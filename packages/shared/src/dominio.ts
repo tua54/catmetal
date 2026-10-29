@@ -45,6 +45,24 @@ export type TipoMutacion = (typeof TIPOS_MUTACION)[number];
 export const MIMES_EVIDENCIA = ['image/jpeg', 'image/png', 'image/webp'] as const;
 export type MimeEvidencia = (typeof MIMES_EVIDENCIA)[number];
 
+/**
+ * Entidades que viajan en `/sync/pull` (campo `entidad`): nombres de tabla de D1 tal cual.
+ * `audit_log`, `sync_mutations`, `devices` y `refresh_tokens` no se sincronizan.
+ */
+export const ENTIDADES_SYNC = [
+  'users',
+  'materials',
+  'production_orders',
+  'order_supervisors',
+  'order_planned_materials',
+  'consumptions',
+  'incidents',
+  'evidences',
+  'validations',
+  'settings',
+] as const;
+export type EntidadSync = (typeof ENTIDADES_SYNC)[number];
+
 // Límites y parámetros del sistema.
 
 /** Tolerancia por defecto sobre la cantidad planeada, en porcentaje (S7). */
@@ -70,4 +88,13 @@ export const MAX_INTENTOS_LOGIN = 5;
 export const BLOQUEO_MINUTOS = 15;
 /** Diferencia entre reloj del dispositivo y del servidor que activa `alerta_reloj`, en ms: 10 min. */
 export const ALERTA_RELOJ_MS = 600_000;
+/**
+ * Ventana en la que reutilizar un refresh token ya rotado se trata como reintento por respuesta
+ * perdida y no como robo (ADR 0008 punto 3), en ms: 30 s.
+ */
+export const VENTANA_GRACIA_REFRESH_MS = 30_000;
+/** Días mínimos que el cliente conserva las mutaciones `aplicada` antes de purgarlas (ADR 0009). */
+export const RETENCION_MUTACIONES_APLICADAS_DIAS = 7;
+/** Tamaño máximo de una mutación serializada en JSON, en bytes: 64 KiB (ADR 0009). */
+export const MAX_PAYLOAD_MUTACION_BYTES = 65_536;
 export const ZONA_HORARIA = 'America/Bogota';

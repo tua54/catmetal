@@ -17,6 +17,7 @@ import {
   evidenciaMetaSchema,
   finalizarOrdenSchema,
   isoFechaSchema,
+  leerMutationId,
   loginSchema,
   loteSchema,
   type Mutacion,
@@ -28,6 +29,7 @@ import {
   syncPullResponseSchema,
   syncPushRequestSchema,
   syncPushResponseSchema,
+  TIPOS_CAMBIO_SYNC,
   toleranciaSchema,
   uuidV7Schema,
 } from './esquemas';
@@ -96,6 +98,37 @@ describe('primitivos', () => {
     invalido(isoFechaSchema, 1_761_771_300_000);
   });
 
+  it('isoFechaSchema normaliza a 24 caracteres con milisegundos', () => {
+    expect(isoFechaSchema.parse('2026-10-29T20:55:00Z')).toBe('2026-10-29T20:55:00.000Z');
+    expect(isoFechaSchema.parse('2026-10-29T20:55:00.5Z')).toBe('2026-10-29T20:55:00.500Z');
+    expect(isoFechaSchema.parse('2026-10-29T20:55:00.123456Z')).toBe('2026-10-29T20:55:00.123Z');
+    expect(isoFechaSchema.parse(FECHA)).toBe(FECHA);
+    expect(isoFechaSchema.parse('2028-02-29T23:59:59.999Z')).toHaveLength(24);
+    // Los esquemas que usan la fecha devuelven la versión normalizada.
+    const consumo = crearConsumoSchema.parse({
+      ...consumoValido(),
+      client_created_at: '2026-10-29T20:55:00Z',
+    });
+    expect(consumo.client_created_at).toBe('2026-10-29T20:55:00.000Z');
+    const fecha: string = isoFechaSchema.parse(FECHA);
+    expect(typeof fecha).toBe('string');
+  });
+
+  it('isoFechaSchema rechaza fechas inexistentes en el calendario', () => {
+    for (const fecha of [
+      '2026-10-29T23:59:60Z',
+      '2026-10-29T24:00:00Z',
+      '2026-02-29T00:00:00Z',
+      '1900-02-29T00:00:00Z',
+      '2026-04-31T00:00:00Z',
+    ]) {
+      expect(mensajes(isoFechaSchema, fecha), fecha).toEqual([
+        'La fecha debe estar en formato ISO-8601 UTC (terminada en Z).',
+      ]);
+    }
+    expect(isoFechaSchema.parse('2000-02-29T00:00:00Z')).toBe('2000-02-29T00:00:00.000Z');
+  });
+
   it('cantidadSchema: > 0, máximo 3 decimales y ≤ 1e9', () => {
     valido(cantidadSchema, 0.001);
     valido(cantidadSchema, 125.5);
@@ -146,6 +179,23 @@ describe('auth', () => {
     });
     expect(datos.email).toBe('a@b.co');
     expect(datos.device_nombre).toBe('Tablet línea 2');
+  });
+
+  it('loginSchema acepta instalacion_id opcional (UUID v7)', () => {
+    const instalacion_id = uuidv7();
+    const datos = loginSchema.parse({
+      email: 'a@b.co',
+      password: 'x',
+      device_id: uuidv7(),
+      instalacion_id,
+    });
+    expect(datos.instalacion_id).toBe(instalacion_id);
+    invalido(loginSchema, {
+      email: 'a@b.co',
+      password: 'x',
+      device_id: uuidv7(),
+      instalacion_id: 'navegador-1',
+    });
   });
 
   it('loginSchema inválido', () => {
@@ -545,35 +595,82 @@ describe('sincronización', () => {
     invalido(mutacionSchema, { tipo: 'consumo.crear' });
   });
 
-  it('syncPushRequestSchema: entre 1 y 25 mutaciones', () => {
-    const device_id = uuidv7();
-    valido(syncPushRequestSchema, { device_id, mutaciones: mutaciones() });
-    const veinticinco = Array.from({ length: 25 }, () => mutaciones()[0]);
-    valido(syncPushRequestSchema, { device_id, mutaciones: veinticinco });
-    expect(
-      mensajes(syncPushRequestSchema, { device_id, mutaciones: [...veinticinco, mutaciones()[0]] }),
-    ).toEqual(['Máximo 25 mutaciones por envío.']);
-    invalido(syncPushRequestSchema, { device_id, mutaciones: [] });
-    invalido(syncPushRequestSchema, { device_id: 'tablet', mutaciones: mutaciones() });
+  it('syncPushRequestSchema: sobre laxo con user_id y entre 1 y 25 mutaciones', () => {
+    const user_id = uuidv7();
+    valido(syncPushRequestSchema, { user_id, mutaciones: mutaciones() });
+    // El sobre no valida cada mutación: una inválida no atasca el lote (ADR 0009).
+    const datos = syncPushRequestSchema.parse({
+      user_id,
+      mutaciones: [{ tipo: 'consumo.borrar' }, 'basura', null, 42, mutaciones()[0]],
+    });
+    expect(datos.mutaciones).toHaveLength(5);
+    const veinticinco = Array.from({ length: 25 }, () => ({}));
+    valido(syncPushRequestSchema, { user_id, mutaciones: veinticinco });
+    expect(mensajes(syncPushRequestSchema, { user_id, mutaciones: [...veinticinco, {}] })).toEqual([
+      'Máximo 25 mutaciones por envío.',
+    ]);
+    invalido(syncPushRequestSchema, { user_id, mutaciones: [] });
+    invalido(syncPushRequestSchema, { user_id: 'yo', mutaciones: mutaciones() });
+    invalido(syncPushRequestSchema, { mutaciones: mutaciones() });
+    invalido(syncPushRequestSchema, { user_id, mutaciones: 'no es lista' });
   });
 
-  it('resultadoMutacionSchema y syncPushResponseSchema', () => {
-    const aplicada = { mutation_id: uuidv7(), resultado: 'aplicada' };
+  it('syncPushRequestSchema descarta device_id del sobre (se usa el did de la sesión)', () => {
+    const datos = syncPushRequestSchema.parse({
+      user_id: uuidv7(),
+      device_id: uuidv7(),
+      mutaciones: [{}],
+    });
+    expect(datos).not.toHaveProperty('device_id');
+  });
+
+  it('cada mutación del sobre se valida aparte con mutacionSchema.safeParse', () => {
+    const { mutaciones: lista } = syncPushRequestSchema.parse({
+      user_id: uuidv7(),
+      mutaciones: [mutaciones()[0], { mutation_id: uuidv7(), tipo: 'consumo.crear' }],
+    });
+    expect(lista.map((m) => mutacionSchema.safeParse(m).success)).toEqual([true, false]);
+  });
+
+  it('leerMutationId extrae un mutation_id válido aunque el resto sea inválido', () => {
+    const id = uuidv7();
+    expect(leerMutationId({ mutation_id: id, tipo: 'inventado', payload: 5 })).toBe(id);
+    expect(leerMutationId({ mutation_id: id.toUpperCase() })).toBeNull();
+    expect(leerMutationId({ mutation_id: 'abc' })).toBeNull();
+    expect(leerMutationId({ mutation_id: 123 })).toBeNull();
+    expect(leerMutationId({})).toBeNull();
+    expect(leerMutationId(Object.create({ mutation_id: id }))).toBeNull();
+    expect(leerMutationId([id])).toBeNull();
+    expect(leerMutationId(null)).toBeNull();
+    expect(leerMutationId(undefined)).toBeNull();
+    expect(leerMutationId(id)).toBeNull();
+  });
+
+  it('resultadoMutacionSchema exige indice y admite mutation_id ausente', () => {
+    const aplicada = { indice: 0, mutation_id: uuidv7(), resultado: 'aplicada' };
     const rechazada = {
+      indice: 1,
       mutation_id: uuidv7(),
       resultado: 'rechazada',
       code: 'DEPENDENCIA_RECHAZADA',
       message: 'No se aplicó.',
     };
     const conflicto = {
+      indice: 2,
       mutation_id: uuidv7(),
       resultado: 'conflicto',
       code: 'CONFLICTO',
       servidor: { version: 2, cantidad: 10 },
     };
-    valido(syncPushResponseSchema, { resultados: [aplicada, rechazada, conflicto] });
+    // mutation_id ilegible: el resultado se identifica solo por su posición.
+    const sinId = { indice: 3, resultado: 'rechazada', code: 'VALIDACION' };
+    valido(syncPushResponseSchema, { resultados: [aplicada, rechazada, conflicto, sinId] });
+    invalido(resultadoMutacionSchema, { mutation_id: uuidv7(), resultado: 'aplicada' });
+    invalido(resultadoMutacionSchema, { ...aplicada, indice: -1 });
+    invalido(resultadoMutacionSchema, { ...aplicada, indice: 1.5 });
     invalido(resultadoMutacionSchema, { ...aplicada, resultado: 'ok' });
     invalido(resultadoMutacionSchema, { ...rechazada, code: 'INVENTADO' });
+    invalido(resultadoMutacionSchema, { ...aplicada, mutation_id: 'x' });
   });
 
   it('syncPullQuerySchema convierte el cursor y usa 0 por defecto', () => {
@@ -585,27 +682,42 @@ describe('sincronización', () => {
     }
   });
 
-  it('syncPullResponseSchema', () => {
+  it('syncPullResponseSchema con época y los cuatro tipos de cambio', () => {
+    expect(TIPOS_CAMBIO_SYNC).toEqual(['upsert', 'revocar', 'hidratar', 'reiniciar']);
+    const epoca = crypto.randomUUID();
     valido(syncPullResponseSchema, {
+      epoca,
       cursor: 1500,
       hay_mas: false,
       cambios: [
         {
-          seq: 1499,
+          seq: 1497,
           tipo: 'upsert',
           entidad: 'validations',
           id: uuidv7(),
           datos: { decision: 'aprobado' },
         },
-        { seq: 1500, tipo: 'revocar', entidad: 'production_orders', id: uuidv7(), datos: null },
+        { seq: 1498, tipo: 'revocar', entidad: 'production_orders', id: uuidv7(), datos: null },
+        { seq: 1499, tipo: 'hidratar', entidad: 'production_orders', id: uuidv7(), datos: null },
+        { seq: 1500, tipo: 'reiniciar', entidad: 'users', id: uuidv7(), datos: null },
       ],
     });
+    // Una entidad desconocida no rompe el contrato (compatibilidad hacia adelante).
+    valido(syncPullResponseSchema, {
+      epoca,
+      cursor: 1,
+      hay_mas: false,
+      cambios: [{ seq: 1, tipo: 'upsert', entidad: 'tabla_futura', id: 'x', datos: {} }],
+    });
     invalido(syncPullResponseSchema, {
+      epoca,
       cursor: 1,
       hay_mas: false,
       cambios: [{ seq: 1, tipo: 'borrar', entidad: 'x', id: 'y', datos: null }],
     });
-    invalido(syncPullResponseSchema, { cursor: -1, hay_mas: false, cambios: [] });
+    invalido(syncPullResponseSchema, { epoca, cursor: -1, hay_mas: false, cambios: [] });
+    invalido(syncPullResponseSchema, { cursor: 1, hay_mas: false, cambios: [] });
+    invalido(syncPullResponseSchema, { epoca: '', cursor: 1, hay_mas: false, cambios: [] });
   });
 });
 
@@ -647,5 +759,21 @@ describe('mensajes y detalles de validación', () => {
         { campo: '', mensaje: 'Indique al menos un campo para modificar.' },
       ]);
     }
+  });
+
+  it('detallesValidacion acepta cualquier objeto con issues ($ZodError de zod core)', () => {
+    const errorCore = {
+      issues: [
+        { code: 'too_small', path: ['payload', 0, 'cantidad'], message: 'Muy pequeño.' },
+        { code: 'custom', path: [Symbol.for('raro')], message: 'Raro.' },
+        { path: [], message: 'Sin código.' },
+      ],
+    } as const;
+    expect(detallesValidacion(errorCore)).toEqual([
+      { campo: 'payload.0.cantidad', mensaje: 'Muy pequeño.' },
+      { campo: 'Symbol(raro)', mensaje: 'Raro.' },
+      { campo: '', mensaje: 'Sin código.' },
+    ]);
+    expect(detallesValidacion({ issues: [] })).toEqual([]);
   });
 });

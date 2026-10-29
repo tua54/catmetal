@@ -18,7 +18,7 @@ import {
   UNIDADES,
 } from './dominio';
 import { CODIGOS_ERROR } from './errores';
-import { REGEX_UUID_V7 } from './uuid';
+import { esUuidV7, REGEX_UUID_V7 } from './uuid';
 
 // Efecto global intencional: todos los mensajes genéricos de Zod en español, en la PWA y en el Worker.
 z.config(z.locales.es());
@@ -31,10 +31,19 @@ export const uuidV7Schema = z
   .string({ error: 'El identificador es obligatorio.' })
   .regex(REGEX_UUID_V7, { error: 'El identificador no es un UUID v7 válido.' });
 
-/** Instante ISO-8601 en UTC con `Z` (por ejemplo `2026-10-29T20:55:00.000Z`). Sin desfases horarios. */
-export const isoFechaSchema = z.iso.datetime({
-  error: 'La fecha debe estar en formato ISO-8601 UTC (terminada en Z).',
-});
+const MENSAJE_FECHA = 'La fecha debe estar en formato ISO-8601 UTC (terminada en Z).';
+
+/**
+ * Instante ISO-8601 en UTC con `Z`, sin desfases horarios. Se **normaliza** con `toISOString()`
+ * al formato único de D1: 24 caracteres con milisegundos (`2026-10-29T20:55:00Z` →
+ * `2026-10-29T20:55:00.000Z`). Más de 3 decimales de segundo se truncan a milisegundos.
+ * Rechaza fechas inexistentes en el calendario.
+ */
+// z.iso.datetime ya valida el calendario (rechaza 2026-02-29, 24:00, segundos 60), así que
+// toISOString() nunca recibe una fecha inválida.
+export const isoFechaSchema = z.iso
+  .datetime({ error: MENSAJE_FECHA })
+  .transform((valor) => new Date(valor).toISOString());
 
 /** Tiene como máximo 3 decimales (el número es el double más cercano a un decimal de 3 cifras). */
 function tieneMaximo3Decimales(valor: number): boolean {
@@ -98,8 +107,11 @@ export const loginSchema = z.object({
     .string({ error: 'La contraseña es obligatoria.' })
     .min(1, { error: 'La contraseña es obligatoria.' })
     .max(128, { error: 'La contraseña admite máximo 128 caracteres.' }),
+  /** Propuesto por el cliente: uno por usuario y navegador (ADR 0008 punto 7). */
   device_id: uuidV7Schema,
   device_nombre: textoSchema('El nombre del dispositivo', 1, 100).optional(),
+  /** Uno por navegador, compartido entre los usuarios de la misma tablet (ADR 0008 punto 7). */
+  instalacion_id: uuidV7Schema.optional(),
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -317,18 +329,32 @@ export const mutacionSchema = z.discriminatedUnion(
   { error: 'El tipo de mutación no es válido.' },
 );
 
+/**
+ * Sobre de `POST /sync/push` (ADR 0009). Es **laxo** a propósito: las mutaciones no se validan aquí,
+ * sino una por una con `mutacionSchema.safeParse`, para que una sola mutación inválida (por ejemplo,
+ * de una PWA vieja) no atasque el lote entero.
+ * - `user_id` es el autor del outbox; debe coincidir con el `sub` de la sesión (si no,
+ *   403 `AUTOR_NO_COINCIDE` y no se procesa nada).
+ * - No lleva `device_id`: el servidor usa el `did` de la sesión.
+ */
 export const syncPushRequestSchema = z.object({
-  device_id: uuidV7Schema,
+  user_id: uuidV7Schema,
   mutaciones: z
-    .array(mutacionSchema, { error: 'La lista de mutaciones es obligatoria.' })
+    .array(z.unknown(), { error: 'La lista de mutaciones es obligatoria.' })
     .min(1, { error: 'Envíe al menos una mutación.' })
     .max(MAX_MUTACIONES_POR_LOTE, {
       error: `Máximo ${MAX_MUTACIONES_POR_LOTE} mutaciones por envío.`,
     }),
 });
 
+/**
+ * Resultado de una mutación del lote. `indice` es su posición en `mutaciones` (siempre presente);
+ * `mutation_id` falta cuando no se pudo leer de la mutación recibida. Las mutaciones sin resultado
+ * (por un error transitorio del servidor) siguen pendientes y se reenvían.
+ */
 export const resultadoMutacionSchema = z.object({
-  mutation_id: uuidV7Schema,
+  indice: z.number().int().min(0),
+  mutation_id: uuidV7Schema.optional(),
   resultado: z.enum(RESULTADOS_MUTACION),
   code: z.enum(CODIGOS_ERROR).optional(),
   message: z.string().optional(),
@@ -350,15 +376,37 @@ export const syncPullQuerySchema = z.object({
     .default(0),
 });
 
+/**
+ * Tipos de cambio de `/sync/pull` (ADR 0005, regla 6):
+ * - `upsert`: estado actual de una entidad visible; el cliente la crea o la reemplaza.
+ * - `revocar`: la entidad dejó de ser visible (por ejemplo, desasignación de una orden); el cliente
+ *   borra sus datos locales, salvo los suyos pendientes de enviar.
+ * - `hidratar`: el usuario ganó visibilidad sobre una entidad (asignación a `production_orders`);
+ *   el cliente pide un snapshot paginado de ella, porque su cursor ya pasó su histórico.
+ * - `reiniciar`: cambió el alcance del usuario (rol o reactivación); el cliente reinicia su estado
+ *   sincronizado con un snapshot completo.
+ * `hidratar` y `reiniciar` se atienden dentro del mismo candado de sync.
+ */
+export const TIPOS_CAMBIO_SYNC = ['upsert', 'revocar', 'hidratar', 'reiniciar'] as const;
+
 export const cambioSyncSchema = z.object({
   seq: z.number().int().min(1),
-  tipo: z.enum(['upsert', 'revocar']),
+  tipo: z.enum(TIPOS_CAMBIO_SYNC),
+  /**
+   * Nombre de tabla (`ENTIDADES_SYNC`). Se valida como texto para que un cliente viejo no falle
+   * si un servidor nuevo agrega una entidad; el cliente ignora las que no conoce.
+   */
   entidad: z.string().min(1),
   id: z.string().min(1),
   datos: z.record(z.string(), z.unknown()).nullable(),
 });
 
 export const syncPullResponseSchema = z.object({
+  /**
+   * Época de sync (`settings.sync_epoca`, ADR 0009). Cambia tras una restauración; si el cliente
+   * recibe una distinta de la suya, reinicia cursor y estado y reenvía sus mutaciones aplicadas.
+   */
+  epoca: z.string().min(1),
   /** Último `seq` revisado (no el último devuelto); el cliente lo envía en el siguiente pull. */
   cursor: z.number().int().min(0),
   hay_mas: z.boolean(),
@@ -375,12 +423,40 @@ export interface DetalleValidacion {
   mensaje: string;
 }
 
-/** Convierte un error de Zod en `details` para el error `VALIDACION` (sin incluir los valores recibidos). */
-export function detallesValidacion(error: z.ZodError): DetalleValidacion[] {
+/** Problema de validación mínimo: lo cumplen `ZodError` y el `$ZodError` de zod core. */
+export interface ProblemaValidacion {
+  readonly path: readonly PropertyKey[];
+  readonly message: string;
+  readonly code?: string;
+}
+
+/**
+ * Convierte un error de Zod en `details` para el error `VALIDACION` (sin incluir los valores
+ * recibidos). Acepta `ZodError` y el `$ZodError` de zod core (hook de @hono/zod-validator).
+ */
+export function detallesValidacion(error: {
+  readonly issues: readonly ProblemaValidacion[];
+}): DetalleValidacion[] {
   return error.issues.map((issue) => ({
     campo: issue.path.map(String).join('.'),
     mensaje: issue.message,
   }));
+}
+
+/**
+ * Extrae un `mutation_id` UUID v7 válido de una mutación recibida, aunque el resto sea inválido.
+ * Permite responder `rechazada` con `VALIDACION` identificando la mutación. Devuelve `null` si no
+ * hay uno legible.
+ */
+export function leerMutationId(mutacion: unknown): string | null {
+  if (typeof mutacion !== 'object' || mutacion === null || Array.isArray(mutacion)) {
+    return null;
+  }
+  if (!Object.hasOwn(mutacion, 'mutation_id')) {
+    return null;
+  }
+  const id: unknown = (mutacion as { mutation_id: unknown }).mutation_id;
+  return esUuidV7(id) ? id : null;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -408,6 +484,7 @@ export type SyncPushRequest = z.infer<typeof syncPushRequestSchema>;
 export type ResultadoMutacion = z.infer<typeof resultadoMutacionSchema>;
 export type SyncPushResponse = z.infer<typeof syncPushResponseSchema>;
 export type SyncPullQuery = z.infer<typeof syncPullQuerySchema>;
+export type TipoCambioSync = (typeof TIPOS_CAMBIO_SYNC)[number];
 export type CambioSync = z.infer<typeof cambioSyncSchema>;
 export type SyncPullResponse = z.infer<typeof syncPullResponseSchema>;
 /** Mutación de un tipo concreto, por ejemplo `MutacionDe<'consumo.crear'>`. */

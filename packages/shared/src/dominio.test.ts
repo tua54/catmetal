@@ -4,6 +4,7 @@ import {
   ALERTA_RELOJ_MS,
   BLOQUEO_MINUTOS,
   DECISIONES,
+  ENTIDADES_SYNC,
   ESTADOS_CONSUMO,
   ESTADOS_ORDEN,
   ESTADOS_OUTBOX,
@@ -13,15 +14,18 @@ import {
   MAX_FILAS_REVISADAS_PULL,
   MAX_INTENTOS_LOGIN,
   MAX_MUTACIONES_POR_LOTE,
+  MAX_PAYLOAD_MUTACION_BYTES,
   MIMES_EVIDENCIA,
   PBKDF2_ITERACIONES_SERVIDOR,
   REFRESH_TOKEN_TTL_S,
   RESULTADOS_MUTACION,
+  RETENCION_MUTACIONES_APLICADAS_DIAS,
   ROLES,
   TIPOS_MUTACION,
   TIPOS_NOVEDAD,
   TOLERANCIA_PCT_DEFECTO,
   UNIDADES,
+  VENTANA_GRACIA_REFRESH_MS,
   ZONA_HORARIA,
 } from './dominio';
 
@@ -58,6 +62,27 @@ describe('dominio', () => {
     expect(BLOQUEO_MINUTOS).toBe(15);
     expect(ALERTA_RELOJ_MS).toBe(10 * 60 * 1000);
     expect(ZONA_HORARIA).toBe('America/Bogota');
+    expect(VENTANA_GRACIA_REFRESH_MS).toBe(30_000);
+    expect(RETENCION_MUTACIONES_APLICADAS_DIAS).toBe(7);
+    expect(MAX_PAYLOAD_MUTACION_BYTES).toBe(64 * 1024);
+  });
+
+  it('lista las entidades sincronizables con su nombre de tabla', () => {
+    expect(ENTIDADES_SYNC).toEqual([
+      'users',
+      'materials',
+      'production_orders',
+      'order_supervisors',
+      'order_planned_materials',
+      'consumptions',
+      'incidents',
+      'evidences',
+      'validations',
+      'settings',
+    ]);
+    for (const interna of ['audit_log', 'sync_mutations', 'devices', 'refresh_tokens']) {
+      expect(ENTIDADES_SYNC).not.toContain(interna);
+    }
   });
 
   it('nunca configura más de 100.000 iteraciones de PBKDF2 (tope del runtime de Workers)', () => {

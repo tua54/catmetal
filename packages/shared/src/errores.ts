@@ -32,6 +32,8 @@ const LISTA_CODIGOS_ERROR = [
   'ID_INVALIDO',
   'ID_DUPLICADO',
   'LOTE_DEMASIADO_GRANDE',
+  'AUTOR_NO_COINCIDE',
+  'ULTIMO_ADMIN',
   'ERROR_INTERNO',
 ] as const;
 
@@ -88,6 +90,10 @@ export const MENSAJES_ERROR: Readonly<Record<CodigoError, string>> = {
   ID_INVALIDO: 'El identificador del registro no es válido.',
   ID_DUPLICADO: 'Ya existe un registro con este identificador.',
   LOTE_DEMASIADO_GRANDE: 'Se enviaron demasiados registros a la vez. Intente con menos.',
+  // /sync/push con un user_id distinto del de la sesión (tablet compartida, ADR 0008 punto 8).
+  AUTOR_NO_COINCIDE:
+    'Estas mutaciones pertenecen a otro usuario. Inicie sesión con su propio usuario para enviarlas.',
+  ULTIMO_ADMIN: 'No se puede desactivar ni cambiar el rol del último administrador activo.',
   ERROR_INTERNO: 'Ocurrió un error inesperado en el servidor. Intente de nuevo más tarde.',
 };
 
@@ -122,6 +128,8 @@ export const ESTADO_HTTP_POR_CODIGO: Readonly<Record<CodigoError, number>> = {
   ID_INVALIDO: 400,
   ID_DUPLICADO: 409,
   LOTE_DEMASIADO_GRANDE: 413,
+  AUTOR_NO_COINCIDE: 403,
+  ULTIMO_ADMIN: 422,
   ERROR_INTERNO: 500,
 };
 

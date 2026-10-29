@@ -4,6 +4,7 @@ export * from './permisos';
 export * from './errores';
 export * from './unidades';
 export * from './formato';
+export * from './fechas';
 export * from './uuid';
 export * from './esquemas';
 export type * from './tipos';

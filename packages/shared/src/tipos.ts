@@ -33,6 +33,17 @@ export interface Usuario extends ConMarcasDeTiempo {
   bloqueado_hasta: string | null;
 }
 
+/** Dispositivo (navegador de un usuario) registrado al iniciar sesión (ADR 0008 punto 7). */
+export interface Dispositivo extends ConMarcasDeTiempo {
+  id: string;
+  user_id: string;
+  nombre: string | null;
+  user_agent: string | null;
+  /** Id del navegador, compartido entre los usuarios de la misma tablet. */
+  instalacion_id: string | null;
+  ultimo_sync_at: string | null;
+}
+
 export interface Material extends ConMarcasDeTiempo {
   id: string;
   codigo: string;

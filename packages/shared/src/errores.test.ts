@@ -38,6 +38,8 @@ const MINIMOS = [
   'ID_INVALIDO',
   'ID_DUPLICADO',
   'LOTE_DEMASIADO_GRANDE',
+  'AUTOR_NO_COINCIDE',
+  'ULTIMO_ADMIN',
   'ERROR_INTERNO',
 ];
 
@@ -78,7 +80,12 @@ describe('errores', () => {
     ] as const) {
       expect(ESTADO_HTTP_POR_CODIGO[codigo]).toBe(401);
     }
-    for (const codigo of ['PERMISO_DENEGADO', 'ORIGEN_INVALIDO', 'AUTOAPROBACION'] as const) {
+    for (const codigo of [
+      'PERMISO_DENEGADO',
+      'ORIGEN_INVALIDO',
+      'AUTOAPROBACION',
+      'AUTOR_NO_COINCIDE',
+    ] as const) {
       expect(ESTADO_HTTP_POR_CODIGO[codigo]).toBe(403);
     }
     expect(ESTADO_HTTP_POR_CODIGO.NO_ENCONTRADO).toBe(404);
@@ -101,6 +108,7 @@ describe('errores', () => {
       'DEPENDENCIA_RECHAZADA',
       'CORRECCION_INVALIDA',
       'MATERIAL_INACTIVO',
+      'ULTIMO_ADMIN',
     ] as const) {
       expect(ESTADO_HTTP_POR_CODIGO[codigo]).toBe(422);
     }
@@ -113,6 +121,15 @@ describe('errores', () => {
       'Correo o contraseña incorrectos, o la cuenta está bloqueada temporalmente. Intente de nuevo en unos minutos.',
     );
     expect(MENSAJES_ERROR.CREDENCIALES_INVALIDAS).not.toMatch(/no existe|no registrado/i);
+  });
+
+  it('mensajes de autoría y último administrador', () => {
+    expect(MENSAJES_ERROR.AUTOR_NO_COINCIDE).toBe(
+      'Estas mutaciones pertenecen a otro usuario. Inicie sesión con su propio usuario para enviarlas.',
+    );
+    expect(MENSAJES_ERROR.ULTIMO_ADMIN).toBe(
+      'No se puede desactivar ni cambiar el rol del último administrador activo.',
+    );
   });
 
   it('crearError usa el mensaje estándar e incluye details solo si se pasa', () => {
