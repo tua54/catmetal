@@ -32,3 +32,15 @@ Fuente: informe de `documentation-researcher` (URLs en cada punto).
 ## React Router 7 en Vitest
 
 - En Vitest, `react-router` se resolvía como CommonJS y `react-router/dom` como ESM: quedaban dos contextos de router y fallaba `useRouteError`. Solución en `apps/web`: usar el `RouterProvider` de `react-router` pasándole `flushSync` de `react-dom` (lo mismo que hace internamente `react-router/dom`).
+
+## Wrangler en Windows y en el pool de pruebas
+
+- `wrangler dev` lanza `workerd.exe` como proceso nieto: para detenerlo hace falta matar el árbol (`taskkill /PID <pid> /T /F`). `scripts/dev.mjs` lo hace; en POSIX usa `detached` y mata el grupo de procesos.
+- `wrangler d1 migrations apply --local` pide confirmación; sin TTY usa "fallback value: yes". Sin migraciones sale con código 0.
+- `readD1Migrations('ruta')` resuelve rutas relativas desde el `cwd` (pnpm ejecuta los scripts en la carpeta del paquete).
+- `secrets.required` en `wrangler.jsonc` (no se hereda: se repite por entorno) tipa los secretos en `wrangler types` sin leer `.dev.vars` y hace que `wrangler dev` avise si faltan.
+- El binding `ratelimits` funciona en el pool de Vitest: 5 llamadas pasan y la sexta se bloquea.
+- La cobertura istanbul **sí** funciona con `@cloudflare/vitest-plugin` 1.4.11 y Vitest 4.1.12 (no da 0 %).
+- `vitest.config.mjs` (no `.ts`) en el worker: una config en TypeScript arrastra `@types/node` al programa de `src/` y permitiría usar APIs de Node sin error de tipos.
+- Wrangler detecta que lo ejecuta un agente y anuncia una "Local Explorer API" en `/cdn-cgi/local/explorer/api` (solo local).
+- `vite-plugin-pwa` con `injectRegister: 'inline'` rompería la CSP `script-src 'self'`: usar `'script'` o `virtual:pwa-register`.
