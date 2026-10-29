@@ -28,3 +28,7 @@ Fuente: informe de `documentation-researcher` (URLs en cada punto).
 - **PBKDF2**: workerd define `DEFAULT_MAX_PBKDF2_ITERATIONS = 100000` y lanza `DOMNotSupportedError` por encima. Los docs de Web Crypto no lo mencionan. https://github.com/cloudflare/workerd/blob/main/src/workerd/io/limit-enforcer.h
 - **Drizzle**: la documentación actual describe el formato de carpetas de drizzle-kit v1; con 0.31.x se verifica el formato real al generar. `drizzle-kit migrate/push` con `d1-http` van contra D1 remota: **prohibidos**; se aplica con `wrangler d1 migrations apply DB --local`. Para triggers: `drizzle-kit generate --custom --name triggers` (queda en el journal).
 - **Hono**: `secureHeaders` con `contentSecurityPolicy`; `@hono/zod-validator` 0.9 acepta Zod 4; el hook debe devolver una `Response` para reemplazar el 400 por defecto.
+
+## React Router 7 en Vitest
+
+- En Vitest, `react-router` se resolvía como CommonJS y `react-router/dom` como ESM: quedaban dos contextos de router y fallaba `useRouteError`. Solución en `apps/web`: usar el `RouterProvider` de `react-router` pasándole `flushSync` de `react-dom` (lo mismo que hace internamente `react-router/dom`).
