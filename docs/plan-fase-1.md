@@ -50,4 +50,5 @@ Node puro. Lee `SEED_PASSWORD` de `apps/worker/.dev.vars`, genera hashes con `no
 | 1.3 | Auth: hash, JWT, refresh con rotación, bloqueo, middlewares (auth, CSRF, permisos), auditoría, endpoints de auth y de usuarios | `general-purpose` | `apps/worker/src/**` (salvo `db/schema.ts`), `apps/worker/test/**` | 1.1 | Pruebas de login, rotación, reutilización, bloqueo, limitador, CSRF, iteraciones ≤ 100k, auditoría sin secretos |
 | 1.4 | Matriz de permisos de la §3 (positiva y negativa por regla) | `test-engineer` | `apps/worker/test/permisos*.test.ts` | 1.3 | Una prueba positiva y una negativa por fila de la tabla |
 | 1.5 | Revisión del esquema, triggers e índices | `database-specialist` (solo lectura) | — | 1.1–1.3 | Informe; hallazgos corregidos o justificados |
-| 1.6 | ADR 0005–0009 | orquestador | `docs/adr/` | — | — |
+| 1.7 | Aplicar la revisión del esquema (ADR 0010): migraciones 0003–0004, índices, `audit_log.order_id`, `version` en aprobar/rechazar | `general-purpose` | `apps/worker/**`, `migrations/**`, `packages/shared/**`, `scripts/seed.mjs` | 1.5 | Gates en verde; 34 triggers |
+| 1.6 | ADR 0005–0010 | orquestador | `docs/adr/` | — | — |

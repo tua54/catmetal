@@ -5,11 +5,11 @@
 ## Estado actual
 
 - Rama de trabajo: `build/v1` (línea base en `main`: `bfa8975`).
-- Fase 0 cerrada (tag `fase-0`). Fase en curso: **Fase 1 — Base de datos y auth**.
+- Fases 0 y 1 cerradas (tags `fase-0`, `fase-1`). Fase en curso: **Fase 2 — API de negocio**.
 
 ## Siguiente paso
 
-Confirmar `docs/plan-fase-1.md` y las ADR 0005–0009, y delegar las tareas 1.0 (contratos de shared) y 1.1 (esquema y triggers) en paralelo.
+Confirmar `docs/plan-fase-2.md` (ya redactado, con los patrones de la ADR 0010) y delegar la tarea 2.1 (infraestructura de comandos de dominio, materiales, settings, órdenes y asignaciones).
 
 ## Mapeo de subagentes
 
@@ -56,10 +56,16 @@ No se usan `mvc-dotnet-developer`, `angular-developer` ni `orchestrator`.
 - Evidencia: `docs/evidencia/fase-0.md`.
 - Incidente (fase 0): el commit de cierre `4ef958b` dejó este registro con huecos por un error de comillas en bash (sustitución de comandos). Ningún comando dañino se ejecutó (solo falló un `pnpm dev\`). Corregido en el commit siguiente; desde entonces los documentos se editan con las herramientas de edición, no con heredocs.
 
-### Fase 1 — Base de datos y auth (en curso)
+### Fase 1 — Base de datos y auth (cerrada)
 
 - 1.0 Contratos de shared endurecidos por ADR 0008/0009 (general-purpose).
 - 1.1 Esquema Drizzle, migraciones 0000 (generada), 0001 (26 triggers a mano) y 0002 (settings iniciales con `sync_epoca` aleatoria por base) (general-purpose).
 - 1.2 Seed local idempotente (general-purpose). Credenciales: `admin@catmetal.test`, `jefe@catmetal.test`, `supervisor1@catmetal.test`, `supervisor2@catmetal.test`, contraseña `SEED_PASSWORD` de `apps/worker/.dev.vars`.
 - Decisión menor: en `audit_log`, las claves compuestas usan `entidad_id = '<order_id>:<user_id>'` (`order_supervisors`) y `'<order_id>:<material_id>'` (`order_planned_materials`); `settings` usa su `clave`.
 - Decisión menor: el seed usa `ON CONFLICT DO NOTHING` en vez de `INSERT OR IGNORE` para no ocultar violaciones de CHECK.
+- 1.3 Auth completa (general-purpose): login, refresh con rotación y ventana de gracia, bloqueo, CSRF, permisos, usuarios.
+- 1.4 Matriz de permisos de la §3 (test-engineer): 48 pruebas.
+- 1.5 Revisión del esquema (database-specialist): `docs/auditoria/revision-esquema-fase-1.md`.
+- 1.7 Aplicación de la revisión (general-purpose): ADR 0010, migraciones 0003–0004, 34 triggers.
+- Preguntas nuevas: P20 (lote obligatorio), P21 (fotos HEIC).
+- Cierre: gates en verde, 466 pruebas. Evidencia: `docs/evidencia/fase-1.md`.
