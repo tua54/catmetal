@@ -1,0 +1,122 @@
+# Integración continua: lint, tipos, formato, pruebas (con cobertura) y E2E (desde la Fase 4).
+#
+# - Solo trabajo local en el runner: las pruebas del Worker usan workerd/Miniflare con D1, R2 y KV
+#   locales. Nada de despliegues, secretos de Cloudflare ni comandos `wrangler` remotos.
+# - El despliegue a staging es un workflow aparte, manual (workflow_dispatch) y con environment
+#   protegido (docs/despliegue.md, Fase 6).
+
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+# Un push nuevo a la misma rama cancela la ejecución anterior.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Sin telemetría de Wrangler en CI.
+  WRANGLER_SEND_METRICS: 'false'
+
+jobs:
+  calidad:
+    name: Lint, tipos, formato y pruebas
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Obtener el código
+        uses: actions/checkout@v7
+
+      # pnpm (versión de `packageManager` en package.json) y Node (versión de .nvmrc) en un paso.
+      - name: Instalar pnpm y Node
+        uses: pnpm/setup@v3
+        with:
+          cache: true
+          install: false
+
+      - name: Instalar dependencias
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Tipos
+        run: pnpm typecheck
+
+      - name: Formato
+        run: pnpm format:check
+
+      # Incluye la cobertura de packages/shared y apps/worker con umbral de líneas del 80 %.
+      # apps/web/dist no existe en CI: scripts/ensure-web-dist.mjs crea un index.html marcador
+      # antes de las pruebas del Worker (assets.directory debe existir).
+      - name: Pruebas
+        run: pnpm test
+
+      - name: Subir cobertura
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: cobertura
+          path: |
+            packages/shared/coverage/
+            apps/worker/coverage/
+            apps/web/coverage/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  e2e:
+    name: Pruebas E2E (Playwright)
+    needs: calidad
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Obtener el código
+        uses: actions/checkout@v7
+
+      # El script `test:e2e` llega en la Fase 4. Mientras no exista en package.json, el job termina
+      # en verde sin instalar navegadores ni ejecutar nada.
+      - name: Comprobar si existe el script test:e2e
+        id: e2e
+        run: |
+          node -e "
+            const fs = require('node:fs');
+            const scripts = JSON.parse(fs.readFileSync('package.json', 'utf8')).scripts ?? {};
+            const existe = typeof scripts['test:e2e'] === 'string';
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, 'existe=' + existe + '\n');
+            console.log(existe ? 'Se ejecutarán las pruebas E2E.' : 'No hay script test:e2e todavía (Fase 4): se omite.');
+          "
+
+      - name: Instalar pnpm y Node
+        if: steps.e2e.outputs.existe == 'true'
+        uses: pnpm/setup@v3
+        with:
+          cache: true
+          install: false
+
+      - name: Instalar dependencias
+        if: steps.e2e.outputs.existe == 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Instalar navegadores de Playwright
+        if: steps.e2e.outputs.existe == 'true'
+        run: pnpm exec playwright install --with-deps chromium webkit
+
+      - name: Pruebas E2E
+        if: steps.e2e.outputs.existe == 'true'
+        run: pnpm test:e2e
+
+      - name: Subir reporte de Playwright
+        if: always() && steps.e2e.outputs.existe == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: reporte-playwright
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
+          retention-days: 14
