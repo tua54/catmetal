@@ -1,5 +1,4 @@
-// @vitest-environment jsdom
-// Prueba trivial en jsdom; la configuración de Vitest + Testing Library se completa en la tarea 0.4.
+// Verifica que el paquete del frontend resuelve @catmetal/shared (consumido como código fuente).
 import { describe, expect, it } from 'vitest';
 import { NOMBRE_APP, PAQUETE_COMPARTIDO } from './index';
 

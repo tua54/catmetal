@@ -1,0 +1,67 @@
+/*
+ * Estilos globales y tokens visuales (Tailwind 4, configuración CSS-first).
+ * Fuente de los tokens: docs/diseno/README.md (identidad Catmetal + Figma).
+ * La fuente Poppins se importa empaquetada desde main.tsx (@fontsource/poppins), nunca desde Google Fonts.
+ */
+@import 'tailwindcss';
+
+@theme {
+  /* Tipografía */
+  --font-sans:
+    'Poppins', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+    sans-serif;
+
+  /* Marca Catmetal */
+  --color-brand-500: #0349ff;
+  --color-brand-600: #0539cc;
+  --color-brand-700: #043bc9;
+  --color-navy-800: #243673;
+
+  /* Neutros */
+  --color-ink-950: #111111;
+  --color-ink-700: #333333;
+  --color-ink-500: #69727d;
+  --color-surface-50: #f5f7f9;
+
+  /* Semánticos */
+  --color-success-100: #dcfce7;
+  --color-success-700: #15803d;
+  --color-warning-100: #fef3c7;
+  --color-warning-500: #f59e0b;
+  --color-warning-800: #92400e;
+  --color-danger-50: #fef2f2;
+  --color-danger-700: #b91c1c;
+}
+
+@layer base {
+  html {
+    /* Base de 16 px: respeta el tamaño de fuente configurado por el usuario. */
+    font-size: 100%;
+    color-scheme: light;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
+  body {
+    min-height: 100dvh;
+    background-color: var(--color-surface-50);
+    color: var(--color-ink-700);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Anillo de foco visible y consistente (teclado), en brand-500. No depende de hover. */
+  :focus-visible {
+    outline: 3px solid var(--color-brand-500);
+    outline-offset: 2px;
+  }
+}
+
+/*
+ * Cifras alineadas para cantidades y costos.
+ * Tailwind ya trae `tabular-nums`; `cifras` es el alias semántico del proyecto.
+ */
+@utility cifras {
+  font-variant-numeric: tabular-nums;
+}

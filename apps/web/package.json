@@ -5,8 +5,12 @@
   "type": "module",
   "description": "PWA offline-first de registro de consumos (React + Vite)",
   "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@catmetal/shared": "workspace:*",
