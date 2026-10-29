@@ -44,3 +44,13 @@ Fuente: informe de `documentation-researcher` (URLs en cada punto).
 - `vitest.config.mjs` (no `.ts`) en el worker: una config en TypeScript arrastra `@types/node` al programa de `src/` y permitiría usar APIs de Node sin error de tipos.
 - Wrangler detecta que lo ejecuta un agente y anuncia una "Local Explorer API" en `/cdn-cgi/local/explorer/api` (solo local).
 - `vite-plugin-pwa` con `injectRegister: 'inline'` rompería la CSP `script-src 'self'`: usar `'script'` o `virtual:pwa-register`.
+
+## Drizzle y migraciones D1 (verificado en la tarea 1.1)
+
+- drizzle-kit 0.31.11 genera archivos planos `NNNN_nombre.sql` más `meta/_journal.json` y `meta/NNNN_snapshot.json` (sin carpetas). `--custom` también genera snapshot. Wrangler y `readD1Migrations` solo leen los `.sql` del nivel superior: no hace falta `migrations_pattern`.
+- drizzle-kit reescribe `migrations/meta/*.json` con tabulaciones en cada `db:generate`: esa carpeta está en `.prettierignore`.
+- Wrangler (y `readD1Migrations`) separa sentencias como `sqlite3_complete`: entiende `CREATE TRIGGER ... BEGIN ... END;` y trata `--> statement-breakpoint` como comentario. Dentro del cuerpo de un trigger no debe aparecer `END;` salvo al final.
+- SQLite no documenta el orden de disparo de varios triggers sobre la misma sentencia: si dos abortan, el mensaje que gana no es determinista.
+- Errores de D1 por trigger: `D1_ERROR: <mensaje del RAISE>: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_TRIGGER)`. Los CHECK fallidos incluyen el nombre de la restricción.
+- `notnull` es palabra reservada en SQLite: no sirve como alias.
+- En el pool de Workers no hay `fs`: las pruebas que necesitan leer archivos del repo reciben el contenido como binding generado en `vitest.config.mjs` (igual que `TEST_MIGRATIONS`).
