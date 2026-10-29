@@ -45,12 +45,13 @@ No se usan `mvc-dotnet-developer`, `angular-developer` ni `orchestrator`.
 
 ### Fase 0 — Fundaciones (cerrada)
 
-- 0.1 Monorepo y herramientas (general-purpose). Versiones: ADR 0001. pnpm 12 con  y .
--  verificó APIs de Cloudflare/Drizzle/Hono:  está deprecado → se usa  (desviación D1).
-- 0.2 Contratos de  (general-purpose): 115 pruebas, 100 % de líneas.
+- 0.1 Monorepo y herramientas (general-purpose). Versiones: ADR 0001. pnpm 12 con `allowBuilds` y `minimumReleaseAge`.
+- `documentation-researcher` verificó APIs de Cloudflare/Drizzle/Hono: `@cloudflare/vitest-pool-workers` está deprecado → se usa `@cloudflare/vitest-plugin` (desviación D1).
+- 0.2 Contratos de `packages/shared` (general-purpose): 115 pruebas, 100 % de líneas.
 - 0.4 Esqueleto de la PWA (react-developer), en paralelo con 0.2.
-- 0.3 Worker, Wrangler, pruebas en el pool de Workers y  (general-purpose). ADR 0004:  para aplicar cabeceras a todo.
+- 0.3 Worker, Wrangler, pruebas en el pool de Workers y `pnpm dev` (general-purpose). ADR 0004: `run_worker_first: true` para aplicar cabeceras a todo.
 - 0.5 CI y README (general-purpose).
--  revisó por adelantado las ADR de la Fase 1 (cursor, triggers, hashes, sesiones): 4 hallazgos altos incorporados (hidratación de órdenes recién asignadas, sobre laxo en /sync/push, user_id del autor en el sobre, época de sync) → ADR 0009 y ADR 0005/0006/0008 reescritas.
-- Decisión menor:  en la web se revisa en la Fase 6.
-- Evidencia: .
+- `software-architect` revisó por adelantado las ADR de la Fase 1 (cursor, triggers, hashes, sesiones): 4 hallazgos altos incorporados (hidratación de órdenes recién asignadas, sobre laxo en /sync/push, user_id del autor en el sobre, época de sync) → ADR 0009 y ADR 0005/0006/0008 reescritas.
+- Decisión menor: `sourcemap: true` en la web se revisa en la Fase 6.
+- Evidencia: `docs/evidencia/fase-0.md`.
+- Incidente: el commit de cierre `4ef958b` dejó este registro con huecos por un error de comillas en bash (sustitución de comandos). Ningún comando dañino se ejecutó (solo falló un `pnpm dev\`). Corregido en el commit siguiente; desde entonces los documentos se editan con las herramientas de edición, no con heredocs.
