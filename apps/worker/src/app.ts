@@ -6,6 +6,9 @@
 import { Hono } from 'hono';
 import { cabecerasSeguridad } from './cabeceras';
 import { manejarError, manejarNoEncontrado } from './errores';
+import { verificarOrigen } from './middleware/origen';
+import { crearRutasAuth } from './rutas/auth';
+import { crearRutasUsuarios } from './rutas/usuarios';
 import type { AppEnv } from './tipos';
 
 /** Rutas de la API bajo `/api/v1`. */
@@ -15,6 +18,8 @@ function crearApi(): Hono<AppEnv> {
   api.get('/health', (c) =>
     c.json({ ok: true, entorno: c.env.ENTORNO, hora_servidor: new Date().toISOString() }),
   );
+  api.route('/auth', crearRutasAuth());
+  api.route('/users', crearRutasUsuarios());
 
   return api;
 }
@@ -34,6 +39,9 @@ export function crearApp(): Hono<AppEnv> {
   app.use('*', cabecerasSeguridad);
   app.onError(manejarError);
   app.notFound(manejarNoEncontrado);
+  // CSRF por Origin en toda la API, antes de cualquier ruta (también en /auth/login y /auth/refresh).
+  app.use('/api', verificarOrigen);
+  app.use('/api/*', verificarOrigen);
 
   app.route('/api/v1', crearApi());
   app.all('/api', manejarNoEncontrado);

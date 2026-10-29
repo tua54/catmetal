@@ -80,7 +80,11 @@ describe('rutas /api desconocidas', () => {
   }
 
   it('un método no definido en una ruta existente también responde 404 JSON', async () => {
-    const respuesta = await exports.default.fetch(`${BASE}/api/v1/health`, { method: 'DELETE' });
+    // Con Origin propio: sin él, el filtro CSRF responde 403 antes de buscar la ruta.
+    const respuesta = await exports.default.fetch(`${BASE}/api/v1/health`, {
+      method: 'DELETE',
+      headers: { Origin: BASE },
+    });
     expect(respuesta.status).toBe(404);
     expect(await respuesta.json()).toMatchObject({ code: 'NO_ENCONTRADO' });
   });

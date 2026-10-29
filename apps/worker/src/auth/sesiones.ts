@@ -1,0 +1,372 @@
+// Sesiones con refresh tokens rotativos (docs/spec.md §5, ADR 0008 puntos 2, 3 y 7).
+//
+// Toda escritura va en un único `db.batch()` con su auditoría. La rotación y el reintento son
+// condicionales en SQL: gana quien obtiene `changes = 1` en el INSERT del token nuevo, así dos
+// refresh concurrentes con el mismo token nunca dejan dos sucesores vigentes.
+
+import { ahoraIso, uuidv7, VENTANA_GRACIA_REFRESH_MS } from '@catmetal/shared';
+import { sentenciaAuditoria, sentenciaAuditoriaCondicional } from '../auditoria/auditar';
+import { generarRefreshToken, hashRefreshToken, vencimientoRefresh } from './tokens';
+
+export interface TokenEmitido {
+  id: string;
+  /** Valor opaco que va en la cookie; nunca se guarda ni se audita. */
+  token: string;
+  familiaId: string;
+  userId: string;
+  deviceId: string;
+}
+
+/** Fila de `refresh_tokens` (sin `token_hash`) con el estado del usuario dueño. */
+export interface FilaRefresh {
+  id: string;
+  user_id: string;
+  device_id: string;
+  familia_id: string;
+  expira_at: string;
+  revocado_at: string | null;
+  reemplazado_por: string | null;
+  usuario_activo: number;
+}
+
+export async function buscarRefresh(
+  db: D1Database,
+  tokenHash: string,
+): Promise<FilaRefresh | null> {
+  return db
+    .prepare(
+      `SELECT r.id, r.user_id, r.device_id, r.familia_id, r.expira_at, r.revocado_at,
+              r.reemplazado_por, u.activo AS usuario_activo
+       FROM refresh_tokens AS r JOIN users AS u ON u.id = r.user_id
+       WHERE r.token_hash = ?`,
+    )
+    .bind(tokenHash)
+    .first<FilaRefresh>();
+}
+
+export interface DatosNuevaSesion {
+  userId: string;
+  deviceId: string;
+  /** El dispositivo no existe todavía: se inserta en el mismo batch. */
+  dispositivoNuevo: boolean;
+  instalacionId: string | null;
+  nombreDispositivo: string | null;
+  userAgent: string | null;
+  /** El usuario tenía intentos fallidos o un bloqueo vencido: se reinician. */
+  reiniciarIntentos: boolean;
+}
+
+/**
+ * Login correcto: registra o actualiza el dispositivo, reinicia el contador de intentos, revoca las
+ * familias activas del mismo usuario en el mismo dispositivo y crea una familia nueva.
+ */
+export async function iniciarSesion(
+  db: D1Database,
+  secretoRefresh: string,
+  datos: DatosNuevaSesion,
+): Promise<TokenEmitido> {
+  const ahora = ahoraIso();
+  const token = generarRefreshToken();
+  const emitido: TokenEmitido = {
+    id: uuidv7(),
+    token,
+    familiaId: uuidv7(),
+    userId: datos.userId,
+    deviceId: datos.deviceId,
+  };
+  const tokenHash = await hashRefreshToken(secretoRefresh, token);
+  const expira = vencimientoRefresh(Date.parse(ahora));
+  const sentencias: D1PreparedStatement[] = [];
+
+  if (datos.dispositivoNuevo) {
+    sentencias.push(
+      db
+        .prepare(
+          `INSERT INTO devices (id, user_id, instalacion_id, nombre, user_agent, ultimo_sync_at, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, NULL, ?, ?)`,
+        )
+        .bind(
+          datos.deviceId,
+          datos.userId,
+          datos.instalacionId,
+          datos.nombreDispositivo,
+          datos.userAgent,
+          ahora,
+          ahora,
+        ),
+      sentenciaAuditoria(db, {
+        entidad: 'devices',
+        entidad_id: datos.deviceId,
+        accion: 'dispositivo.registro',
+        actor_id: datos.userId,
+        device_id: datos.deviceId,
+        despues: {
+          id: datos.deviceId,
+          user_id: datos.userId,
+          nombre: datos.nombreDispositivo,
+          user_agent: datos.userAgent,
+          instalacion_id: datos.instalacionId,
+        },
+        server_at: ahora,
+      }),
+    );
+  } else {
+    sentencias.push(
+      db
+        .prepare(
+          `UPDATE devices
+           SET instalacion_id = COALESCE(?, instalacion_id), nombre = COALESCE(?, nombre),
+               user_agent = ?, updated_at = ?
+           WHERE id = ? AND user_id = ?`,
+        )
+        .bind(
+          datos.instalacionId,
+          datos.nombreDispositivo,
+          datos.userAgent,
+          ahora,
+          datos.deviceId,
+          datos.userId,
+        ),
+    );
+  }
+
+  if (datos.reiniciarIntentos) {
+    sentencias.push(
+      db
+        .prepare(
+          `UPDATE users SET intentos_fallidos = 0, bloqueado_hasta = NULL, updated_at = ? WHERE id = ?`,
+        )
+        .bind(ahora, datos.userId),
+    );
+  }
+
+  sentencias.push(
+    // ADR 0008 punto 7: una sesión por usuario y dispositivo.
+    db
+      .prepare(
+        `UPDATE refresh_tokens SET revocado_at = ?, updated_at = ?
+         WHERE user_id = ? AND device_id = ? AND revocado_at IS NULL`,
+      )
+      .bind(ahora, ahora, datos.userId, datos.deviceId),
+    db
+      .prepare(
+        `INSERT INTO refresh_tokens (id, user_id, device_id, token_hash, familia_id, expira_at, revocado_at, reemplazado_por, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)`,
+      )
+      .bind(
+        emitido.id,
+        datos.userId,
+        datos.deviceId,
+        tokenHash,
+        emitido.familiaId,
+        expira,
+        ahora,
+        ahora,
+      ),
+    sentenciaAuditoria(db, {
+      entidad: 'refresh_tokens',
+      entidad_id: emitido.id,
+      accion: 'sesion.inicio',
+      actor_id: datos.userId,
+      device_id: datos.deviceId,
+      despues: {
+        id: emitido.id,
+        user_id: datos.userId,
+        device_id: datos.deviceId,
+        familia_id: emitido.familiaId,
+        expira_at: expira,
+      },
+      server_at: ahora,
+    }),
+  );
+
+  await db.batch(sentencias);
+  return emitido;
+}
+
+/**
+ * Emite un sucesor de `origen` en un batch condicional (ADR 0008 punto 2):
+ * (a) INSERT … SELECT del token nuevo solo si `origen` cumple `condicionOrigen`;
+ * (b) UPDATE de `origen` (revocado, reemplazado_por) solo si (a) insertó;
+ * (c) auditoría solo si (a) insertó.
+ * Devuelve el token nuevo, o `null` si otro proceso ganó la carrera o la condición no se cumplió.
+ */
+async function emitirSucesor(
+  db: D1Database,
+  secretoRefresh: string,
+  origen: FilaRefresh,
+  condicionOrigen: { sql: string; parametros: (string | number)[] },
+  accion: string,
+  presentadoId: string,
+): Promise<TokenEmitido | null> {
+  const ahora = ahoraIso();
+  const token = generarRefreshToken();
+  const nuevoId = uuidv7();
+  const tokenHash = await hashRefreshToken(secretoRefresh, token);
+  const expira = vencimientoRefresh(Date.parse(ahora));
+  const existeNuevo = {
+    sql: 'EXISTS (SELECT 1 FROM refresh_tokens WHERE id = ?)',
+    parametros: [nuevoId],
+  };
+
+  const [insercion] = await db.batch([
+    db
+      .prepare(
+        `INSERT INTO refresh_tokens (id, user_id, device_id, token_hash, familia_id, expira_at, revocado_at, reemplazado_por, created_at, updated_at)
+         SELECT ?, r.user_id, r.device_id, ?, r.familia_id, ?, NULL, NULL, ?, ?
+         FROM refresh_tokens AS r JOIN users AS u ON u.id = r.user_id
+         WHERE r.id = ? AND r.revocado_at IS NULL AND r.expira_at > ? AND u.activo = 1
+           AND ${condicionOrigen.sql}`,
+      )
+      .bind(
+        nuevoId,
+        tokenHash,
+        expira,
+        ahora,
+        ahora,
+        origen.id,
+        ahora,
+        ...condicionOrigen.parametros,
+      ),
+    db
+      .prepare(
+        `UPDATE refresh_tokens SET revocado_at = ?, reemplazado_por = ?, updated_at = ?
+         WHERE id = ? AND revocado_at IS NULL AND ${existeNuevo.sql}`,
+      )
+      .bind(ahora, nuevoId, ahora, origen.id, ...existeNuevo.parametros),
+    sentenciaAuditoriaCondicional(
+      db,
+      {
+        entidad: 'refresh_tokens',
+        entidad_id: nuevoId,
+        accion,
+        actor_id: origen.user_id,
+        device_id: origen.device_id,
+        antes: { id: presentadoId, familia_id: origen.familia_id },
+        despues: {
+          id: nuevoId,
+          user_id: origen.user_id,
+          device_id: origen.device_id,
+          familia_id: origen.familia_id,
+          expira_at: expira,
+        },
+        server_at: ahora,
+      },
+      existeNuevo,
+    ),
+  ]);
+
+  if (insercion?.meta.changes !== 1) {
+    return null;
+  }
+  return {
+    id: nuevoId,
+    token,
+    familiaId: origen.familia_id,
+    userId: origen.user_id,
+    deviceId: origen.device_id,
+  };
+}
+
+/** Rotación normal: el token presentado está vigente. */
+export function rotar(
+  db: D1Database,
+  secretoRefresh: string,
+  presentado: FilaRefresh,
+): Promise<TokenEmitido | null> {
+  return emitirSucesor(
+    db,
+    secretoRefresh,
+    presentado,
+    { sql: '1 = 1', parametros: [] },
+    'sesion.rotacion',
+    presentado.id,
+  );
+}
+
+/**
+ * Reintento por respuesta perdida (ADR 0008 punto 3): el token presentado ya fue rotado, pero su
+ * sucesor se creó hace 30 s o menos y sigue vigente. Se revoca el sucesor y se emite otro de la
+ * misma familia. Devuelve `null` si no aplica (fuera de la ventana o sucesor ya usado).
+ */
+export async function reintentarDentroDeGracia(
+  db: D1Database,
+  secretoRefresh: string,
+  presentado: FilaRefresh,
+): Promise<TokenEmitido | null> {
+  if (presentado.reemplazado_por === null) {
+    return null;
+  }
+  const sucesor = await db
+    .prepare(
+      `SELECT r.id, r.user_id, r.device_id, r.familia_id, r.expira_at, r.revocado_at,
+              r.reemplazado_por, u.activo AS usuario_activo
+       FROM refresh_tokens AS r JOIN users AS u ON u.id = r.user_id
+       WHERE r.id = ? AND r.familia_id = ?`,
+    )
+    .bind(presentado.reemplazado_por, presentado.familia_id)
+    .first<FilaRefresh>();
+  if (sucesor === null) {
+    return null;
+  }
+  const limite = new Date(Date.now() - VENTANA_GRACIA_REFRESH_MS).toISOString();
+  return emitirSucesor(
+    db,
+    secretoRefresh,
+    sucesor,
+    { sql: 'r.created_at >= ?', parametros: [limite] },
+    'sesion.reintento',
+    presentado.id,
+  );
+}
+
+/**
+ * Revoca todos los tokens vigentes de una familia y audita la acción, solo si revocó alguno
+ * (condición: hay tokens de la familia revocados en este mismo instante).
+ */
+export async function revocarFamilia(
+  db: D1Database,
+  familia: { familiaId: string; userId: string; deviceId: string | null; tokenId: string },
+  accion: 'sesion.cierre' | 'sesion.reutilizacion',
+): Promise<void> {
+  const ahora = ahoraIso();
+  await db.batch([
+    db
+      .prepare(
+        `UPDATE refresh_tokens SET revocado_at = ?, updated_at = ?
+         WHERE familia_id = ? AND user_id = ? AND revocado_at IS NULL`,
+      )
+      .bind(ahora, ahora, familia.familiaId, familia.userId),
+    sentenciaAuditoriaCondicional(
+      db,
+      {
+        entidad: 'refresh_tokens',
+        entidad_id: familia.tokenId,
+        accion,
+        actor_id: familia.userId,
+        device_id: familia.deviceId,
+        despues: { id: familia.tokenId, familia_id: familia.familiaId, revocado_at: ahora },
+        server_at: ahora,
+      },
+      {
+        sql: 'EXISTS (SELECT 1 FROM refresh_tokens WHERE familia_id = ? AND revocado_at = ?)',
+        parametros: [familia.familiaId, ahora],
+      },
+    ),
+  ]);
+}
+
+/** Sentencia que revoca todas las familias de un usuario (cambio de rol, desactivación, contraseña). */
+export function sentenciaRevocarTodas(
+  db: D1Database,
+  userId: string,
+  ahora: string,
+  condicion: { sql: string; parametros: (string | number)[] },
+): D1PreparedStatement {
+  return db
+    .prepare(
+      `UPDATE refresh_tokens SET revocado_at = ?, updated_at = ?
+       WHERE user_id = ? AND revocado_at IS NULL AND ${condicion.sql}`,
+    )
+    .bind(ahora, ahora, userId, ...condicion.parametros);
+}
