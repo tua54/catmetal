@@ -1,0 +1,11 @@
+# Fin de línea LF en el repo para que Windows y Linux (CI) produzcan los mismos diffs
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.gz binary

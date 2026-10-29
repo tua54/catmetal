@@ -1,0 +1,37 @@
+# Dependencias y builds
+node_modules/
+dist/
+build/
+coverage/
+.turbo/
+*.tsbuildinfo
+
+# Cloudflare / Wrangler (estado local de D1, R2, KV)
+.wrangler/
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+
+# Entorno
+.env
+.env.*
+!.env.example
+
+# Playwright / Lighthouse
+playwright-report/
+test-results/
+blob-report/
+playwright/.cache/
+.lighthouseci/
+
+# Claude Code: aprobaciones locales de cada persona
+.claude/settings.local.json
+
+# Sistema / editores
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.log
