@@ -5,6 +5,8 @@ declare global {
   namespace Cloudflare {
     interface Env {
       TEST_MIGRATIONS: D1Migration[];
+      /** Archivos de src/, migrations/ y scripts/ para las pruebas estáticas (vitest.config.mjs). */
+      TEST_ARCHIVOS_FUENTE: { ruta: string; contenido: string }[];
     }
   }
 }

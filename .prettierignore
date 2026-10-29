@@ -6,6 +6,8 @@ playwright-report
 test-results
 blob-report
 worker-configuration.d.ts
+# Snapshots y journal que genera drizzle-kit (los reescribe en cada `db:generate`).
+migrations/meta
 pnpm-lock.yaml
 docs
 _mover-a-claude

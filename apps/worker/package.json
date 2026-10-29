@@ -6,6 +6,7 @@
   "description": "Worker de Cloudflare: API /api/v1 (Hono) y PWA como Static Assets",
   "scripts": {
     "dev": "wrangler dev --ip 127.0.0.1 --port 8787",
+    "db:generate": "drizzle-kit generate",
     "db:migrate:local": "wrangler d1 migrations apply DB --local",
     "cf-typegen": "wrangler types",
     "typecheck": "wrangler types --check && tsc --noEmit && tsc --noEmit -p test",

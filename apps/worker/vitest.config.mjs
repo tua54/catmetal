@@ -4,6 +4,8 @@
 // Es .mjs a propósito: si fuera .ts tendría que entrar en el tsconfig del Worker y arrastraría
 // @types/node (vía miniflare/undici) al programa de src/, que corre en workerd y no en Node.
 import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-plugin';
+import { readdirSync, readFileSync } from 'node:fs';
+import { extname, join, relative } from 'node:path';
 import { defineConfig } from 'vitest/config';
 
 // Relativa al directorio del paquete: pnpm ejecuta los scripts con cwd = apps/worker.
@@ -21,6 +23,26 @@ for (const [nombre, valor] of Object.entries(SECRETOS_DE_PRUEBA)) {
 
 const migraciones = await readD1Migrations(DIRECTORIO_MIGRACIONES);
 
+// Archivos que revisa la prueba estática de la ADR 0006 (sin reemplazo implícito de SQLite).
+// workerd no tiene `fs`: la lista se arma aquí, en Node, y se pasa como binding de prueba.
+const DIRECTORIOS_REVISADOS = ['src', DIRECTORIO_MIGRACIONES, '../../scripts'];
+const EXTENSIONES_REVISADAS = new Set(['.ts', '.sql', '.mjs']);
+
+function archivosFuente(directorio) {
+  return readdirSync(directorio, { withFileTypes: true }).flatMap((entrada) => {
+    const ruta = join(directorio, entrada.name);
+    if (entrada.isDirectory()) {
+      return archivosFuente(ruta);
+    }
+    return EXTENSIONES_REVISADAS.has(extname(entrada.name)) ? [ruta] : [];
+  });
+}
+
+const archivosRevisados = DIRECTORIOS_REVISADOS.flatMap(archivosFuente).map((ruta) => ({
+  ruta: relative('../..', ruta).replaceAll('\\', '/'),
+  contenido: readFileSync(ruta, 'utf8'),
+}));
+
 export default defineConfig({
   plugins: [
     cloudflareTest({
@@ -29,6 +51,7 @@ export default defineConfig({
         bindings: {
           ...SECRETOS_DE_PRUEBA,
           TEST_MIGRATIONS: migraciones,
+          TEST_ARCHIVOS_FUENTE: archivosRevisados,
         },
       },
     }),

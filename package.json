@@ -11,6 +11,7 @@
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "setup:dev-vars": "node scripts/gen-dev-vars.mjs",
+    "db:generate": "pnpm --filter @catmetal/worker db:generate",
     "db:migrate:local": "pnpm --filter @catmetal/worker db:migrate:local",
     "lint": "eslint .",
     "typecheck": "pnpm -r typecheck",
