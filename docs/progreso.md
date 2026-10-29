@@ -5,11 +5,11 @@
 ## Estado actual
 
 - Rama de trabajo: `build/v1` (línea base en `main`: `bfa8975`).
-- Fase en curso: **Fase 0 — Fundaciones**.
+- Fase 0 cerrada (tag `fase-0`). Fase en curso: **Fase 1 — Base de datos y auth**.
 
 ## Siguiente paso
 
-Escribir `docs/plan-fase-0.md`, hacer su commit y delegar la tarea 0.1.
+Confirmar `docs/plan-fase-1.md` y las ADR 0005–0009, y delegar las tareas 1.0 (contratos de shared) y 1.1 (esquema y triggers) en paralelo.
 
 ## Mapeo de subagentes
 
@@ -42,3 +42,15 @@ No se usan `mvc-dotnet-developer`, `angular-developer` ni `orchestrator`.
 
 - Línea base en `main` (`chore: línea base de orquestación y especificación`), incluye `_mover-a-claude/` porque es la configuración entregada del proyecto.
 - Rama `build/v1` creada.
+
+### Fase 0 — Fundaciones (cerrada)
+
+- 0.1 Monorepo y herramientas (general-purpose). Versiones: ADR 0001. pnpm 12 con  y .
+-  verificó APIs de Cloudflare/Drizzle/Hono:  está deprecado → se usa  (desviación D1).
+- 0.2 Contratos de  (general-purpose): 115 pruebas, 100 % de líneas.
+- 0.4 Esqueleto de la PWA (react-developer), en paralelo con 0.2.
+- 0.3 Worker, Wrangler, pruebas en el pool de Workers y  (general-purpose). ADR 0004:  para aplicar cabeceras a todo.
+- 0.5 CI y README (general-purpose).
+-  revisó por adelantado las ADR de la Fase 1 (cursor, triggers, hashes, sesiones): 4 hallazgos altos incorporados (hidratación de órdenes recién asignadas, sobre laxo en /sync/push, user_id del autor en el sobre, época de sync) → ADR 0009 y ADR 0005/0006/0008 reescritas.
+- Decisión menor:  en la web se revisa en la Fase 6.
+- Evidencia: .
