@@ -131,6 +131,8 @@ export const editarUsuarioSchema = z
     rol: rolSchema.optional(),
     activo: z.boolean({ error: 'El campo activo debe ser verdadero o falso.' }).optional(),
     password: passwordSchema.optional(),
+    /** Reinicia `intentos_fallidos` y `bloqueado_hasta` (desbloqueo por el admin, ADR 0008). */
+    desbloquear: z.literal(true, { error: 'El campo desbloquear solo admite true.' }).optional(),
   })
   .refine((datos) => Object.values(datos).some((valor) => valor !== undefined), {
     error: 'Indique al menos un campo para modificar.',
@@ -228,14 +230,17 @@ export const crearConsumoSchema = z.object({
   corrige_a: uuidV7Schema.nullable().optional(),
 });
 
+/** Versión de un consumo que conoce el cliente (empieza en 1; control de concurrencia optimista). */
+const versionConsumoSchema = z
+  .number({ error: 'La versión es obligatoria.' })
+  .int({ error: 'La versión debe ser un entero.' })
+  .min(1, { error: 'La versión debe ser mayor o igual a 1.' });
+
 /** Edición de un consumo propio pendiente (S4). `version` es la que el cliente conoce (empieza en 1). */
 export const editarConsumoSchema = z
   .object({
     id: uuidV7Schema,
-    version: z
-      .number({ error: 'La versión es obligatoria.' })
-      .int({ error: 'La versión debe ser un entero.' })
-      .min(1, { error: 'La versión debe ser mayor o igual a 1.' }),
+    version: versionConsumoSchema,
     material_id: uuidV7Schema.optional(),
     cantidad: cantidadSchema.optional(),
     unidad: unidadSchema.optional(),
@@ -288,14 +293,19 @@ export const crearNovedadSchema = z.object({
 // Validación del jefe
 // ---------------------------------------------------------------------------------------------
 
-/** `id` es el id de la validación (UUID v7 generado por el cliente). */
+/**
+ * `id` es el id de la validación (UUID v7 generado por el cliente). `version` es la versión del
+ * consumo que vio el jefe: si cambió mientras decidía, el servidor responde 409 CONFLICTO (ADR 0010).
+ */
 export const aprobarSchema = z.object({
   id: uuidV7Schema,
+  version: versionConsumoSchema,
   client_created_at: isoFechaSchema,
 });
 
 export const rechazarSchema = z.object({
   id: uuidV7Schema,
+  version: versionConsumoSchema,
   motivo: textoSchema('El motivo del rechazo', 3, 500),
   client_created_at: isoFechaSchema,
 });

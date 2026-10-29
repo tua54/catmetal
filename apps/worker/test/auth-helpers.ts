@@ -1,10 +1,9 @@
 // Utilidades para las pruebas de autenticación contra el Worker real (exports.default.fetch) y la
 // D1 local real. Los usuarios se crean con el `hashearContrasena` del Worker.
-import { type Perfil, type Rol, uuidv7 } from '@catmetal/shared';
+import { type Perfil, type RespuestaSesion, type Rol, uuidv7 } from '@catmetal/shared';
 import { env, exports } from 'cloudflare:workers';
 import { expect } from 'vitest';
 import { hashearContrasena } from '../src/auth/contrasenas';
-import type { RespuestaSesion } from '../src/rutas/auth';
 
 export const BASE = 'https://catmetal.test';
 export const ORIGEN = BASE;

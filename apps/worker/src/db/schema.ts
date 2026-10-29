@@ -181,6 +181,10 @@ export const refresh_tokens = sqliteTable(
     uniqueIndex('refresh_tokens_token_hash').on(t.token_hash),
     index('refresh_tokens_user_id').on(t.user_id),
     index('refresh_tokens_familia_id').on(t.familia_id),
+    // Sesiones vigentes por usuario y dispositivo: middleware, login y revocaciones (ADR 0010, H7).
+    index('refresh_tokens_vigentes_usuario')
+      .on(t.user_id, t.device_id)
+      .where(sql`revocado_at IS NULL`),
     check('refresh_tokens_token_hash_hex', sql`length(token_hash) = 64`),
     check('refresh_tokens_fechas_iso', fechas([...MARCAS, 'expira_at'], ['revocado_at'])),
   ],
@@ -343,6 +347,12 @@ export const consumptions = sqliteTable(
       .on(t.corrige_a)
       .where(sql`corrige_a IS NOT NULL`),
     index('consumptions_material_id').on(t.material_id),
+    // Cola de validación del jefe: solo los pendientes, paginados por id (ADR 0010, H6).
+    index('consumptions_pendientes_id')
+      .on(t.id)
+      .where(sql`estado = 'pendiente'`),
+    // Consumos de una orden paginados por id (ADR 0010, H10).
+    index('consumptions_order_id_id').on(t.order_id, t.id),
     check('consumptions_cantidad_positiva', sql`cantidad > 0`),
     check('consumptions_cantidad_plan_positiva', sql`cantidad_en_unidad_plan > 0`),
     check('consumptions_costo_no_negativo', sql`costo_unitario_cop_snapshot >= 0`),
@@ -493,6 +503,11 @@ export const audit_log = sqliteTable(
     entidad: text('entidad').notNull(),
     entidad_id: text('entidad_id').notNull(),
     accion: text('accion').notNull(),
+    /**
+     * Orden a la que pertenece la entidad auditada (orden, asignación, plan, consumo, novedad,
+     * evidencia, validación); NULL en las demás. Sin FK, igual que `entidad_id` (ADR 0010).
+     */
+    order_id: text('order_id'),
     /** NULL en acciones del sistema (migraciones, cron). */
     actor_id: text('actor_id').references(() => users.id),
     device_id: text('device_id').references(() => devices.id),
@@ -508,6 +523,10 @@ export const audit_log = sqliteTable(
     uniqueIndex('audit_log_id_unico').on(t.id),
     index('audit_log_entidad_entidad_id').on(t.entidad, t.entidad_id),
     index('audit_log_actor_id_seq').on(t.actor_id, t.seq),
+    // Línea de tiempo de una orden y visibilidad del pull (ADR 0010, H8).
+    index('audit_log_order_id_seq')
+      .on(t.order_id, t.seq)
+      .where(sql`order_id IS NOT NULL`),
     check('audit_log_datos_antes_json', json('datos_antes', true)),
     check('audit_log_datos_despues_json', json('datos_despues', true)),
     check('audit_log_alerta_reloj_booleano', booleano('alerta_reloj')),

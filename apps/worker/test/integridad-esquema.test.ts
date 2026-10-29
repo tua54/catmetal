@@ -6,6 +6,7 @@ import { env } from 'cloudflare:workers';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { crearDb, MAX_PAYLOAD_JSON_BYTES, schema, settings, users } from '../src/db/schema';
+import { CONSULTA_SESION } from '../src/middleware/autenticar';
 import {
   ahora,
   crearDispositivo,
@@ -33,19 +34,24 @@ const TABLAS_ESPERADAS = [
   'validations',
 ];
 
-// Lista literal de la ADR 0006. Si una migración reconstruye una tabla y pierde un trigger, falla aquí.
+// Lista literal de las ADR 0006 y 0010. Si una migración reconstruye una tabla y pierde un trigger,
+// falla aquí.
 const TRIGGERS_ESPERADOS = [
   'audit_log_no_delete',
   'audit_log_no_update',
   'audit_log_seq_creciente',
+  'audit_log_seq_sin_saltos',
   'consumptions_autoria_inmutable',
   'consumptions_corrige_rechazado',
   'consumptions_decidido_inmutable',
   'consumptions_estado_con_validacion',
+  'consumptions_insercion_valida',
   'consumptions_no_delete',
+  'consumptions_validado_no_se_edita',
   'consumptions_version',
   'devices_no_delete',
   'evidences_inmutable',
+  'evidences_insercion_valida',
   'evidences_no_delete',
   'incidents_no_delete',
   'incidents_no_update',
@@ -54,13 +60,17 @@ const TRIGGERS_ESPERADOS = [
   'order_supervisors_no_delete',
   'production_orders_estado_terminal',
   'production_orders_no_delete',
+  'production_orders_transicion',
   'settings_no_delete',
+  'settings_valores_validos',
   'sync_mutations_no_delete',
   'sync_mutations_no_update',
   'users_no_delete',
+  'validations_aplica_decision',
   'validations_no_delete',
   'validations_no_update',
   'validations_reglas',
+  'validations_validador_jefe',
 ];
 
 // Índices con nombre: los de la §4 de la spec, los adicionales de las ADR 0008/0009 y los de las FK.
@@ -120,6 +130,15 @@ const INDICES_ESPERADOS: Record<string, { tabla: string; columnas: string[]; uni
     columnas: ['user_id', 'procesada_at'],
     unico: false,
   },
+  // ADR 0010 (revisión del esquema H6, H7, H8 y H10)
+  consumptions_pendientes_id: { tabla: 'consumptions', columnas: ['id'], unico: false },
+  consumptions_order_id_id: { tabla: 'consumptions', columnas: ['order_id', 'id'], unico: false },
+  refresh_tokens_vigentes_usuario: {
+    tabla: 'refresh_tokens',
+    columnas: ['user_id', 'device_id'],
+    unico: false,
+  },
+  audit_log_order_id_seq: { tabla: 'audit_log', columnas: ['order_id', 'seq'], unico: false },
 };
 
 interface FilaMaestra {
@@ -308,11 +327,15 @@ describe('CHECK', () => {
       [{ cantidad: -3 }, /consumptions_cantidad_positiva/],
       [{ cantidad_en_unidad_plan: 0 }, /consumptions_cantidad_plan_positiva/],
       [{ unidad: 'ton' }, /consumptions_unidad_valida/],
-      [{ estado: 'borrado' }, /consumptions_estado_valido/],
+      // El BEFORE INSERT consumptions_insercion_valida se dispara antes que los CHECK: un estado
+      // distinto de 'pendiente' o una versión distinta de 1 los frena el trigger (ADR 0010).
+      [{ estado: 'borrado' }, /un consumo nuevo nace pendiente y con version 1/],
+      [{ estado: 'aprobado' }, /un consumo nuevo nace pendiente y con version 1/],
       [{ costo_unitario_cop_snapshot: -1 }, /consumptions_costo_no_negativo/],
       [{ registro_tardio: 2 }, /consumptions_registro_tardio_booleano/],
       [{ requiere_novedad: -1 }, /consumptions_requiere_novedad_booleano/],
-      [{ version: 0 }, /consumptions_version_positiva/],
+      [{ version: 0 }, /un consumo nuevo nace pendiente y con version 1/],
+      [{ version: 2 }, /un consumo nuevo nace pendiente y con version 1/],
     ];
     for (const [extra, error] of casos) {
       await expect(insertar('consumptions', valoresConsumo(e, extra))).rejects.toThrow(error);
@@ -573,5 +596,166 @@ describe('prueba estática: sin reemplazo implícito de SQLite (ADR 0006)', () =
     expect(PALABRA_PROHIBIDA.test(sinComentarios('x.sql', '-- INSERT OR ' + 'REPLACE'))).toBe(
       false,
     );
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// ADR 0010: columna audit_log.order_id, índices parciales, planes de consulta y reconstrucciones
+// ---------------------------------------------------------------------------------------------
+
+describe('ADR 0010: esquema', () => {
+  it('audit_log.order_id es TEXT nullable y sin FK', async () => {
+    const columna = await env.DB.prepare(
+      `SELECT type AS tipo, "notnull" AS obligatorio FROM pragma_table_info('audit_log') WHERE name = 'order_id'`,
+    ).first();
+    expect(columna).toEqual({ tipo: 'TEXT', obligatorio: 0 });
+    const { results } = await env.DB.prepare(
+      `SELECT "from" AS columna FROM pragma_foreign_key_list('audit_log')`,
+    ).all<{ columna: string }>();
+    expect(results.map((r) => r.columna)).not.toContain('order_id');
+  });
+
+  it.each([
+    ['consumptions', 'consumptions_pendientes_id', "WHERE estado = 'pendiente'"],
+    ['refresh_tokens', 'refresh_tokens_vigentes_usuario', 'WHERE revocado_at IS NULL'],
+    ['audit_log', 'audit_log_order_id_seq', 'WHERE order_id IS NOT NULL'],
+  ])('%s: el índice %s es parcial (%s)', async (tabla, nombre, condicion) => {
+    const lista = await env.DB.prepare(`SELECT partial FROM pragma_index_list(?) WHERE name = ?`)
+      .bind(tabla, nombre)
+      .first<{ partial: number }>();
+    expect(lista?.partial).toBe(1);
+    const definicion = await env.DB.prepare(
+      `SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?`,
+    )
+      .bind(nombre)
+      .first<{ sql: string }>();
+    expect(definicion?.sql).toContain(condicion);
+  });
+});
+
+describe('ADR 0010: planes de consulta (EXPLAIN QUERY PLAN en la D1 local)', () => {
+  async function plan(sql: string, ...parametros: string[]): Promise<string> {
+    const { results } = await env.DB.prepare(`EXPLAIN QUERY PLAN ${sql}`)
+      .bind(...parametros)
+      .all<{ detail: string }>();
+    return results.map((r) => r.detail).join(' | ');
+  }
+
+  it('la cola de validación (pendientes por id) usa consumptions_pendientes_id', async () => {
+    const detalle = await plan(
+      `SELECT id FROM consumptions WHERE estado = 'pendiente' AND id > ? ORDER BY id LIMIT 50`,
+      '',
+    );
+    expect(detalle).toContain('consumptions_pendientes_id');
+  });
+
+  it('los consumos de una orden paginados por id usan consumptions_order_id_id', async () => {
+    const detalle = await plan(
+      `SELECT id FROM consumptions WHERE order_id = ? AND id > ? ORDER BY id LIMIT 50`,
+      uuidv7(),
+      '',
+    );
+    expect(detalle).toContain('consumptions_order_id_id');
+  });
+
+  it('la consulta de sesión del middleware usa refresh_tokens_vigentes_usuario', async () => {
+    const detalle = await plan(CONSULTA_SESION, uuidv7(), uuidv7(), ahora(), uuidv7());
+    expect(detalle).toContain('refresh_tokens_vigentes_usuario');
+  });
+
+  it('la revocación por usuario y dispositivo del login usa refresh_tokens_vigentes_usuario', async () => {
+    const detalle = await plan(
+      `UPDATE refresh_tokens SET revocado_at = ? WHERE user_id = ? AND device_id = ? AND revocado_at IS NULL`,
+      ahora(),
+      uuidv7(),
+      uuidv7(),
+    );
+    expect(detalle).toContain('refresh_tokens_vigentes_usuario');
+  });
+
+  it('la línea de tiempo de una orden usa audit_log_order_id_seq', async () => {
+    const detalle = await plan(
+      `SELECT seq FROM audit_log WHERE order_id = ? AND seq > 0 ORDER BY seq LIMIT 100`,
+      uuidv7(),
+    );
+    expect(detalle).toContain('audit_log_order_id_seq');
+  });
+});
+
+/**
+ * Regla de reconstrucción (ADR 0010): todo `DROP TABLE T` va seguido de
+ * `ALTER TABLE __new_T RENAME TO T` en la misma migración, y la migración usa
+ * `PRAGMA defer_foreign_keys = on` (el `PRAGMA foreign_keys=OFF` de drizzle-kit no sirve en D1).
+ * Devuelve los problemas encontrados.
+ */
+function problemasDeReconstruccion(contenido: string): string[] {
+  const sql = contenido.replace(/--.*$/gm, '');
+  const problemas: string[] = [];
+  const identificador = '[`"\\[]?([A-Za-z_][A-Za-z0-9_]*)[`"\\]]?';
+  const drops = [
+    ...sql.matchAll(new RegExp(`\\bDROP\\s+TABLE\\s+(?:IF\\s+EXISTS\\s+)?${identificador}`, 'gi')),
+  ];
+  for (const drop of drops) {
+    const tabla = drop[1] ?? '';
+    const resto = sql.slice((drop.index ?? 0) + drop[0].length);
+    const rename = new RegExp(
+      `\\bALTER\\s+TABLE\\s+[\`"\\[]?__new_${tabla}[\`"\\]]?\\s+RENAME\\s+TO\\s+[\`"\\[]?${tabla}[\`"\\]]?`,
+      'i',
+    );
+    if (!rename.test(resto)) {
+      problemas.push(`DROP TABLE ${tabla} sin RENAME de __new_${tabla}`);
+    }
+  }
+  if (drops.length > 0) {
+    if (!/\bPRAGMA\s+defer_foreign_keys\s*=\s*on\b/i.test(sql)) {
+      problemas.push('falta PRAGMA defer_foreign_keys = on');
+    }
+    if (/\bPRAGMA\s+foreign_keys\s*=\s*off\b/i.test(sql)) {
+      problemas.push('PRAGMA foreign_keys = OFF no sirve en D1');
+    }
+  }
+  return problemas;
+}
+
+describe('prueba estática: reconstrucción de tablas (ADR 0010)', () => {
+  it('ninguna migración tiene un DROP TABLE sin su RENAME', () => {
+    const migraciones = env.TEST_ARCHIVOS_FUENTE.filter(
+      (a) => a.ruta.startsWith('migrations/') && a.ruta.endsWith('.sql'),
+    );
+    expect(migraciones.length).toBeGreaterThanOrEqual(5);
+    const problemas = migraciones.flatMap((a) =>
+      problemasDeReconstruccion(a.contenido).map((p) => `${a.ruta}: ${p}`),
+    );
+    expect(problemas).toEqual([]);
+  });
+
+  it('detecta casos sintéticos', () => {
+    const correcta = [
+      'PRAGMA defer_foreign_keys = on;',
+      'CREATE TABLE `__new_users` (id text);',
+      'INSERT INTO `__new_users` SELECT id FROM `users`;',
+      'DROP TABLE `users`;',
+      'ALTER TABLE `__new_users` RENAME TO `users`;',
+    ].join('\n');
+    expect(problemasDeReconstruccion(correcta)).toEqual([]);
+    expect(problemasDeReconstruccion('DROP TABLE users;')).toEqual([
+      'DROP TABLE users sin RENAME de __new_users',
+      'falta PRAGMA defer_foreign_keys = on',
+    ]);
+    expect(
+      problemasDeReconstruccion(
+        'PRAGMA foreign_keys=OFF;\nPRAGMA defer_foreign_keys = on;\nDROP TABLE IF EXISTS "materials";\nALTER TABLE __new_otra RENAME TO materials;',
+      ),
+    ).toEqual([
+      'DROP TABLE materials sin RENAME de __new_materials',
+      'PRAGMA foreign_keys = OFF no sirve en D1',
+    ]);
+    // Un RENAME antes del DROP no cuenta, y un comentario no es una sentencia.
+    expect(
+      problemasDeReconstruccion(
+        'PRAGMA defer_foreign_keys = on;\nALTER TABLE __new_users RENAME TO users;\nDROP TABLE users;',
+      ),
+    ).toEqual(['DROP TABLE users sin RENAME de __new_users']);
+    expect(problemasDeReconstruccion('-- DROP TABLE users;')).toEqual([]);
   });
 });

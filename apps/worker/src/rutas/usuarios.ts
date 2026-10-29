@@ -5,6 +5,7 @@ import {
   ahoraIso,
   crearUsuarioSchema,
   editarUsuarioSchema,
+  type ListaUsuarios,
   type Rol,
   type Usuario,
   uuidv7,
@@ -54,11 +55,6 @@ const listarQuerySchema = z.object({
 
 const idParamSchema = z.object({ id: z.string().min(1).max(64) });
 
-// `desbloquear` no está en el contrato de shared: es una extensión del Worker (se reporta).
-const editarSchema = editarUsuarioSchema.safeExtend({
-  desbloquear: z.literal(true, { error: 'El campo desbloquear solo admite true.' }).optional(),
-});
-
 async function buscarUsuario(db: D1Database, id: string): Promise<FilaUsuario | null> {
   return db
     .prepare(`SELECT ${COLUMNAS_USUARIO} FROM users WHERE id = ?`)
@@ -84,10 +80,11 @@ export function crearRutasUsuarios(): Hono<AppEnv> {
       .all<FilaUsuario>();
     const pagina = results.slice(0, limite);
     const ultimo = pagina.at(-1);
-    return c.json({
+    const cuerpo: ListaUsuarios = {
       usuarios: pagina.map(usuarioDe),
       siguiente_cursor: results.length > limite && ultimo !== undefined ? ultimo.id : null,
-    });
+    };
+    return c.json(cuerpo);
   });
 
   rutas.post('/', validar('json', crearUsuarioSchema), async (c) => {
@@ -131,96 +128,101 @@ export function crearRutasUsuarios(): Hono<AppEnv> {
     return c.json(usuarioDe(fila), 201);
   });
 
-  rutas.patch('/:id', validar('param', idParamSchema), validar('json', editarSchema), async (c) => {
-    const { id } = c.req.valid('param');
-    const datos = c.req.valid('json');
-    const sesion = c.get('sesion');
-    const db = c.env.DB;
-    const actual = await buscarUsuario(db, id);
-    if (actual === null) {
-      throw new ErrorApi('NO_ENCONTRADO');
-    }
+  rutas.patch(
+    '/:id',
+    validar('param', idParamSchema),
+    validar('json', editarUsuarioSchema),
+    async (c) => {
+      const { id } = c.req.valid('param');
+      const datos = c.req.valid('json');
+      const sesion = c.get('sesion');
+      const db = c.env.DB;
+      const actual = await buscarUsuario(db, id);
+      if (actual === null) {
+        throw new ErrorApi('NO_ENCONTRADO');
+      }
 
-    const ahora = ahoraIso();
-    const nuevo: FilaUsuario = {
-      ...actual,
-      nombre: datos.nombre ?? actual.nombre,
-      rol: datos.rol ?? actual.rol,
-      activo: datos.activo === undefined ? actual.activo : datos.activo ? 1 : 0,
-      intentos_fallidos: datos.desbloquear === true ? 0 : actual.intentos_fallidos,
-      bloqueado_hasta: datos.desbloquear === true ? null : actual.bloqueado_hasta,
-      updated_at: ahora,
-    };
-    const quitaAdmin =
-      actual.rol === 'admin' &&
-      actual.activo === 1 &&
-      (nuevo.rol !== 'admin' || nuevo.activo !== 1);
-    const revocaSesiones =
-      nuevo.rol !== actual.rol ||
-      (actual.activo === 1 && nuevo.activo === 0) ||
-      datos.password !== undefined;
-    const passwordHash =
-      datos.password === undefined ? null : await hashearContrasena(datos.password);
+      const ahora = ahoraIso();
+      const nuevo: FilaUsuario = {
+        ...actual,
+        nombre: datos.nombre ?? actual.nombre,
+        rol: datos.rol ?? actual.rol,
+        activo: datos.activo === undefined ? actual.activo : datos.activo ? 1 : 0,
+        intentos_fallidos: datos.desbloquear === true ? 0 : actual.intentos_fallidos,
+        bloqueado_hasta: datos.desbloquear === true ? null : actual.bloqueado_hasta,
+        updated_at: ahora,
+      };
+      const quitaAdmin =
+        actual.rol === 'admin' &&
+        actual.activo === 1 &&
+        (nuevo.rol !== 'admin' || nuevo.activo !== 1);
+      const revocaSesiones =
+        nuevo.rol !== actual.rol ||
+        (actual.activo === 1 && nuevo.activo === 0) ||
+        datos.password !== undefined;
+      const passwordHash =
+        datos.password === undefined ? null : await hashearContrasena(datos.password);
 
-    // Guardia atómica del último admin (ADR 0008 punto 9): el UPDATE solo aplica si, cuando quita
-    // un admin activo, queda otro admin activo. Las demás sentencias dependen de que haya aplicado.
-    const guardia = quitaAdmin
-      ? `EXISTS (SELECT 1 FROM users AS otro WHERE otro.rol = 'admin' AND otro.activo = 1 AND otro.id <> ?)`
-      : '1 = 1';
-    const parametrosGuardia = quitaAdmin ? [id] : [];
-    const aplicado = {
-      sql: 'EXISTS (SELECT 1 FROM users WHERE id = ? AND updated_at = ?)',
-      parametros: [id, ahora],
-    };
+      // Guardia atómica del último admin (ADR 0008 punto 9): el UPDATE solo aplica si, cuando quita
+      // un admin activo, queda otro admin activo. Las demás sentencias dependen de que haya aplicado.
+      const guardia = quitaAdmin
+        ? `EXISTS (SELECT 1 FROM users AS otro WHERE otro.rol = 'admin' AND otro.activo = 1 AND otro.id <> ?)`
+        : '1 = 1';
+      const parametrosGuardia = quitaAdmin ? [id] : [];
+      const aplicado = {
+        sql: 'EXISTS (SELECT 1 FROM users WHERE id = ? AND updated_at = ?)',
+        parametros: [id, ahora],
+      };
 
-    const sentencias: D1PreparedStatement[] = [
-      db
-        .prepare(
-          `UPDATE users SET nombre = ?, rol = ?, activo = ?, intentos_fallidos = ?, bloqueado_hasta = ?,
+      const sentencias: D1PreparedStatement[] = [
+        db
+          .prepare(
+            `UPDATE users SET nombre = ?, rol = ?, activo = ?, intentos_fallidos = ?, bloqueado_hasta = ?,
                password_hash = COALESCE(?, password_hash), updated_at = ?
              WHERE id = ? AND ${guardia}`,
-        )
-        .bind(
-          nuevo.nombre,
-          nuevo.rol,
-          nuevo.activo,
-          nuevo.intentos_fallidos,
-          nuevo.bloqueado_hasta,
-          passwordHash,
-          ahora,
-          id,
-          ...parametrosGuardia,
-        ),
-    ];
-    if (revocaSesiones) {
-      sentencias.push(sentenciaRevocarTodas(db, id, ahora, aplicado));
-    }
-    sentencias.push(
-      sentenciaAuditoriaCondicional(
-        db,
-        {
-          entidad: 'users',
-          entidad_id: id,
-          accion: 'usuario.editar',
-          actor_id: sesion.userId,
-          device_id: sesion.deviceId,
-          antes: { ...actual },
-          despues: {
-            ...nuevo,
-            ...(datos.password === undefined ? {} : { password_restablecida: true }),
+          )
+          .bind(
+            nuevo.nombre,
+            nuevo.rol,
+            nuevo.activo,
+            nuevo.intentos_fallidos,
+            nuevo.bloqueado_hasta,
+            passwordHash,
+            ahora,
+            id,
+            ...parametrosGuardia,
+          ),
+      ];
+      if (revocaSesiones) {
+        sentencias.push(sentenciaRevocarTodas(db, id, ahora, aplicado));
+      }
+      sentencias.push(
+        sentenciaAuditoriaCondicional(
+          db,
+          {
+            entidad: 'users',
+            entidad_id: id,
+            accion: 'usuario.editar',
+            actor_id: sesion.userId,
+            device_id: sesion.deviceId,
+            antes: { ...actual },
+            despues: {
+              ...nuevo,
+              ...(datos.password === undefined ? {} : { password_restablecida: true }),
+            },
+            server_at: ahora,
           },
-          server_at: ahora,
-        },
-        aplicado,
-      ),
-    );
+          aplicado,
+        ),
+      );
 
-    const [actualizacion] = await db.batch(sentencias);
-    if (actualizacion?.meta.changes !== 1) {
-      throw new ErrorApi('ULTIMO_ADMIN');
-    }
-    return c.json(usuarioDe(nuevo));
-  });
+      const [actualizacion] = await db.batch(sentencias);
+      if (actualizacion?.meta.changes !== 1) {
+        throw new ErrorApi('ULTIMO_ADMIN');
+      }
+      return c.json(usuarioDe(nuevo));
+    },
+  );
 
   return rutas;
 }

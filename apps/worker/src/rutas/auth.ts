@@ -8,6 +8,7 @@ import {
   MAX_INTENTOS_LOGIN,
   type Perfil,
   permisosDeRol,
+  type RespuestaSesion,
   type Rol,
   uuidv7,
 } from '@catmetal/shared';
@@ -49,14 +50,6 @@ interface FilaPerfil {
   nombre: string;
   email: string;
   rol: Rol;
-}
-
-export interface RespuestaSesion {
-  access_token: string;
-  /** Segundos de vida del access token. */
-  expira_en: number;
-  device_id: string;
-  usuario: Perfil;
 }
 
 export function perfilDe(usuario: FilaPerfil): Perfil {

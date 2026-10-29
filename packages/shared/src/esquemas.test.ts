@@ -248,6 +248,10 @@ describe('administración', () => {
     ]);
     invalido(editarUsuarioSchema, { activo: 'no' });
     invalido(editarUsuarioSchema, { password: 'corta' });
+    valido(editarUsuarioSchema, { desbloquear: true });
+    expect(mensajes(editarUsuarioSchema, { desbloquear: false })).toEqual([
+      'El campo desbloquear solo admite true.',
+    ]);
   });
 
   it('crearMaterialSchema', () => {
@@ -502,21 +506,39 @@ describe('novedades y evidencias', () => {
 
 describe('validación del jefe', () => {
   it('aprobarSchema', () => {
-    valido(aprobarSchema, { id: uuidv7(), client_created_at: FECHA });
-    invalido(aprobarSchema, { id: uuidv7() });
+    valido(aprobarSchema, { id: uuidv7(), version: 1, client_created_at: FECHA });
+    invalido(aprobarSchema, { id: uuidv7(), version: 1 });
+    // La versión que vio el jefe es obligatoria (ADR 0010).
+    expect(mensajes(aprobarSchema, { id: uuidv7(), client_created_at: FECHA })).toEqual([
+      'La versión es obligatoria.',
+    ]);
+    invalido(aprobarSchema, { id: uuidv7(), version: 0, client_created_at: FECHA });
+    invalido(aprobarSchema, { id: uuidv7(), version: 1.5, client_created_at: FECHA });
   });
 
   it('rechazarSchema exige motivo de 3 a 500 caracteres', () => {
     valido(rechazarSchema, {
       id: uuidv7(),
+      version: 2,
       motivo: 'Lote no coincide con la remisión.',
       client_created_at: FECHA,
     });
     expect(
-      mensajes(rechazarSchema, { id: uuidv7(), motivo: ' no ', client_created_at: FECHA }),
+      mensajes(rechazarSchema, {
+        id: uuidv7(),
+        version: 1,
+        motivo: ' no ',
+        client_created_at: FECHA,
+      }),
     ).toEqual(['El motivo del rechazo debe tener al menos 3 caracteres.']);
-    invalido(rechazarSchema, { id: uuidv7(), client_created_at: FECHA });
-    invalido(rechazarSchema, { id: uuidv7(), motivo: 'x'.repeat(501), client_created_at: FECHA });
+    invalido(rechazarSchema, { id: uuidv7(), version: 1, client_created_at: FECHA });
+    invalido(rechazarSchema, {
+      id: uuidv7(),
+      version: 1,
+      motivo: 'x'.repeat(501),
+      client_created_at: FECHA,
+    });
+    invalido(rechazarSchema, { id: uuidv7(), motivo: 'Motivo válido', client_created_at: FECHA });
   });
 });
 
@@ -546,7 +568,7 @@ describe('sincronización', () => {
         mutation_id: uuidv7(),
         client_created_at: FECHA,
         tipo: 'consumo.aprobar',
-        payload: { id: uuidv7(), consumption_id: consumo.id, client_created_at: FECHA },
+        payload: { id: uuidv7(), consumption_id: consumo.id, version: 1, client_created_at: FECHA },
       },
       {
         mutation_id: uuidv7(),
@@ -555,6 +577,7 @@ describe('sincronización', () => {
         payload: {
           id: uuidv7(),
           consumption_id: consumo.id,
+          version: 1,
           motivo: 'Cantidad no corresponde.',
           client_created_at: FECHA,
         },
@@ -588,9 +611,14 @@ describe('sincronización', () => {
       const sinConsumo: Record<string, unknown> = { ...aprobar.payload };
       delete sinConsumo.consumption_id;
       invalido(mutacionSchema, { ...aprobar, payload: sinConsumo });
+      // También exigen la versión del consumo que vio el jefe (ADR 0010).
+      const sinVersion: Record<string, unknown> = { ...aprobar.payload };
+      delete sinVersion.version;
+      invalido(mutacionSchema, { ...aprobar, payload: sinVersion });
     }
     if (rechazar?.tipo === 'consumo.rechazar') {
       invalido(mutacionSchema, { ...rechazar, payload: { ...rechazar.payload, motivo: '' } });
+      invalido(mutacionSchema, { ...rechazar, payload: { ...rechazar.payload, version: 0 } });
     }
     invalido(mutacionSchema, { tipo: 'consumo.crear' });
   });

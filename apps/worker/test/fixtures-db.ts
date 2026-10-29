@@ -136,24 +136,27 @@ export function valoresValidacion(
   };
 }
 
-/** Sentencia que cambia el estado de un consumo incrementando `version` (como lo hará el Worker). */
+/**
+ * UPDATE directo del estado (incrementando `version`). Desde la ADR 0010 el Worker NO lo hace: el
+ * estado lo aplica el trigger `validations_aplica_decision`. Se usa solo en pruebas negativas.
+ */
 export function sentenciaDecidir(consumoId: string, estado: 'aprobado' | 'rechazado') {
   return env.DB.prepare(
     'UPDATE consumptions SET estado = ?, version = version + 1, updated_at = ? WHERE id = ?',
   ).bind(estado, ahora(), consumoId);
 }
 
-/** Inserta la validación y cambia el estado en el mismo batch (orden exigido por los triggers). */
+/**
+ * Decide un consumo: basta con insertar la validación; el trigger `validations_aplica_decision`
+ * pone `estado = decision` y `version + 1` en el mismo INSERT (ADR 0010).
+ */
 export async function decidir(
   consumoId: string,
   validadoPor: string,
   decision: 'aprobado' | 'rechazado',
 ): Promise<void> {
   const motivo = decision === 'rechazado' ? 'Cantidad mal digitada' : null;
-  await env.DB.batch([
-    sentenciaInsert('validations', valoresValidacion(consumoId, validadoPor, decision, motivo)),
-    sentenciaDecidir(consumoId, decision),
-  ]);
+  await insertar('validations', valoresValidacion(consumoId, validadoPor, decision, motivo));
 }
 
 export async function crearNovedad(consumoId: string, registradoPor: string) {

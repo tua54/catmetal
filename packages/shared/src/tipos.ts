@@ -150,3 +150,19 @@ export interface Perfil {
   rol: Rol;
   permisos: Permiso[];
 }
+
+/** Respuesta de `POST /auth/login` y `POST /auth/refresh` (el refresh token va en la cookie). */
+export interface RespuestaSesion {
+  access_token: string;
+  /** Segundos de vida del access token. */
+  expira_en: number;
+  /** Dispositivo de la sesión (puede diferir del propuesto si pertenecía a otro usuario). */
+  device_id: string;
+  usuario: Perfil;
+}
+
+/** Respuesta de `GET /users` (paginación por cursor: el `id` del último usuario). */
+export interface ListaUsuarios {
+  usuarios: Usuario[];
+  siguiente_cursor: string | null;
+}

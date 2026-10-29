@@ -17,7 +17,7 @@ interface FilaSesion {
   familia_vigente: number;
 }
 
-const CONSULTA_SESION = `
+export const CONSULTA_SESION = `
   SELECT u.rol AS rol, u.activo AS activo,
     EXISTS (
       SELECT 1 FROM refresh_tokens AS r

@@ -42,6 +42,16 @@ export const COLUMNAS_AUDITABLES = {
 
 export type EntidadAuditada = keyof typeof COLUMNAS_AUDITABLES;
 
+/**
+ * Columnas booleanas de la lista blanca: en D1 son 0/1, en la auditoría se guardan como
+ * `true/false`, igual que en la API y en el seed (ADR 0010, H13).
+ */
+export const COLUMNAS_BOOLEANAS: Readonly<Record<EntidadAuditada, readonly string[]>> = {
+  users: ['activo'],
+  refresh_tokens: [],
+  devices: [],
+};
+
 export type DatosAuditoria = Record<string, unknown>;
 
 export interface EntradaAuditoria {
@@ -51,6 +61,11 @@ export interface EntradaAuditoria {
   /** NULL en acciones del sistema. */
   actor_id: string | null;
   device_id: string | null;
+  /**
+   * Orden a la que pertenece la entidad (orden, asignación, plan, consumo, novedad, evidencia,
+   * validación). Obligatorio para esas entidades (ADR 0010); NULL en las demás.
+   */
+  order_id?: string | null;
   antes?: DatosAuditoria | null;
   despues?: DatosAuditoria | null;
   /** Hora del dispositivo (si la acción viene de un dispositivo). */
@@ -65,7 +80,17 @@ export interface CondicionSql {
   parametros: readonly (string | number | null)[];
 }
 
-/** Copia solo las columnas de la lista blanca de la entidad. */
+function normalizarBooleano(valor: unknown): unknown {
+  if (valor === 1 || valor === true) {
+    return true;
+  }
+  if (valor === 0 || valor === false) {
+    return false;
+  }
+  return valor;
+}
+
+/** Copia solo las columnas de la lista blanca de la entidad y normaliza sus booleanos. */
 export function filtrarDatos(
   entidad: EntidadAuditada,
   datos: DatosAuditoria | null | undefined,
@@ -74,10 +99,14 @@ export function filtrarDatos(
     return null;
   }
   const permitidas: readonly string[] = COLUMNAS_AUDITABLES[entidad];
+  const booleanas = COLUMNAS_BOOLEANAS[entidad];
   return Object.fromEntries(
-    Object.entries(datos).filter(
-      ([clave, valor]) => permitidas.includes(clave) && valor !== undefined,
-    ),
+    Object.entries(datos)
+      .filter(([clave, valor]) => permitidas.includes(clave) && valor !== undefined)
+      .map(([clave, valor]) => [
+        clave,
+        booleanas.includes(clave) ? normalizarBooleano(valor) : valor,
+      ]),
   );
 }
 
@@ -94,8 +123,8 @@ export function calcularAlertaReloj(
 }
 
 const COLUMNAS_INSERT =
-  'id, entidad, entidad_id, accion, actor_id, device_id, datos_antes, datos_despues, client_at, server_at, alerta_reloj, created_at, updated_at';
-const MARCADORES = Array.from({ length: 13 }, () => '?').join(', ');
+  'id, entidad, entidad_id, accion, order_id, actor_id, device_id, datos_antes, datos_despues, client_at, server_at, alerta_reloj, created_at, updated_at';
+const MARCADORES = Array.from({ length: 14 }, () => '?').join(', ');
 
 function valores(entrada: EntradaAuditoria): (string | number | null)[] {
   if (!Object.hasOwn(COLUMNAS_AUDITABLES, entrada.entidad)) {
@@ -109,6 +138,7 @@ function valores(entrada: EntradaAuditoria): (string | number | null)[] {
     entrada.entidad,
     entrada.entidad_id,
     entrada.accion,
+    entrada.order_id ?? null,
     entrada.actor_id,
     entrada.device_id,
     antes === null ? null : JSON.stringify(antes),

@@ -274,3 +274,54 @@ describe('auditoría', () => {
     expect(results[1]).toMatchObject({ accion: 'prueba.si', alerta_reloj: 0, client_at: null });
   });
 });
+
+describe('auditoría: order_id y booleanos (ADR 0010)', () => {
+  it('normaliza los booleanos de la lista blanca a true/false', () => {
+    expect(filtrarDatos('users', { id: 'u', activo: 1 })).toEqual({ id: 'u', activo: true });
+    expect(filtrarDatos('users', { id: 'u', activo: 0 })).toEqual({ id: 'u', activo: false });
+    expect(filtrarDatos('users', { id: 'u', activo: true })).toEqual({ id: 'u', activo: true });
+    // Un valor que no es booleano se deja tal cual (no se inventa un dato).
+    expect(filtrarDatos('users', { id: 'u', activo: null })).toEqual({ id: 'u', activo: null });
+    // Las columnas no booleanas no se tocan.
+    expect(filtrarDatos('users', { id: 'u', intentos_fallidos: 1 })).toEqual({
+      id: 'u',
+      intentos_fallidos: 1,
+    });
+  });
+
+  it('escribe order_id cuando se indica y NULL cuando no', async () => {
+    const entidadId = uuidv7();
+    const orden = uuidv7();
+    await env.DB.batch([
+      sentenciaAuditoria(env.DB, {
+        entidad: 'users',
+        entidad_id: entidadId,
+        accion: 'prueba.con_orden',
+        order_id: orden,
+        actor_id: null,
+        device_id: null,
+        despues: { id: entidadId, activo: 1 },
+      }),
+      sentenciaAuditoria(env.DB, {
+        entidad: 'users',
+        entidad_id: entidadId,
+        accion: 'prueba.sin_orden',
+        actor_id: null,
+        device_id: null,
+      }),
+    ]);
+    const { results } = await env.DB.prepare(
+      'SELECT accion, order_id, datos_despues FROM audit_log WHERE entidad_id = ? ORDER BY seq',
+    )
+      .bind(entidadId)
+      .all();
+    expect(results).toEqual([
+      {
+        accion: 'prueba.con_orden',
+        order_id: orden,
+        datos_despues: JSON.stringify({ id: entidadId, activo: true }),
+      },
+      { accion: 'prueba.sin_orden', order_id: null, datos_despues: null },
+    ]);
+  });
+});

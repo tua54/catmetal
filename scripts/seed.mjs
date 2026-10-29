@@ -290,25 +290,28 @@ function literal(valor) {
 /**
  * Descripción de cada tabla: clave (para ubicar la fila), expresión de `entidad_id` (las PK
  * compuestas se escriben `<order_id>:<otro_id>`), columnas booleanas (van como true/false en el JSON,
- * igual que las expone Drizzle) y columnas que nunca entran en la auditoría.
+ * igual que las expone Drizzle), columnas que nunca entran en la auditoría y la expresión de
+ * `audit_log.order_id` de las entidades que pertenecen a una orden (ADR 0010).
  */
 const TABLAS = {
   users: { clave: ['id'], entidadId: 'id', booleanos: ['activo'], secretas: ['password_hash'] },
   materials: { clave: ['id'], entidadId: 'id', booleanos: ['activo'] },
-  production_orders: { clave: ['id'], entidadId: 'id' },
+  production_orders: { clave: ['id'], entidadId: 'id', orderId: 'id' },
   order_supervisors: {
     clave: ['order_id', 'user_id'],
     entidadId: "order_id || ':' || user_id",
+    orderId: 'order_id',
     booleanos: ['activo'],
   },
   order_planned_materials: {
     clave: ['order_id', 'material_id'],
     entidadId: "order_id || ':' || material_id",
+    orderId: 'order_id',
   },
 };
 
 function sentenciasDe(tabla, fila, idAuditoria) {
-  const { clave, entidadId, booleanos = [], secretas = [] } = TABLAS[tabla];
+  const { clave, entidadId, orderId = 'NULL', booleanos = [], secretas = [] } = TABLAS[tabla];
   const columnas = Object.keys(fila);
   const insercion =
     `INSERT INTO ${tabla} (${columnas.join(', ')})\n` +
@@ -325,10 +328,10 @@ function sentenciasDe(tabla, fila, idAuditoria) {
   const filtro = clave.map((c) => `${c} = ${literal(fila[c])}`).join(' AND ');
   const auditoria =
     'INSERT INTO audit_log (\n' +
-    '  id, entidad, entidad_id, accion, actor_id, device_id, datos_antes, datos_despues,\n' +
+    '  id, entidad, entidad_id, accion, order_id, actor_id, device_id, datos_antes, datos_despues,\n' +
     '  client_at, server_at, alerta_reloj, created_at, updated_at\n' +
     ')\n' +
-    `SELECT ${literal(idAuditoria)}, '${tabla}', ${entidadId}, 'seed', NULL, NULL, NULL,\n` +
+    `SELECT ${literal(idAuditoria)}, '${tabla}', ${entidadId}, 'seed', ${orderId}, NULL, NULL, NULL,\n` +
     `  json_object(${pares.join(', ')}),\n` +
     '  NULL, created_at, 0, created_at, created_at\n' +
     `FROM ${tabla} WHERE ${filtro}\n` +

@@ -1,10 +1,9 @@
 // POST /api/v1/auth/refresh y /logout: rotación, reutilización, ventana de gracia y concurrencia
 // (ADR 0008 puntos 2 y 3).
-import { MENSAJES_ERROR, VENTANA_GRACIA_REFRESH_MS } from '@catmetal/shared';
+import { MENSAJES_ERROR, type RespuestaSesion, VENTANA_GRACIA_REFRESH_MS } from '@catmetal/shared';
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 import { hashRefreshToken } from '../src/auth/tokens';
-import type { RespuestaSesion } from '../src/rutas/auth';
 import {
   cookieRefresh,
   crearUsuarioConClave,
