@@ -30,3 +30,5 @@ Cada pregunta lleva el **supuesto aplicado** mientras el cliente no responda. Lo
 | P17 | Política de contraseñas. | Mínimo 10 caracteres. Sin reglas de composición (NIST SP 800-63B). |
 | P18 | ¿Cómo escriben los operarios las cantidades: "1.234" es mil doscientos treinta y cuatro o uno coma dos tres cuatro? | Un único separador que aparece una vez es decimal ("1.234" = 1,234; "125,5" = 125,5). Si aparecen los dos, el último es el decimal. La pantalla de registro muestra la cantidad interpretada antes de guardar. |
 | P19 | ¿Cuántas veces se puede corregir un consumo rechazado? | Una sola corrección por consumo rechazado (índice único parcial en `corrige_a`). Si la corrección también se rechaza, se corrige la corrección. |
+| P20 | ¿Todos los materiales tienen lote? (p. ej. arena a granel). | `lote` es obligatorio (1–64 caracteres). Si un material no tiene lote, el operario escribe "SIN LOTE". Pendiente de confirmar con el cliente antes de relajar la regla. |
+| P21 | ¿Las fotos del iPad (HEIC) se aceptan? | El servidor solo acepta JPEG, PNG y WebP. La PWA recomprime siempre a JPEG o WebP con `browser-image-compression` antes de guardar. |
