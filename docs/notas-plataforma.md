@@ -54,3 +54,9 @@ Fuente: informe de `documentation-researcher` (URLs en cada punto).
 - Errores de D1 por trigger: `D1_ERROR: <mensaje del RAISE>: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_TRIGGER)`. Los CHECK fallidos incluyen el nombre de la restricción.
 - `notnull` es palabra reservada en SQLite: no sirve como alias.
 - En el pool de Workers no hay `fs`: las pruebas que necesitan leer archivos del repo reciben el contenido como binding generado en `vitest.config.mjs` (igual que `TEST_MIGRATIONS`).
+
+## Workers (runtime)
+
+- `crypto.getRandomValues` en workerd acepta como máximo 64 KiB por llamada.
+- D1 rechaza `sqlite_version()` ("not authorized"). Los errores de FOREIGN KEY de D1 no indican tabla ni columna.
+- En D1, `LIKE ?` con patrones largos construidos a partir de UUID o correos falló con "LIKE or GLOB pattern too complex"; usar `instr()` o rangos.
