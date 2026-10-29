@@ -74,3 +74,5 @@ No se usan `mvc-dotnet-developer`, `angular-developer` ni `orchestrator`.
 
 - 2.1 Infraestructura de comandos de dominio, materiales, settings, órdenes y asignaciones (general-purpose), en curso.
 - **Tarea adelantada 4.1** (sistema visual y componentes base, `ui-ux-designer`, ADR 0011): se ejecuta en paralelo con la Fase 2 porque solo toca `apps/web/src/components/ui` y no depende del backend. Su commit lleva `Fase: 4`.
+- 2.1 confirmada. 4.1 (adelantada) confirmada: 76 pruebas de componentes.
+- En paralelo: 2.2 (consumos, novedades, evidencias), 2.4 (auditoría y reportes) y **tarea adelantada 3.3** (capa Dexie + outbox, `react-developer`, ADR 0012; solo toca `apps/web/src/datos`).
