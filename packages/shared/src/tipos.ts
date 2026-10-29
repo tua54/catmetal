@@ -240,3 +240,23 @@ export interface SupervisoresDeOrden {
   order_id: string;
   supervisores: SupervisorAsignado[];
 }
+
+/** Novedad con los metadatos de sus evidencias (sin `storage_key`). */
+export interface NovedadConEvidencias extends Novedad {
+  evidencias: Evidencia[];
+}
+
+/** Consumo con sus novedades, evidencias y validación (lista de consumos de una orden). */
+export interface ConsumoDetallado extends Consumo {
+  /** `requiere_novedad` y todavía sin ninguna novedad registrada ("Falta justificar la novedad"). */
+  falta_novedad: boolean;
+  novedades: NovedadConEvidencias[];
+  /** Decisión del jefe (con el motivo si se rechazó), o `null` si sigue pendiente. */
+  validacion: Validacion | null;
+}
+
+/** Respuesta de `GET /orders/:id/consumptions` (paginación por cursor: el `id` del último consumo). */
+export interface ListaConsumos {
+  consumos: ConsumoDetallado[];
+  siguiente_cursor: string | null;
+}

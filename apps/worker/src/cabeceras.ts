@@ -47,7 +47,9 @@ export const cabecerasSeguridad: MiddlewareHandler = async (c, next) => {
   for (const [nombre, valor] of Object.entries(CABECERAS_SEGURIDAD)) {
     cabeceras.set(nombre, valor);
   }
-  if (esRutaApi(c.req.path)) {
+  // Una ruta puede fijar su propio Cache-Control solo si también prohíbe guardar la respuesta (por
+  // ejemplo `private, no-store` en GET /evidences/:id); cualquier otro valor se reemplaza.
+  if (esRutaApi(c.req.path) && !(cabeceras.get('Cache-Control') ?? '').includes('no-store')) {
     cabeceras.set('Cache-Control', 'no-store');
   }
 };
