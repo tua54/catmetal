@@ -166,3 +166,77 @@ export interface ListaUsuarios {
   usuarios: Usuario[];
   siguiente_cursor: string | null;
 }
+
+/** Respuesta de `GET /materials` (paginación por cursor: el `id` del último material). */
+export interface ListaMateriales {
+  materiales: Material[];
+  siguiente_cursor: string | null;
+}
+
+/** Respuesta de `GET /settings` y de `PATCH /settings/tolerancia`. */
+export interface Configuracion {
+  /** Tolerancia global sobre lo planeado, en porcentaje (S7, P11). */
+  tolerancia_pct: number;
+}
+
+/** Respuesta de `GET /orders` (paginación por cursor: el `id` de la última orden). */
+export interface ListaOrdenes {
+  ordenes: Orden[];
+  siguiente_cursor: string | null;
+}
+
+/** Supervisor con asignación activa en una orden. */
+export interface SupervisorAsignado {
+  user_id: string;
+  nombre: string;
+  /** Admin que hizo (o reactivó) la asignación. */
+  asignado_por: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Consumo vs plan de un material planeado de la orden. */
+export interface AvanceMaterial {
+  material_id: string;
+  codigo: string;
+  nombre: string;
+  /** Unidad del plan (la de `cantidad_planeada` y `consumido`). */
+  unidad: Unidad;
+  cantidad_planeada: number;
+  /** Σ `cantidad_en_unidad_plan` de los consumos no rechazados (pendientes y aprobados). */
+  consumido: number;
+  /** `consumido / cantidad_planeada × 100`, con 2 decimales. */
+  porcentaje: number;
+  /** `excedeTolerancia(cantidad_planeada, consumido, tolerancia_pct)` (S7). */
+  excede_tolerancia: boolean;
+}
+
+/** Consumo (no rechazado) de un material que no está en el plan de la orden (P10). */
+export interface ConsumoFueraDePlan {
+  material_id: string;
+  codigo: string;
+  nombre: string;
+  /** Unidad del material (P10: sin plan, la cantidad se guarda en la unidad del material). */
+  unidad: Unidad;
+  consumido: number;
+}
+
+/** Respuesta de `GET /orders/:id`: la orden con su plan, el consumo vs plan y sus supervisores. */
+export interface DetalleOrden extends Orden {
+  /** Tolerancia vigente con la que se calculó `excede_tolerancia`. */
+  tolerancia_pct: number;
+  materiales: AvanceMaterial[];
+  materiales_fuera_de_plan: ConsumoFueraDePlan[];
+  supervisores: SupervisorAsignado[];
+}
+
+/** Respuesta de `POST /orders`: la orden creada (estado `planeada`) con sus materiales planeados. */
+export interface OrdenCreada extends Orden {
+  materiales: MaterialPlaneado[];
+}
+
+/** Respuesta de `PUT /orders/:id/supervisors`: la lista resultante de supervisores activos. */
+export interface SupervisoresDeOrden {
+  order_id: string;
+  supervisores: SupervisorAsignado[];
+}

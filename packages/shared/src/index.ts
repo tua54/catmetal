@@ -7,6 +7,7 @@ export * from './formato';
 export * from './fechas';
 export * from './uuid';
 export * from './esquemas';
+export * from './consultas';
 export type * from './tipos';
 
 /** Nombre del paquete (lo usan las pruebas de humo de los demás paquetes). */

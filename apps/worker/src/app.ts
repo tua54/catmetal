@@ -7,8 +7,16 @@ import { Hono } from 'hono';
 import { cabecerasSeguridad } from './cabeceras';
 import { manejarError, manejarNoEncontrado } from './errores';
 import { verificarOrigen } from './middleware/origen';
+import { crearRutasAuditoria } from './rutas/auditoria';
 import { crearRutasAuth } from './rutas/auth';
+import { crearRutasConsumos } from './rutas/consumos';
+import { crearRutasEvidencias } from './rutas/evidencias';
+import { crearRutasMateriales } from './rutas/materiales';
+import { crearRutasOrdenes } from './rutas/ordenes';
+import { crearRutasReportes } from './rutas/reportes';
+import { crearRutasSettings } from './rutas/settings';
 import { crearRutasUsuarios } from './rutas/usuarios';
+import { crearRutasValidaciones } from './rutas/validaciones';
 import type { AppEnv } from './tipos';
 
 /** Rutas de la API bajo `/api/v1`. */
@@ -20,6 +28,17 @@ function crearApi(): Hono<AppEnv> {
   );
   api.route('/auth', crearRutasAuth());
   api.route('/users', crearRutasUsuarios());
+  api.route('/materials', crearRutasMateriales());
+  api.route('/settings', crearRutasSettings());
+  api.route('/orders', crearRutasOrdenes());
+  // Sub-apps de las tareas 2.2–2.4: se montan en la raíz y declaran sus rutas completas, porque
+  // comparten prefijos (`/orders/:id/consumptions`, `/consumptions/:id/approve`). Así cada tarea
+  // edita solo su archivo de rutas.
+  api.route('/', crearRutasConsumos());
+  api.route('/', crearRutasEvidencias());
+  api.route('/', crearRutasValidaciones());
+  api.route('/', crearRutasAuditoria());
+  api.route('/', crearRutasReportes());
 
   return api;
 }

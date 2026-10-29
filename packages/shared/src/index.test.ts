@@ -30,6 +30,8 @@ describe('@catmetal/shared', () => {
       'mutacionSchema',
       'syncPushRequestSchema',
       'syncPullQuerySchema',
+      'listarOrdenesQuerySchema',
+      'idParamSchema',
     ];
     for (const nombre of esperados) {
       expect(shared, nombre).toHaveProperty(nombre);
