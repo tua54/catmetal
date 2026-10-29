@@ -69,3 +69,8 @@ No se usan `mvc-dotnet-developer`, `angular-developer` ni `orchestrator`.
 - 1.7 Aplicación de la revisión (general-purpose): ADR 0010, migraciones 0003–0004, 34 triggers.
 - Preguntas nuevas: P20 (lote obligatorio), P21 (fotos HEIC).
 - Cierre: gates en verde, 466 pruebas. Evidencia: `docs/evidencia/fase-1.md`.
+
+### Fase 2 — API de negocio (en curso)
+
+- 2.1 Infraestructura de comandos de dominio, materiales, settings, órdenes y asignaciones (general-purpose), en curso.
+- **Tarea adelantada 4.1** (sistema visual y componentes base, `ui-ux-designer`, ADR 0011): se ejecuta en paralelo con la Fase 2 porque solo toca `apps/web/src/components/ui` y no depende del backend. Su commit lleva `Fase: 4`.
