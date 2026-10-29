@@ -28,3 +28,5 @@ Cada pregunta lleva el **supuesto aplicado** mientras el cliente no responda. Lo
 | P15 | ¿Se puede agregar una novedad a un consumo que ya tiene una? | Sí, se permiten varias novedades por consumo (la tabla `incidents` lo admite). Para aprobar basta con al menos una. |
 | P16 | ¿Las órdenes canceladas se pueden reabrir? | No en la v1. No hay endpoint para cancelar en la spec: se añade `POST /orders/:id/cancel` (jefe/admin) solo si se necesita; por ahora no se expone. |
 | P17 | Política de contraseñas. | Mínimo 10 caracteres. Sin reglas de composición (NIST SP 800-63B). |
+| P18 | ¿Cómo escriben los operarios las cantidades: "1.234" es mil doscientos treinta y cuatro o uno coma dos tres cuatro? | Un único separador que aparece una vez es decimal ("1.234" = 1,234; "125,5" = 125,5). Si aparecen los dos, el último es el decimal. La pantalla de registro muestra la cantidad interpretada antes de guardar. |
+| P19 | ¿Cuántas veces se puede corregir un consumo rechazado? | Una sola corrección por consumo rechazado (índice único parcial en `corrige_a`). Si la corrección también se rechaza, se corrige la corrección. |
