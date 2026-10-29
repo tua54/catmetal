@@ -312,9 +312,6 @@ importers:
       '@cloudflare/vitest-plugin':
         specifier: 1.4.11
         version: 1.4.11(@cloudflare/workers-types@5.20261028.1)(@types/node@26.6.6)(vitest@4.1.12)
-      '@cloudflare/workers-types':
-        specifier: 5.20261028.1
-        version: 5.20261028.1
       '@vitest/coverage-istanbul':
         specifier: 4.1.12
         version: 4.1.12(supports-color@10.2.2)(vitest@4.1.12)
@@ -5008,7 +5005,8 @@ snapshots:
   '@cloudflare/workerd-windows-64@1.20261023.1':
     optional: true
 
-  '@cloudflare/workers-types@5.20261028.1': {}
+  '@cloudflare/workers-types@5.20261028.1':
+    optional: true
 
   '@cspotcode/source-map-support@0.8.1':
     dependencies:

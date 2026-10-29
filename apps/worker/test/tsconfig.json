@@ -1,0 +1,8 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    // Módulos `cloudflare:test` y `cloudflare:workers` del pool de Vitest.
+    "types": ["@cloudflare/vitest-plugin/types"]
+  },
+  "include": ["./**/*.ts", "../src", "../worker-configuration.d.ts"]
+}

@@ -1,10 +1,20 @@
-// Esqueleto mínimo del Worker. La app Hono y los bindings se configuran en la tarea 0.3.
-import { NOMBRE_PAQUETE } from '@catmetal/shared';
+// Punto de entrada del Worker: `fetch` (PWA + API) y `scheduled` (cron diario).
 
-export const NOMBRE_SERVICIO = 'catmetal-worker';
+import { app } from './app';
+import { registrar } from './log';
+
+/**
+ * Cron `0 8 * * *` (03:00 en Bogotá). En la Fase 6 hará el backup paginado de D1 a R2 y el
+ * mantenimiento; por ahora solo deja constancia de la ejecución.
+ */
+const scheduled: ExportedHandlerScheduledHandler<Env> = (controller) => {
+  registrar('info', 'cron_ejecutado', {
+    cron: controller.cron,
+    programado_para: new Date(controller.scheduledTime).toISOString(),
+  });
+};
 
 export default {
-  fetch(): Response {
-    return Response.json({ servicio: NOMBRE_SERVICIO, shared: NOMBRE_PAQUETE });
-  },
-} satisfies ExportedHandler;
+  fetch: app.fetch,
+  scheduled,
+} satisfies ExportedHandler<Env>;

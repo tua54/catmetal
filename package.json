@@ -9,7 +9,9 @@
     "node": ">=22"
   },
   "scripts": {
-    "dev": "node -e \"console.log('pnpm dev se completa en la tarea 0.3 (wrangler dev + vite)')\"",
+    "dev": "node scripts/dev.mjs",
+    "setup:dev-vars": "node scripts/gen-dev-vars.mjs",
+    "db:migrate:local": "pnpm --filter @catmetal/worker db:migrate:local",
     "lint": "eslint .",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r --workspace-concurrency=1 test",

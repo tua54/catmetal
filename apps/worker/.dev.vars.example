@@ -1,0 +1,11 @@
+# Variables secretas del Worker en desarrollo local.
+# No escriba valores aquí: genere apps/worker/.dev.vars con valores aleatorios ejecutando
+#   pnpm setup:dev-vars
+# (.dev.vars está en .gitignore y nunca se versiona).
+
+# Firma de los access tokens (JWT HS256). 32 bytes aleatorios en base64url.
+JWT_SECRET=
+# Clave para derivar/firmar los refresh tokens. 32 bytes aleatorios en base64url.
+REFRESH_SECRET=
+# Contraseña de los usuarios del seed local. Solo para la base local.
+SEED_PASSWORD=

@@ -5,8 +5,11 @@
   "type": "module",
   "description": "Worker de Cloudflare: API /api/v1 (Hono) y PWA como Static Assets",
   "scripts": {
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "dev": "wrangler dev --ip 127.0.0.1 --port 8787",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local",
+    "cf-typegen": "wrangler types",
+    "typecheck": "wrangler types --check && tsc --noEmit && tsc --noEmit -p test",
+    "test": "node ../../scripts/ensure-web-dist.mjs && vitest run --coverage"
   },
   "dependencies": {
     "@catmetal/shared": "workspace:*",
@@ -18,7 +21,6 @@
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "1.4.11",
-    "@cloudflare/workers-types": "5.20261028.1",
     "@vitest/coverage-istanbul": "4.1.12",
     "drizzle-kit": "0.31.11",
     "typescript": "6.0.3",

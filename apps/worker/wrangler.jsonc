@@ -1,0 +1,170 @@
+// Configuración del Worker de Control de Materia Prima · Catmetal S.A.S.
+//
+// - El nivel superior es el entorno de DESARROLLO LOCAL (`wrangler dev`, pruebas con Vitest):
+//   D1, R2, KV y Rate Limiting se simulan en `.wrangler/state` y nunca tocan la cuenta de Cloudflare.
+// - `env.staging` y `env.production` describen los entornos remotos. Sus IDs son marcadores
+//   `REEMPLAZAR_CON_ID_...` que el equipo humano completa al crear los recursos (docs/despliegue.md).
+// - Los bindings, `vars` y `ratelimits` NO se heredan entre entornos: se repiten en cada uno.
+//   `assets`, `triggers` y `observability` sí se heredan del nivel superior.
+// - Secretos (`JWT_SECRET`, `REFRESH_SECRET`): en local salen de `.dev.vars` (ignorado por git,
+//   lo genera `node scripts/gen-dev-vars.mjs`); en remoto son secrets de Wrangler. Nunca van aquí.
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "catmetal-mp",
+  "main": "src/index.ts",
+  // Fecha soportada por el workerd instalado (wrangler 4.156.0 / workerd 1.20261023.1).
+  "compatibility_date": "2026-10-01",
+
+  // Un solo Worker sirve la PWA y la API (ADR 0004): el Worker atiende TODAS las rutas para aplicar
+  // las cabeceras de seguridad; `/api/*` lo resuelve Hono y el resto se delega a `env.ASSETS.fetch`,
+  // que aplica `not_found_handling` (las rutas de la SPA devuelven index.html).
+  "assets": {
+    "directory": "../web/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": true,
+  },
+
+  // Cron diario a las 08:00 UTC (03:00 en Bogotá, fuera de turno): backup y mantenimiento (Fase 6).
+  "triggers": {
+    "crons": ["0 8 * * *"],
+  },
+
+  // Workers Logs: los logs estructurados del Worker quedan disponibles en el panel.
+  "observability": {
+    "enabled": true,
+  },
+
+  // Variables no secretas del entorno local. `ORIGENES_DEV` lista los orígenes que, solo en desarrollo,
+  // se aceptan además del propio en la verificación de `Origin` (proxy de Vite, ADR 0002).
+  "vars": {
+    "ENTORNO": "local",
+    "ORIGENES_DEV": "http://localhost:5173,http://127.0.0.1:5173",
+  },
+
+  // Secretos que el Worker exige (no se heredan: se repiten en cada entorno). Con esta lista,
+  // `wrangler types` los tipa sin leer `.dev.vars` y `wrangler dev` avisa si falta alguno.
+  "secrets": {
+    "required": ["JWT_SECRET", "REFRESH_SECRET"],
+  },
+
+  // D1: fuente de verdad. En local el `database_id` es un marcador; wrangler crea la base en
+  // `.wrangler/state`. Las migraciones SQL viven en /migrations (raíz del monorepo).
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "mp-local",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "../../migrations",
+    },
+  ],
+
+  // R2: evidencias (fotos) y backups. El bucket nunca es público.
+  "r2_buckets": [
+    {
+      "binding": "EVIDENCE",
+      "bucket_name": "mp-evidencias-local",
+    },
+  ],
+
+  // KV: solo caché opcional de datos no críticos. Nada de seguridad ni de negocio vive solo aquí.
+  "kv_namespaces": [
+    {
+      "binding": "CONFIG",
+      "id": "mp-config-local",
+    },
+  ],
+
+  // Rate Limiting: primer filtro contra fuerza bruta en el login (clave IP + email, 5 por 60 s).
+  // Es aproximado y por ubicación; la garantía es el contador en D1 (docs/spec.md §5).
+  "ratelimits": [
+    {
+      "name": "LOGIN_LIMITER",
+      "namespace_id": "1001",
+      "simple": { "limit": 5, "period": 60 },
+    },
+  ],
+
+  "env": {
+    // Staging: se despliega solo de forma manual (workflow_dispatch con environment protegido).
+    "staging": {
+      "vars": {
+        "ENTORNO": "staging",
+        // Vacío: fuera de desarrollo solo se acepta el propio origen.
+        "ORIGENES_DEV": "",
+      },
+      "secrets": {
+        "required": ["JWT_SECRET", "REFRESH_SECRET"],
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "mp-staging",
+          // Marcador: reemplazar con el ID real de la D1 de staging (docs/despliegue.md).
+          "database_id": "REEMPLAZAR_CON_ID_D1_STAGING",
+          "migrations_dir": "../../migrations",
+        },
+      ],
+      "r2_buckets": [
+        {
+          "binding": "EVIDENCE",
+          "bucket_name": "mp-evidencias-staging",
+        },
+      ],
+      "kv_namespaces": [
+        {
+          "binding": "CONFIG",
+          // Marcador: reemplazar con el ID real del namespace KV de staging.
+          "id": "REEMPLAZAR_CON_ID_KV_STAGING",
+        },
+      ],
+      "ratelimits": [
+        {
+          "name": "LOGIN_LIMITER",
+          "namespace_id": "1002",
+          "simple": { "limit": 5, "period": 60 },
+        },
+      ],
+    },
+
+    // Producción.
+    "production": {
+      "vars": {
+        "ENTORNO": "production",
+        "ORIGENES_DEV": "",
+      },
+      "secrets": {
+        "required": ["JWT_SECRET", "REFRESH_SECRET"],
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "mp-prod",
+          // Marcador: reemplazar con el ID real de la D1 de producción (docs/despliegue.md).
+          "database_id": "REEMPLAZAR_CON_ID_D1_PRODUCCION",
+          "migrations_dir": "../../migrations",
+        },
+      ],
+      "r2_buckets": [
+        {
+          "binding": "EVIDENCE",
+          "bucket_name": "mp-evidencias-prod",
+        },
+      ],
+      "kv_namespaces": [
+        {
+          "binding": "CONFIG",
+          // Marcador: reemplazar con el ID real del namespace KV de producción.
+          "id": "REEMPLAZAR_CON_ID_KV_PRODUCCION",
+        },
+      ],
+      "ratelimits": [
+        {
+          "name": "LOGIN_LIMITER",
+          "namespace_id": "1003",
+          "simple": { "limit": 5, "period": 60 },
+        },
+      ],
+    },
+  },
+}
