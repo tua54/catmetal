@@ -1,5 +1,6 @@
 import type { RouteObject } from 'react-router';
-import { AppLayout } from './components/layout/AppLayout';
+import { AppLayout, type HandleRuta } from './components/layout/AppLayout';
+import { DisenoPage } from './pages/DisenoPage';
 import { HomePage } from './pages/HomePage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import { RouteErrorPage } from './pages/RouteErrorPage';
@@ -15,6 +16,15 @@ export const routes: RouteObject[] = [
     errorElement: <RouteErrorPage />,
     children: [
       { index: true, element: <HomePage /> },
+      {
+        // Muestra del sistema visual (Tarea 4.1): solo datos de ejemplo, sin API.
+        path: 'diseno',
+        element: <DisenoPage />,
+        handle: {
+          titulo: 'Sistema visual',
+          subtitulo: 'Componentes base · Catmetal',
+        } satisfies HandleRuta,
+      },
       { path: '*', element: <NotFoundPage /> },
     ],
   },

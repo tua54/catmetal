@@ -1,41 +1,55 @@
-import { Link, Outlet } from 'react-router';
-import logoCatmetal from '../../assets/brand/logo-catmetal.png';
+import { Outlet, useMatches } from 'react-router';
+import { BarraSuperior } from '../ui/BarraSuperior';
+import { ProveedorAvisos } from '../ui/ProveedorAvisos';
+
+/** Datos opcionales que cada ruta puede declarar en `handle` para la barra superior. */
+export interface HandleRuta {
+  titulo?: string;
+  subtitulo?: string;
+}
+
+function esHandleRuta(valor: unknown): valor is HandleRuta {
+  return typeof valor === 'object' && valor !== null && 'titulo' in valor;
+}
+
+const TITULO_POR_DEFECTO = 'Control de Materia Prima';
+const SUBTITULO_POR_DEFECTO = 'Catmetal S.A.S.';
 
 /**
- * Estructura común: barra superior en ink-950 con el logo de Catmetal y una línea inferior de 3 px
- * en brand-600 (adaptación de marca de docs/diseno/README.md), y el contenido sobre surface-50.
+ * Estructura común: barra superior (ADR 0011) y contenido sobre surface-50. El título y el
+ * subtítulo salen del `handle` de la ruta más profunda que los declare. La píldora de conexión y el
+ * avatar se conectan en la Fase 4, cuando existan el motor de sync y la sesión.
  */
 export function AppLayout() {
+  const matches = useMatches();
+  const handle = [...matches]
+    .reverse()
+    .map((match) => match.handle)
+    .find(esHandleRuta);
+
   return (
-    <div className="flex min-h-dvh flex-col">
-      <a
-        href="#contenido"
-        className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:rounded-md focus:bg-white focus:px-4 focus:py-3 focus:font-semibold focus:text-brand-600"
-      >
-        Saltar al contenido
-      </a>
+    <ProveedorAvisos>
+      <div className="flex min-h-dvh flex-col">
+        <a
+          href="#contenido"
+          className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:rounded-md focus:bg-white focus:px-4 focus:py-3 focus:font-semibold focus:text-brand-600"
+        >
+          Saltar al contenido
+        </a>
 
-      <header className="border-b-[3px] border-brand-600 bg-ink-950 pt-[env(safe-area-inset-top)] text-white">
-        <div className="mx-auto flex min-h-[74px] w-full max-w-7xl items-center gap-4 px-4 sm:px-6">
-          <Link
-            to="/"
-            className="flex min-h-11 items-center rounded-sm"
-            aria-label="Catmetal · Inicio"
-          >
-            <img src={logoCatmetal} alt="Catmetal" width={180} height={36} className="h-9 w-auto" />
-          </Link>
-          <span aria-hidden="true" className="hidden h-8 w-px bg-white/25 sm:block" />
-          <p className="hidden text-base font-semibold sm:block">Control de Materia Prima</p>
-        </div>
-      </header>
+        <BarraSuperior
+          titulo={handle?.titulo ?? TITULO_POR_DEFECTO}
+          subtitulo={handle?.subtitulo ?? SUBTITULO_POR_DEFECTO}
+        />
 
-      <main
-        id="contenido"
-        tabIndex={-1}
-        className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 focus:outline-none sm:px-6"
-      >
-        <Outlet />
-      </main>
-    </div>
+        <main
+          id="contenido"
+          tabIndex={-1}
+          className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 focus:outline-none sm:px-6"
+        >
+          <Outlet />
+        </main>
+      </div>
+    </ProveedorAvisos>
   );
 }
