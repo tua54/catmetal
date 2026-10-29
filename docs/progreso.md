@@ -54,4 +54,12 @@ No se usan `mvc-dotnet-developer`, `angular-developer` ni `orchestrator`.
 - `software-architect` revisó por adelantado las ADR de la Fase 1 (cursor, triggers, hashes, sesiones): 4 hallazgos altos incorporados (hidratación de órdenes recién asignadas, sobre laxo en /sync/push, user_id del autor en el sobre, época de sync) → ADR 0009 y ADR 0005/0006/0008 reescritas.
 - Decisión menor: `sourcemap: true` en la web se revisa en la Fase 6.
 - Evidencia: `docs/evidencia/fase-0.md`.
-- Incidente: el commit de cierre `4ef958b` dejó este registro con huecos por un error de comillas en bash (sustitución de comandos). Ningún comando dañino se ejecutó (solo falló un `pnpm dev\`). Corregido en el commit siguiente; desde entonces los documentos se editan con las herramientas de edición, no con heredocs.
+- Incidente (fase 0): el commit de cierre `4ef958b` dejó este registro con huecos por un error de comillas en bash (sustitución de comandos). Ningún comando dañino se ejecutó (solo falló un `pnpm dev\`). Corregido en el commit siguiente; desde entonces los documentos se editan con las herramientas de edición, no con heredocs.
+
+### Fase 1 — Base de datos y auth (en curso)
+
+- 1.0 Contratos de shared endurecidos por ADR 0008/0009 (general-purpose).
+- 1.1 Esquema Drizzle, migraciones 0000 (generada), 0001 (26 triggers a mano) y 0002 (settings iniciales con `sync_epoca` aleatoria por base) (general-purpose).
+- 1.2 Seed local idempotente (general-purpose). Credenciales: `admin@catmetal.test`, `jefe@catmetal.test`, `supervisor1@catmetal.test`, `supervisor2@catmetal.test`, contraseña `SEED_PASSWORD` de `apps/worker/.dev.vars`.
+- Decisión menor: en `audit_log`, las claves compuestas usan `entidad_id = '<order_id>:<user_id>'` (`order_supervisors`) y `'<order_id>:<material_id>'` (`order_planned_materials`); `settings` usa su `clave`.
+- Decisión menor: el seed usa `ON CONFLICT DO NOTHING` en vez de `INSERT OR IGNORE` para no ocultar violaciones de CHECK.
