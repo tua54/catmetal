@@ -170,10 +170,43 @@ describe('LoginPage', () => {
     expect(await screen.findByText('Hay 2 registros pendientes de Ana Gómez')).toBeInTheDocument();
 
     const perfiles = screen.getByRole('region', { name: 'Usuarios de esta tablet' });
-    await usuario.click(within(perfiles).getByRole('button', { name: /Ana Gómez/ }));
-    expect(screen.getByLabelText(/^Correo/)).toHaveValue(ana.email);
+    // F4-04: sin autenticar, el login nunca muestra el correo completo ni quién puede entrar sin
+    // conexión; eso último aparece solo tras elegir el perfil.
+    expect(perfiles).not.toHaveTextContent(ana.email);
+    expect(within(perfiles).queryByText(/Puede entrar sin conexión/)).not.toBeInTheDocument();
+    await usuario.click(
+      within(perfiles).getByRole('button', { name: /Ana Gómez\s*s\*\*\*@catmetal\.test/ }),
+    );
+    const correo = screen.getByLabelText(/^Correo/);
+    expect(correo).toHaveValue('s***@catmetal.test');
+    expect(correo).toHaveAttribute('readonly');
+    expect(correo).toHaveAccessibleDescription('Ana Gómez · Puede entrar sin conexión');
+    expect(document.body).not.toHaveTextContent(ana.email);
     expect(screen.getByLabelText(/^Contraseña/)).toHaveFocus();
-    expect(within(perfiles).getByText(/Puede entrar sin conexión/)).toBeInTheDocument();
+  });
+
+  it('con un perfil elegido entra con el correo completo (guardado internamente) y permite usar otro', async () => {
+    const usuario = userEvent.setup();
+    const ana = perfilDe('supervisor', 'Ana Gómez');
+    await guardarPerfilEnTablet(ana);
+    fijarConexion(false);
+    const { router } = renderizarApp('/login');
+
+    const perfiles = await screen.findByRole('region', { name: 'Usuarios de esta tablet' });
+    await usuario.click(within(perfiles).getByRole('button', { name: /Ana Gómez/ }));
+    await usuario.click(screen.getByRole('button', { name: 'Usar otro correo' }));
+    expect(screen.getByLabelText(/^Correo/)).toHaveValue('');
+    expect(screen.getByLabelText(/^Correo/)).not.toHaveAttribute('readonly');
+
+    await usuario.click(within(perfiles).getByRole('button', { name: /Ana Gómez/ }));
+    await usuario.type(screen.getByLabelText(/^Contraseña/), CLAVE);
+    await usuario.click(screen.getByRole('button', { name: 'Iniciar sesión' }));
+
+    expect(
+      await screen.findByRole('heading', { level: 1, name: 'Mis órdenes en proceso' }),
+    ).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe('/supervisor');
+    expect(sesion.estado().usuario?.id).toBe(ana.id);
   });
 
   it('con sesión activa, /login redirige al inicio del rol', async () => {
@@ -195,6 +228,10 @@ describe('mensajeErrorLogin', () => {
     const { ErrorApi, ErrorSesion } = await import('../../auth');
     expect(mensajeErrorLogin(new ErrorSesion('SIN_LOGIN_PREVIO'))).toBe(MENSAJE_SIN_LOGIN_PREVIO);
     expect(mensajeErrorLogin(new ErrorSesion('VALIDACION'))).toMatch(/correo válido/);
+    expect(mensajeErrorLogin(new ErrorSesion('ESPERA_INTENTOS'))).toBe(
+      'Demasiados intentos en esta tablet. Intente más tarde o con conexión.',
+    );
+    expect(mensajeErrorLogin(new ErrorSesion('SIN_CONEXION'))).toMatch(/No hay conexión/);
     expect(mensajeErrorLogin(new ErrorApi('ORIGEN_INVALIDO', 403, 'texto del servidor'))).toBe(
       MENSAJES_ERROR.ORIGEN_INVALIDO,
     );

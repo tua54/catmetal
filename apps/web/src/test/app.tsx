@@ -7,7 +7,7 @@ import { createMemoryRouter, type RouteObject } from 'react-router';
 import { vi } from 'vitest';
 import { App } from '../App';
 import { useArranque } from '../app/estado-arranque';
-import { crearVerificador, sesion } from '../auth';
+import { crearVerificador, MIN_ITERACIONES_VERIFICADOR, sesion } from '../auth';
 import { db } from '../datos/db';
 import { limpiarDb } from '../datos/pruebas/fabricas';
 import { createQueryClient } from '../lib/query-client';
@@ -80,15 +80,16 @@ export function perfilDe(rol: Rol, nombre = NOMBRES[rol]): Perfil {
 }
 
 /**
- * Deja el perfil en la tablet como si hubiera iniciado sesión con conexión antes (verificador con
- * pocas iteraciones para que la prueba sea rápida; el verificador guarda sus iteraciones).
+ * Deja el perfil en la tablet como si hubiera iniciado sesión con conexión antes. El verificador usa
+ * el mínimo de iteraciones aceptado (100.000, ADR 0017 §6): la sesión real de la PWA rechaza los
+ * verificadores más baratos.
  */
 export async function guardarPerfilEnTablet(perfil: Perfil, clave = CLAVE): Promise<void> {
   await db.perfiles.put({
     user_id: perfil.id,
     perfil,
     device_id: uuidv7(),
-    verificador: await crearVerificador(clave, 1_000),
+    verificador: await crearVerificador(clave, MIN_ITERACIONES_VERIFICADOR),
     actualizado_at: '2026-10-29T15:00:00.000Z',
     ultimo_acceso_at: '2026-10-29T15:00:00.000Z',
     cierre_pendiente: false,

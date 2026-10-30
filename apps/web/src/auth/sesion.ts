@@ -1,4 +1,4 @@
-// Sesión de la PWA (docs/spec.md §5; ADR 0008 puntos 1–8; ADR 0012 punto 4).
+// Sesión de la PWA (docs/spec.md §5; ADR 0008 puntos 1–8; ADR 0012 punto 4; ADR 0017).
 //
 // - El access token vive SOLO en un campo privado de esta clase: nunca en el estado publicado, ni en
 //   localStorage, ni en IndexedDB. El refresh token es una cookie HttpOnly que el JS no ve.
@@ -6,10 +6,14 @@
 //   contra el verificador local; puede registrar, pero la sync no corre hasta tener sesión del
 //   servidor (`obtenerAccessToken()` devuelve `null`).
 // - Tablet compartida: hay UNA cookie por origen. Una sesión del servidor solo se adopta si es del
-//   mismo usuario de la sesión local (ADR 0008 punto 8); si no, se pide la contraseña.
+//   mismo usuario de la sesión local (ADR 0008 punto 8); si no, se pide la contraseña. El token
+//   queda ligado a su usuario: nunca se entrega a quien pide el de otra persona (F4-05).
+// - Bloqueo por inactividad (ADR 0017 §1): `bloqueada` oculta la app tras la pantalla "Confirme que
+//   es <nombre>"; la sync puede seguir enviando lo ya encolado (la sesión es legítima).
+// - Límite del login offline (ADR 0017 §2–3): contador persistido por perfil, espera creciente desde
+//   el 5.º fallo, borrado del verificador al 10.º y ningún verificador para el admin.
 
 import {
-  ahoraIso,
   loginSchema,
   MENSAJES_ERROR,
   uuidv7,
@@ -24,9 +28,25 @@ import {
   puedeBorrarDatosDeUsuario,
 } from '../datos/outbox';
 import type { PerfilLocal, VerificadorLocal } from '../datos/tipos';
-import { conCandado, type GestorCandados } from './candado';
-import { crearClienteApi, ErrorApi, ErrorRed, type ClienteApi } from './cliente-api';
-import { comprobarVerificador, crearVerificador, ITERACIONES_VERIFICADOR } from './verificador';
+import {
+  conCandado,
+  DURACION_CANDADO_SYNC_MS,
+  NOMBRE_CANDADO_SYNC,
+  type GestorCandados,
+} from './candado';
+import {
+  crearClienteApi,
+  ErrorApi,
+  ErrorRed,
+  type ClienteApi,
+  type TokenEsperado,
+} from './cliente-api';
+import {
+  comprobarVerificador,
+  crearVerificador,
+  ITERACIONES_VERIFICADOR,
+  type OpcionesComprobacion,
+} from './verificador';
 
 export type ModoSesion = 'sin_sesion' | 'online' | 'offline';
 
@@ -40,6 +60,11 @@ export interface EstadoSesion {
    * que el usuario vuelva a escribir su contraseña con conexión.
    */
   requiere_contrasena: boolean;
+  /**
+   * Bloqueo por inactividad (ADR 0017 §1): la UI solo muestra "Confirme que es <nombre>" hasta que
+   * el usuario confirme su contraseña o elija "No soy <nombre>". La sync no se detiene.
+   */
+  bloqueada: boolean;
 }
 
 export const ESTADO_SIN_SESION: EstadoSesion = Object.freeze({
@@ -48,9 +73,16 @@ export const ESTADO_SIN_SESION: EstadoSesion = Object.freeze({
   permisos: [],
   device_id: null,
   requiere_contrasena: false,
+  bloqueada: false,
 });
 
-export type CodigoErrorSesion = 'CREDENCIALES_INVALIDAS' | 'SIN_LOGIN_PREVIO' | 'VALIDACION';
+export type CodigoErrorSesion =
+  'CREDENCIALES_INVALIDAS' | 'SIN_LOGIN_PREVIO' | 'VALIDACION' | 'ESPERA_INTENTOS' | 'SIN_CONEXION';
+
+export const MENSAJE_ESPERA_INTENTOS =
+  'Demasiados intentos en esta tablet. Intente más tarde o con conexión.';
+export const MENSAJE_SIN_CONEXION_CONFIRMAR =
+  'No hay conexión con el servidor para confirmar su contraseña. Intente cuando vuelva la señal.';
 
 const MENSAJES_SESION: Readonly<Record<CodigoErrorSesion, string>> = {
   // El mismo mensaje genérico del servidor: no revela si falló el correo o la contraseña.
@@ -58,6 +90,8 @@ const MENSAJES_SESION: Readonly<Record<CodigoErrorSesion, string>> = {
   SIN_LOGIN_PREVIO:
     'No hay conexión. Para entrar sin conexión, primero inicie sesión con conexión en este dispositivo.',
   VALIDACION: MENSAJES_ERROR.VALIDACION,
+  ESPERA_INTENTOS: MENSAJE_ESPERA_INTENTOS,
+  SIN_CONEXION: MENSAJE_SIN_CONEXION_CONFIRMAR,
 };
 
 /** Error local de la sesión (login offline o datos de entrada). Los del servidor son `ErrorApi`. */
@@ -94,7 +128,10 @@ export interface AvisoPendientes {
 export interface PerfilDelDispositivo {
   user_id: string;
   nombre: string;
+  /** Correo completo: solo para iniciar sesión, nunca se muestra sin autenticar (F4-04). */
   email: string;
+  /** "j***@catmetal.test": lo que muestra el login. */
+  email_enmascarado: string;
   ultimo_acceso_at: string | null;
   /** Puede entrar sin conexión (inició sesión con conexión en este dispositivo). */
   offline_disponible: boolean;
@@ -107,6 +144,8 @@ export interface OpcionesSesion {
   locks?: GestorCandados | null;
   /** Solo para pruebas: iteraciones del verificador nuevo. */
   iteraciones?: number;
+  /** Solo para pruebas: mínimo de iteraciones aceptadas (por defecto, 100.000; ADR 0017 §6). */
+  iteracionesMinimas?: number;
   enLinea?: () => boolean;
   ahora?: () => number;
   agenteUsuario?: string;
@@ -116,6 +155,36 @@ export interface OpcionesSesion {
 export const NOMBRE_CANDADO_REFRESH = 'catmetal-refresh';
 /** Se refresca el access token si le quedan menos de 30 s. */
 const MARGEN_EXPIRACION_MS = 30_000;
+
+// Constantes de la ADR 0017 (para revertir o ajustar, cambie estos valores).
+/** Minutos sin interacción tras los que se bloquea la sesión (§1). */
+export const MINUTOS_INACTIVIDAD = 10;
+export const LIMITE_INACTIVIDAD_MS = MINUTOS_INACTIVIDAD * 60_000;
+/** Como mucho una escritura de `ultimo_acceso_at` por minuto por la actividad del usuario. */
+export const INTERVALO_REGISTRO_ACTIVIDAD_MS = 60_000;
+/** Desde este fallo consecutivo hay espera entre intentos offline (§2). */
+export const FALLOS_ANTES_DE_ESPERA = 5;
+/** En este fallo consecutivo se borra el verificador: solo se podrá entrar con conexión (§2). */
+export const FALLOS_PARA_BORRAR_VERIFICADOR = 10;
+export const ESPERA_BASE_MS = 30_000;
+export const ESPERA_MAXIMA_MS = 15 * 60_000;
+
+/** Espera tras `fallos` fallos consecutivos: 30 s × 2^(n−5) desde el 5.º, con tope de 15 min. */
+export function esperaTrasFallos(fallos: number): number {
+  if (fallos < FALLOS_ANTES_DE_ESPERA) {
+    return 0;
+  }
+  return Math.min(ESPERA_BASE_MS * 2 ** (fallos - FALLOS_ANTES_DE_ESPERA), ESPERA_MAXIMA_MS);
+}
+
+/** "juan@catmetal.test" → "j***@catmetal.test" (el login no muestra correos completos, F4-04). */
+export function enmascararCorreo(email: string): string {
+  const arroba = email.lastIndexOf('@');
+  if (arroba <= 0) {
+    return '***';
+  }
+  return `${email.charAt(0)}***${email.slice(arroba)}`;
+}
 
 /** "Tablet · Chrome" a partir del user agent (se guarda en `devices.nombre`). */
 export function nombreDispositivo(agente: string): string {
@@ -137,13 +206,42 @@ function mensajePendientes(total: number, nombre: string | null): string {
 
 type Oyente = (estado: EstadoSesion) => void;
 
+/** Resultado de un refresh: el token y el usuario al que pertenece. */
+interface ResultadoRefresco {
+  token: string;
+  user_id: string;
+}
+
+/** Resultado de un intento contra el verificador local. */
+type IntentoLocal = 'ok' | 'fallo' | 'espera' | 'sin_verificador';
+
+interface CambiosPerfil {
+  /** `undefined` conserva el verificador anterior. El admin nunca tiene verificador. */
+  verificador?: VerificadorLocal | null;
+  /** Es un acceso del usuario (login o confirmación): actualiza `ultimo_acceso_at`. */
+  acceso: boolean;
+  /** Un login correcto reinicia el contador de intentos offline. */
+  reiniciarIntentos?: boolean;
+}
+
+function esCaidaDelServidor(error: unknown): boolean {
+  return error instanceof ErrorRed || (error instanceof ErrorApi && error.status >= 500);
+}
+
 export class GestorSesion {
   readonly api: ClienteApi;
   readonly #opciones: OpcionesSesion;
   #estado: EstadoSesion = ESTADO_SIN_SESION;
   #token: string | null = null;
+  /** Usuario al que pertenece `#token` (F4-05). */
+  #tokenUsuario: string | null = null;
   #expiraEn = 0;
-  #refrescoEnCurso: Promise<string | null> | null = null;
+  #refrescoEnCurso: Promise<ResultadoRefresco | null> | null = null;
+  /** Se aborta cada vez que cambia el usuario de la sesión o se cierra (la sync en vuelo se corta). */
+  #control = new AbortController();
+  /** `cerrarSesion` en curso: no se entregan más tokens. */
+  #cerrando = false;
+  #actividadGuardadaEn = Number.NEGATIVE_INFINITY;
   readonly #oyentes = new Set<Oyente>();
 
   constructor(opciones: OpcionesSesion = {}) {
@@ -152,8 +250,9 @@ export class GestorSesion {
       base: opciones.base,
       fetch: opciones.fetch,
       proveedor: {
-        obtenerAccessToken: () => this.obtenerAccessToken(),
-        refrescar: () => this.refrescar(),
+        obtenerAccessToken: (ligado) => this.obtenerAccessToken(ligado),
+        refrescar: (ligado) => this.refrescar(ligado),
+        usuarioActual: () => this.#estado.usuario?.id ?? null,
         sesionRevocada: () => this.#perderSesionDelServidor(),
       },
     });
@@ -172,6 +271,14 @@ export class GestorSesion {
   }
 
   /**
+   * Señal que se aborta cuando cambia el usuario de la sesión o se cierra. El motor de sync la pasa
+   * a sus peticiones: una sync en vuelo nunca sobrevive al cambio de sesión (F4-05).
+   */
+  senalDeSesion(): AbortSignal {
+    return this.#control.signal;
+  }
+
+  /**
    * El servidor dijo que la sesión no corresponde al autor (`AUTOR_NO_COINCIDE`) u otra señal de
    * que la sesión del servidor no es confiable: se descarta el token y se pide la contraseña.
    */
@@ -186,27 +293,49 @@ export class GestorSesion {
   }
 
   #publicar(estado: EstadoSesion): void {
+    const previo = this.#estado.usuario?.id ?? null;
     this.#estado = Object.freeze({ ...estado, permisos: Object.freeze([...estado.permisos]) });
+    if ((estado.usuario?.id ?? null) !== previo) {
+      this.#renovarSenal();
+      this.#actividadGuardadaEn = Number.NEGATIVE_INFINITY;
+    }
     for (const oyente of this.#oyentes) {
       oyente(this.#estado);
     }
+  }
+
+  #renovarSenal(): void {
+    this.#control.abort(new DOMException('La sesión cambió.', 'AbortError'));
+    this.#control = new AbortController();
   }
 
   #ahora(): number {
     return (this.#opciones.ahora ?? Date.now)();
   }
 
+  #ahoraIso(): string {
+    return new Date(this.#ahora()).toISOString();
+  }
+
   #enLinea(): boolean {
     return this.#opciones.enLinea?.() ?? globalThis.navigator?.onLine ?? true;
   }
 
+  #comprobacion(): OpcionesComprobacion {
+    return this.#opciones.iteracionesMinimas === undefined
+      ? {}
+      : { minimoIteraciones: this.#opciones.iteracionesMinimas };
+  }
+
   #guardarToken(respuesta: RespuestaSesion): void {
     this.#token = respuesta.access_token;
+    this.#tokenUsuario = respuesta.usuario.id;
     this.#expiraEn = this.#ahora() + respuesta.expira_en * 1000;
   }
 
   #olvidarToken(): void {
     this.#token = null;
+    this.#tokenUsuario = null;
     this.#expiraEn = 0;
   }
 
@@ -229,23 +358,38 @@ export class GestorSesion {
       .sort((a, b) => (b.ultimo_acceso_at ?? '').localeCompare(a.ultimo_acceso_at ?? ''))[0];
   }
 
-  async #guardarPerfil(
-    respuesta: RespuestaSesion,
-    verificador: VerificadorLocal | null,
-  ): Promise<void> {
-    const ahora = ahoraIso();
+  async #guardarPerfil(respuesta: RespuestaSesion, cambios: CambiosPerfil): Promise<void> {
+    const ahora = this.#ahoraIso();
     await db.transaction('rw', db.perfiles, async () => {
       const previo = await db.perfiles.get(respuesta.usuario.id);
+      // ADR 0017 §3: el admin no trabaja offline; nunca tiene verificador (y se borra uno anterior).
+      const verificador =
+        respuesta.usuario.rol === 'admin'
+          ? null
+          : cambios.verificador !== undefined
+            ? cambios.verificador
+            : (previo?.verificador ?? null);
       await db.perfiles.put({
         user_id: respuesta.usuario.id,
         perfil: respuesta.usuario,
         device_id: respuesta.device_id,
-        verificador: verificador ?? previo?.verificador ?? null,
+        verificador,
         actualizado_at: ahora,
-        ultimo_acceso_at: ahora,
+        ultimo_acceso_at: cambios.acceso ? ahora : (previo?.ultimo_acceso_at ?? null),
         cierre_pendiente: false,
+        intentos_offline: cambios.reiniciarIntentos === true ? 0 : (previo?.intentos_offline ?? 0),
+        espera_hasta: cambios.reiniciarIntentos === true ? null : (previo?.espera_hasta ?? null),
       });
     });
+  }
+
+  /** El último acceso del perfil fue hace menos de `LIMITE_INACTIVIDAD_MS` (no hace falta bloquear). */
+  #accesoReciente(perfil: PerfilLocal | undefined): boolean {
+    if (perfil?.ultimo_acceso_at === null || perfil?.ultimo_acceso_at === undefined) {
+      return false;
+    }
+    const ultimo = Date.parse(perfil.ultimo_acceso_at);
+    return Number.isFinite(ultimo) && Math.abs(this.#ahora() - ultimo) <= LIMITE_INACTIVIDAD_MS;
   }
 
   /** Perfiles guardados en este dispositivo, el más reciente primero (sin verificadores). */
@@ -257,9 +401,81 @@ export class GestorSesion {
         user_id: p.user_id,
         nombre: p.perfil.nombre,
         email: p.perfil.email,
+        email_enmascarado: enmascararCorreo(p.perfil.email),
         ultimo_acceso_at: p.ultimo_acceso_at,
         offline_disponible: p.verificador !== null,
       }));
+  }
+
+  /**
+   * Un intento contra el verificador local, con el contador persistido del perfil (ADR 0017 §2):
+   * durante la espera no se deriva nada; desde el 5.º fallo consecutivo hay espera creciente; al
+   * 10.º se borra el verificador. Un acierto reinicia el contador y registra el acceso.
+   */
+  async #intentoLocal(userId: string, password: string): Promise<IntentoLocal> {
+    const perfil = await db.perfiles.get(userId);
+    if (perfil?.verificador === null || perfil?.verificador === undefined) {
+      return 'sin_verificador';
+    }
+    const espera = perfil.espera_hasta ?? null;
+    if (espera !== null && Date.parse(espera) > this.#ahora()) {
+      return 'espera';
+    }
+    // La derivación (≈ 1 s) va fuera de la transacción: esperar WebCrypto dentro la cerraría.
+    const correcta = await comprobarVerificador(password, perfil.verificador, this.#comprobacion());
+    await db.transaction('rw', db.perfiles, async () => {
+      const actual = await db.perfiles.get(userId);
+      if (actual === undefined) {
+        return;
+      }
+      if (correcta) {
+        await db.perfiles.put({
+          ...actual,
+          intentos_offline: 0,
+          espera_hasta: null,
+          ultimo_acceso_at: this.#ahoraIso(),
+          cierre_pendiente: false,
+        });
+        return;
+      }
+      const fallos = (actual.intentos_offline ?? 0) + 1;
+      if (fallos >= FALLOS_PARA_BORRAR_VERIFICADOR) {
+        await db.perfiles.put({
+          ...actual,
+          verificador: null,
+          intentos_offline: 0,
+          espera_hasta: null,
+        });
+        return;
+      }
+      const ms = esperaTrasFallos(fallos);
+      await db.perfiles.put({
+        ...actual,
+        intentos_offline: fallos,
+        espera_hasta: ms > 0 ? new Date(this.#ahora() + ms).toISOString() : null,
+      });
+    });
+    return correcta ? 'ok' : 'fallo';
+  }
+
+  /**
+   * F4-03: el servidor rechazó la contraseña. Si el verificador local la acepta, ya no es válida
+   * (cambio de contraseña, usuario desactivado o bloqueado): se borra el verificador.
+   */
+  async #invalidarVerificadorSiCoincide(
+    perfil: PerfilLocal | undefined,
+    password: string,
+  ): Promise<void> {
+    if (perfil?.verificador === null || perfil?.verificador === undefined) {
+      return;
+    }
+    if (await comprobarVerificador(password, perfil.verificador, this.#comprobacion())) {
+      await db.perfiles.update(perfil.user_id, {
+        verificador: null,
+        intentos_offline: 0,
+        espera_hasta: null,
+      });
+    }
   }
 
   // -------------------------------------------------------------------------------------------
@@ -280,8 +496,7 @@ export class GestorSesion {
       try {
         return await this.#loginOnline(datos.data.email, datos.data.password);
       } catch (error) {
-        const caidaDelServidor = error instanceof ErrorApi && error.status >= 500;
-        if (!(error instanceof ErrorRed) && !caidaDelServidor) {
+        if (!esCaidaDelServidor(error)) {
           throw error;
         }
       }
@@ -291,26 +506,34 @@ export class GestorSesion {
 
   async #loginOnline(email: string, password: string): Promise<EstadoSesion> {
     const existente = await this.#perfilPorEmail(email);
-    const respuesta = await this.api.peticion<RespuestaSesion>('/auth/login', {
-      metodo: 'POST',
-      autenticar: false,
-      cuerpo: {
-        email,
-        password,
-        device_id: existente?.device_id ?? uuidv7(),
-        instalacion_id: await obtenerInstalacionId(),
-        device_nombre: nombreDispositivo(
-          this.#opciones.agenteUsuario ?? globalThis.navigator?.userAgent ?? '',
-        ),
-      },
-    });
+    let respuesta: RespuestaSesion;
+    try {
+      respuesta = await this.api.peticion<RespuestaSesion>('/auth/login', {
+        metodo: 'POST',
+        autenticar: false,
+        cuerpo: {
+          email,
+          password,
+          device_id: existente?.device_id ?? uuidv7(),
+          instalacion_id: await obtenerInstalacionId(),
+          device_nombre: nombreDispositivo(
+            this.#opciones.agenteUsuario ?? globalThis.navigator?.userAgent ?? '',
+          ),
+        },
+      });
+    } catch (error) {
+      if (error instanceof ErrorApi && error.code === 'CREDENCIALES_INVALIDAS') {
+        await this.#invalidarVerificadorSiCoincide(existente, password);
+      }
+      throw error;
+    }
     // El verificador se deriva de la contraseña ya aceptada por el servidor y se queda en el
-    // dispositivo. Nunca forma parte de ningún cuerpo enviado.
-    const verificador = await crearVerificador(
-      password,
-      this.#opciones.iteraciones ?? ITERACIONES_VERIFICADOR,
-    );
-    await this.#guardarPerfil(respuesta, verificador);
+    // dispositivo. Nunca forma parte de ningún cuerpo enviado. El admin no tiene (ADR 0017 §3).
+    const verificador =
+      respuesta.usuario.rol === 'admin'
+        ? null
+        : await crearVerificador(password, this.#opciones.iteraciones ?? ITERACIONES_VERIFICADOR);
+    await this.#guardarPerfil(respuesta, { verificador, acceso: true, reiniciarIntentos: true });
     this.#guardarToken(respuesta);
     this.#publicar({
       modo: 'online',
@@ -318,6 +541,7 @@ export class GestorSesion {
       permisos: respuesta.usuario.permisos,
       device_id: respuesta.device_id,
       requiere_contrasena: false,
+      bloqueada: false,
     });
     return this.#estado;
   }
@@ -327,10 +551,16 @@ export class GestorSesion {
     if (perfil?.verificador === null || perfil?.verificador === undefined) {
       throw new ErrorSesion('SIN_LOGIN_PREVIO');
     }
-    if (!(await comprobarVerificador(password, perfil.verificador))) {
+    const intento = await this.#intentoLocal(perfil.user_id, password);
+    if (intento === 'espera') {
+      throw new ErrorSesion('ESPERA_INTENTOS');
+    }
+    if (intento === 'sin_verificador') {
+      throw new ErrorSesion('SIN_LOGIN_PREVIO');
+    }
+    if (intento === 'fallo') {
       throw new ErrorSesion('CREDENCIALES_INVALIDAS');
     }
-    await db.perfiles.put({ ...perfil, ultimo_acceso_at: ahoraIso(), cierre_pendiente: false });
     this.#olvidarToken();
     this.#publicar({
       modo: 'offline',
@@ -338,8 +568,74 @@ export class GestorSesion {
       permisos: perfil.perfil.permisos,
       device_id: perfil.device_id,
       requiere_contrasena: false,
+      bloqueada: false,
     });
     return this.#estado;
+  }
+
+  // -------------------------------------------------------------------------------------------
+  // Bloqueo por inactividad (ADR 0017 §1)
+  // -------------------------------------------------------------------------------------------
+
+  /** Bloquea la sesión (inactividad o vuelta de segundo plano). La sync sigue. */
+  bloquear(): void {
+    if (this.#estado.usuario !== null && !this.#estado.bloqueada) {
+      this.#publicar({ ...this.#estado, bloqueada: true });
+    }
+  }
+
+  /**
+   * El usuario interactuó: actualiza `ultimo_acceso_at` como mucho una vez por minuto (decide el
+   * bloqueo al recargar y la caducidad del perfil). Bloqueada, la actividad no cuenta.
+   */
+  async registrarActividad(): Promise<void> {
+    const usuario = this.#estado.usuario;
+    if (usuario === null || this.#estado.bloqueada) {
+      return;
+    }
+    const ahora = this.#ahora();
+    if (ahora - this.#actividadGuardadaEn < INTERVALO_REGISTRO_ACTIVIDAD_MS) {
+      return;
+    }
+    this.#actividadGuardadaEn = ahora;
+    await db.perfiles.update(usuario.id, { ultimo_acceso_at: new Date(ahora).toISOString() });
+  }
+
+  /**
+   * "Confirme que es <nombre>": primero contra el verificador local (sin red, con el contador de
+   * intentos); si no hay verificador o no coincide y hay red, con un login online (que también sirve
+   * si la contraseña cambió en el servidor). "No soy <nombre>" es `cerrarSesion()`.
+   */
+  async confirmarIdentidad(password: string): Promise<EstadoSesion> {
+    const usuario = this.#estado.usuario;
+    if (usuario === null || !this.#estado.bloqueada) {
+      return this.#estado;
+    }
+    if (password === '') {
+      throw new ErrorSesion('VALIDACION');
+    }
+    const intento = await this.#intentoLocal(usuario.id, password);
+    if (this.#estado.usuario?.id !== usuario.id) {
+      // Mientras se verificaba, alguien eligió "No soy <nombre>": no se desbloquea nada.
+      return this.#estado;
+    }
+    if (intento === 'ok') {
+      this.#publicar({ ...this.#estado, bloqueada: false });
+      return this.#estado;
+    }
+    if (this.#enLinea()) {
+      try {
+        return await this.#loginOnline(usuario.email, password);
+      } catch (error) {
+        if (!esCaidaDelServidor(error)) {
+          throw error;
+        }
+      }
+    }
+    if (intento === 'espera') {
+      throw new ErrorSesion('ESPERA_INTENTOS');
+    }
+    throw new ErrorSesion(intento === 'fallo' ? 'CREDENCIALES_INVALIDAS' : 'SIN_CONEXION');
   }
 
   // -------------------------------------------------------------------------------------------
@@ -349,23 +645,30 @@ export class GestorSesion {
   /**
    * `POST /auth/refresh`, serializado entre pestañas (Web Locks o alternativa) y compartido dentro
    * de la pestaña: N llamadas simultáneas hacen UNA petición. Devuelve el access token o `null`.
+   * Con `esperado`, solo devuelve un token de ESE usuario (F4-05): si la sesión ya es de otra
+   * persona, ni siquiera llama al servidor.
    */
-  refrescar(): Promise<string | null> {
-    if (this.#refrescoEnCurso !== null) {
-      return this.#refrescoEnCurso;
+  refrescar(ligado: TokenEsperado = {}): Promise<string | null> {
+    const { esperado } = ligado;
+    if (esperado !== undefined && this.#estado.usuario?.id !== esperado) {
+      return Promise.resolve(null);
     }
-    const enCurso = conCandado(NOMBRE_CANDADO_REFRESH, () => this.#refrescarConCandado(), {
-      locks: this.#opciones.locks,
-      duracionMs: this.#opciones.candado?.duracionMs,
-      intervaloMs: this.#opciones.candado?.intervaloMs,
-    }).finally(() => {
-      this.#refrescoEnCurso = null;
-    });
-    this.#refrescoEnCurso = enCurso;
-    return enCurso;
+    if (this.#refrescoEnCurso === null) {
+      const enCurso = conCandado(NOMBRE_CANDADO_REFRESH, () => this.#refrescarConCandado(), {
+        locks: this.#opciones.locks,
+        duracionMs: this.#opciones.candado?.duracionMs,
+        intervaloMs: this.#opciones.candado?.intervaloMs,
+      }).finally(() => {
+        this.#refrescoEnCurso = null;
+      });
+      this.#refrescoEnCurso = enCurso;
+    }
+    return this.#refrescoEnCurso.then((r) =>
+      r !== null && (esperado === undefined || r.user_id === esperado) ? r.token : null,
+    );
   }
 
-  async #refrescarConCandado(): Promise<string | null> {
+  async #refrescarConCandado(): Promise<ResultadoRefresco | null> {
     let respuesta: RespuestaSesion;
     try {
       respuesta = await this.api.peticion<RespuestaSesion>('/auth/refresh', {
@@ -386,7 +689,7 @@ export class GestorSesion {
     return this.#adoptar(respuesta);
   }
 
-  async #adoptar(respuesta: RespuestaSesion): Promise<string | null> {
+  async #adoptar(respuesta: RespuestaSesion): Promise<ResultadoRefresco | null> {
     const local = this.#estado.usuario;
     if (local !== null && local.id !== respuesta.usuario.id) {
       // La cookie es de otra persona que inició sesión en esta tablet: nunca se adopta su sesión
@@ -394,6 +697,7 @@ export class GestorSesion {
       this.#perderSesionDelServidor();
       return null;
     }
+    const cambio = (): boolean => (this.#estado.usuario?.id ?? null) !== (local?.id ?? null);
     if (local === null) {
       const perfil = await db.perfiles.get(respuesta.usuario.id);
       if (perfil?.cierre_pendiente === true) {
@@ -402,8 +706,29 @@ export class GestorSesion {
         await db.perfiles.put({ ...perfil, cierre_pendiente: false });
         return null;
       }
+      // ADR 0017 §1: una sesión de la cookie con el último acceso viejo (o desconocido) se publica
+      // BLOQUEADA: la UI solo ofrece "Confirme que es <nombre>" o "No soy <nombre>".
+      const reciente = this.#accesoReciente(perfil);
+      await this.#guardarPerfil(respuesta, { acceso: reciente });
+      if (cambio()) {
+        // Mientras tanto alguien inició sesión en esta pestaña: no se pisa su sesión.
+        return null;
+      }
+      this.#guardarToken(respuesta);
+      this.#publicar({
+        modo: 'online',
+        usuario: respuesta.usuario,
+        permisos: respuesta.usuario.permisos,
+        device_id: respuesta.device_id,
+        requiere_contrasena: false,
+        bloqueada: !reciente,
+      });
+      return { token: respuesta.access_token, user_id: respuesta.usuario.id };
     }
-    await this.#guardarPerfil(respuesta, null);
+    await this.#guardarPerfil(respuesta, { acceso: false });
+    if (cambio()) {
+      return null;
+    }
     this.#guardarToken(respuesta);
     this.#publicar({
       modo: 'online',
@@ -411,30 +736,41 @@ export class GestorSesion {
       permisos: respuesta.usuario.permisos,
       device_id: respuesta.device_id,
       requiere_contrasena: false,
+      bloqueada: this.#estado.bloqueada,
     });
-    return respuesta.access_token;
+    return { token: respuesta.access_token, user_id: respuesta.usuario.id };
   }
 
   /**
-   * Access token vigente para el motor de sync: refresca si le quedan menos de 30 s. `null` si no hay
-   * usuario, si la sesión es offline sin sesión del servidor recuperable o si se requiere contraseña.
+   * Access token vigente del usuario de la sesión: refresca si le quedan menos de 30 s. `null` si no
+   * hay usuario, si es de otro usuario que `esperado`, si la sesión es offline sin sesión del
+   * servidor recuperable, si se requiere contraseña o si la sesión se está cerrando.
    */
-  async obtenerAccessToken(): Promise<string | null> {
-    if (this.#estado.usuario === null) {
+  async obtenerAccessToken(ligado: TokenEsperado = {}): Promise<string | null> {
+    const usuario = this.#estado.usuario;
+    if (usuario === null || this.#cerrando) {
       return null;
     }
-    if (this.#token !== null && this.#ahora() < this.#expiraEn - MARGEN_EXPIRACION_MS) {
+    if (ligado.esperado !== undefined && usuario.id !== ligado.esperado) {
+      return null;
+    }
+    if (
+      this.#token !== null &&
+      this.#tokenUsuario === usuario.id &&
+      this.#ahora() < this.#expiraEn - MARGEN_EXPIRACION_MS
+    ) {
       return this.#token;
     }
     if (this.#estado.requiere_contrasena) {
       return null;
     }
-    return this.refrescar();
+    return this.refrescar({ esperado: usuario.id });
   }
 
   /**
    * Al cargar la app: intenta recuperar la sesión del servidor con la cookie. Sin red queda
-   * `sin_sesion` y la UI ofrece los perfiles del dispositivo (con contraseña, login offline).
+   * `sin_sesion` y la UI ofrece los perfiles del dispositivo (con contraseña, login offline). Si el
+   * último acceso del perfil es de hace más de 10 minutos, la sesión queda bloqueada.
    */
   async restaurar(): Promise<{ estado: EstadoSesion; perfiles: PerfilDelDispositivo[] }> {
     if (this.#enLinea()) {
@@ -469,9 +805,12 @@ export class GestorSesion {
    * cuando la haya). Borra los datos locales del usuario SOLO si no tiene pendientes; si los tiene,
    * los conserva y devuelve cuántos son para que la UI advierta.
    *
+   * F4-05: corta la sync en vuelo de esta pestaña (señal de sesión) y toma el candado de sync antes
+   * de borrar: ninguna sync escribe en la partición mientras se borra.
+   *
    * Decisión: se conservan el perfil y el verificador, para que el usuario pueda volver a entrar sin
    * conexión en esta tablet (sus pendientes solo salen con su sesión). El riesgo de fuerza bruta
-   * offline del verificador está aceptado en la ADR 0012.
+   * offline del verificador lo mitigan los límites de la ADR 0017.
    */
   async cerrarSesion(): Promise<ResultadoCierre> {
     const usuario = this.#estado.usuario;
@@ -482,7 +821,21 @@ export class GestorSesion {
         pendientes: { mutaciones: 0, evidencias: 0 },
       };
     }
-    const token = this.#enLinea() ? await this.obtenerAccessToken() : null;
+    const token = this.#enLinea() ? await this.obtenerAccessToken({ esperado: usuario.id }) : null;
+    this.#cerrando = true;
+    this.#renovarSenal();
+    try {
+      return await conCandado(NOMBRE_CANDADO_SYNC, () => this.#cerrarConCandado(usuario, token), {
+        locks: this.#opciones.locks,
+        duracionMs: DURACION_CANDADO_SYNC_MS,
+        intervaloMs: this.#opciones.candado?.intervaloMs,
+      });
+    } finally {
+      this.#cerrando = false;
+    }
+  }
+
+  async #cerrarConCandado(usuario: Perfil, token: string | null): Promise<ResultadoCierre> {
     const notificado = token !== null && (await this.#revocarEnServidor(token));
     this.#olvidarToken();
 
@@ -501,7 +854,9 @@ export class GestorSesion {
         // Llegó un pendiente entre la comprobación y el borrado: no se borra nada.
       }
     }
-    this.#publicar(ESTADO_SIN_SESION);
+    if (this.#estado.usuario?.id === usuario.id) {
+      this.#publicar(ESTADO_SIN_SESION);
+    }
     return {
       servidor_notificado: notificado,
       datos_borrados: borrados,
@@ -523,5 +878,5 @@ export class GestorSesion {
 /** Sesión única de la PWA. */
 export const sesion = new GestorSesion();
 
-/** Cliente de la API con la sesión de la PWA (refresh automático ante 401). */
+/** Cliente de la API con la sesión de la PWA (refresh automático ante 401, ligado al usuario). */
 export const clienteApi: ClienteApi = sesion.api;

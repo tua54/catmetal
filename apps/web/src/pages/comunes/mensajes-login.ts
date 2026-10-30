@@ -1,7 +1,12 @@
 // Mensajes en español de los errores de inicio de sesión (docs/spec.md §5).
 
 import { MENSAJES_ERROR } from '@catmetal/shared';
-import { ErrorApi, ErrorSesion } from '../../auth';
+import {
+  ErrorApi,
+  ErrorSesion,
+  MENSAJE_ESPERA_INTENTOS,
+  MENSAJE_SIN_CONEXION_CONFIRMAR,
+} from '../../auth';
 
 export const MENSAJE_SIN_LOGIN_PREVIO =
   'No hay conexión. Para entrar sin conexión, primero inicie sesión con conexión en esta tablet.';
@@ -25,6 +30,10 @@ export function mensajeErrorLogin(error: unknown): string {
         return MENSAJES_ERROR.CREDENCIALES_INVALIDAS;
       case 'VALIDACION':
         return MENSAJE_DATOS_INVALIDOS;
+      case 'ESPERA_INTENTOS':
+        return MENSAJE_ESPERA_INTENTOS;
+      case 'SIN_CONEXION':
+        return MENSAJE_SIN_CONEXION_CONFIRMAR;
     }
   }
   if (error instanceof ErrorApi) {

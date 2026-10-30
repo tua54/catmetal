@@ -27,6 +27,9 @@ function gestor(opciones: OpcionesSesion = {}): GestorSesion {
     fetch: servidor.fetch,
     locks: null,
     iteraciones: 1_000,
+    // Verificadores baratos para que las pruebas sean rápidas; el mínimo real (100.000) se prueba
+    // en verificador.test y en 'límites del login offline'.
+    iteracionesMinimas: 1_000,
     enLinea: () => enLinea,
     ahora: () => reloj,
     agenteUsuario: CHROME,

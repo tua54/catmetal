@@ -7,10 +7,13 @@ import {
   derivarVerificador,
   igualesEnTiempoConstante,
   ITERACIONES_VERIFICADOR,
+  MIN_ITERACIONES_VERIFICADOR,
   ultimaMedicionDerivacion,
 } from './verificador';
 
 const POCAS = 1_000;
+/** Las pruebas rápidas aceptan verificadores baratos; el mínimo real se prueba aparte. */
+const BARATOS = { minimoIteraciones: 1 };
 
 function deBase64(texto: string): number[] {
   return Array.from(atob(texto), (c) => c.charCodeAt(0));
@@ -29,9 +32,9 @@ describe('verificador PBKDF2', () => {
     expect(deBase64(v.sal)).toHaveLength(16);
     expect(deBase64(v.hash)).toHaveLength(32);
     expect(v.ms_derivacion).toBeGreaterThanOrEqual(0);
-    expect(await comprobarVerificador('clave-de-planta', v)).toBe(true);
-    expect(await comprobarVerificador('clave-de-plantA', v)).toBe(false);
-    expect(await comprobarVerificador('', v)).toBe(false);
+    expect(await comprobarVerificador('clave-de-planta', v, BARATOS)).toBe(true);
+    expect(await comprobarVerificador('clave-de-plantA', v, BARATOS)).toBe(false);
+    expect(await comprobarVerificador('', v, BARATOS)).toBe(false);
   });
 
   it('cada verificador tiene su propia sal', async () => {
@@ -43,10 +46,10 @@ describe('verificador PBKDF2', () => {
 
   it('se comprueba con las iteraciones GUARDADAS, no con la constante', async () => {
     const v = await crearVerificador('clave', 2_000);
-    expect(await comprobarVerificador('clave', v)).toBe(true);
+    expect(await comprobarVerificador('clave', v, BARATOS)).toBe(true);
     expect(ultimaMedicionDerivacion()?.iteraciones).toBe(2_000);
     // Con otras iteraciones el resultado no coincide.
-    expect(await comprobarVerificador('clave', { ...v, iteraciones: 2_001 })).toBe(false);
+    expect(await comprobarVerificador('clave', { ...v, iteraciones: 2_001 }, BARATOS)).toBe(false);
   });
 
   it('coincide con un vector de PBKDF2-HMAC-SHA256 (RFC 7914 §11)', async () => {
@@ -67,8 +70,20 @@ describe('verificador PBKDF2', () => {
       { ...v, hash: btoa('corto') },
     ];
     for (const malo of malos) {
-      expect(await comprobarVerificador('clave', malo)).toBe(false);
+      expect(await comprobarVerificador('clave', malo, BARATOS)).toBe(false);
     }
+    // Control: el mismo verificador sin alterar sí valida (los fallos de arriba son por el defecto).
+    expect(await comprobarVerificador('clave', v, BARATOS)).toBe(true);
+  });
+
+  it('F4-07: rechaza verificadores con menos de 100.000 iteraciones aunque la contraseña coincida', async () => {
+    expect(MIN_ITERACIONES_VERIFICADOR).toBe(100_000);
+    const barato = await crearVerificador('clave', 99_999);
+    expect(await comprobarVerificador('clave', barato)).toBe(false);
+    expect(await comprobarVerificador('clave', barato, BARATOS)).toBe(true);
+    const minimo = await crearVerificador('clave', MIN_ITERACIONES_VERIFICADOR);
+    expect(await comprobarVerificador('clave', minimo)).toBe(true);
+    expect(await comprobarVerificador('otra', minimo)).toBe(false);
   });
 
   it('comparación en tiempo constante', () => {

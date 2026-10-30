@@ -1,7 +1,9 @@
 // Arranque de la PWA (tarea 4.2): sincronización (una sola vez), registro del Service Worker,
-// restauración de la sesión y Background Sync. Lo llama `main.tsx` antes de montar React.
+// retención de datos de la tablet, restauración de la sesión, vigilancia de inactividad y
+// Background Sync. Lo llama `main.tsx` antes de montar React.
 
-import { sesion as sesionDeLaApp } from '../auth';
+import { sesion as sesionDeLaApp, vigilarInactividad } from '../auth';
+import { aplicarRetencionDelDispositivo } from '../datos/retencion';
 import {
   iniciarSincronizacion,
   registrarBackgroundSync,
@@ -54,6 +56,10 @@ export function vigilarBackgroundSync(
 
 export interface OpcionesArranque {
   sesion?: { restaurar(): Promise<unknown> };
+  /** Retención de la tablet en todas las particiones (ADR 0017 §5). */
+  aplicarRetencion?: () => Promise<unknown>;
+  /** Bloqueo por inactividad (ADR 0017 §1). Devuelve la función para dejar de vigilar. */
+  vigilarInactividad?: () => () => void;
   iniciar?: () => Sincronizacion;
   /** Registra el Service Worker (en producción, con `virtual:pwa-register`). */
   registrarServiceWorker?: () => void;
@@ -67,9 +73,12 @@ export interface OpcionesArranque {
  * 1. Inicia la sincronización antes de restaurar, para que su suscripción a la sesión vea el paso a
  *    `online` y programe la primera sync.
  * 2. Registra el SW.
- * 3. Restaura la sesión del servidor (con la cookie). Sin red queda `sin_sesion` y el login ofrece
- *    entrar sin conexión. Pase lo que pase, marca el arranque como listo.
- * 4. Vigila cuándo pedir Background Sync.
+ * 3. Aplica la retención de la tablet (purga en TODAS las particiones, perfiles caducados y
+ *    verificadores de admin), antes de restaurar y de mostrar el login.
+ * 4. Restaura la sesión del servidor (con la cookie). Sin red queda `sin_sesion` y el login ofrece
+ *    entrar sin conexión. Si el último acceso es viejo, la sesión queda bloqueada. Pase lo que pase,
+ *    marca el arranque como listo.
+ * 5. Vigila la inactividad (bloqueo a los 10 min) y cuándo pedir Background Sync.
  */
 export async function arrancar(opciones: OpcionesArranque = {}): Promise<Sincronizacion> {
   const alError = opciones.alError ?? ((error: unknown) => console.error(error));
@@ -81,11 +90,21 @@ export async function arrancar(opciones: OpcionesArranque = {}): Promise<Sincron
     alError(error);
   }
   try {
+    await (opciones.aplicarRetencion ?? (() => aplicarRetencionDelDispositivo()))();
+  } catch (error) {
+    alError(error);
+  }
+  try {
     await (opciones.sesion ?? sesionDeLaApp).restaurar();
   } catch (error) {
     alError(error);
   } finally {
     arranque.setState({ listo: true });
+  }
+  try {
+    (opciones.vigilarInactividad ?? (() => vigilarInactividad({ sesion: sesionDeLaApp })))();
+  } catch (error) {
+    alError(error);
   }
   vigilarBackgroundSync(opciones.estadoSync, opciones.registrarBackgroundSync);
   return sync;

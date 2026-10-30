@@ -40,6 +40,7 @@ describe('iniciarSincronizacion', () => {
       permisos: usuario.permisos,
       device_id: null,
       requiere_contrasena: false,
+      bloqueada: false,
     });
     const sesion = {
       estado: estadoSesion,

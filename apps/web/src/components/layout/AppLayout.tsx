@@ -8,6 +8,7 @@ import { BarraSuperior } from '../ui/BarraSuperior';
 import { PildoraConexion, type EstadoConexion } from '../ui/PildoraConexion';
 import { AvisosSesion } from './AvisosSesion';
 import { MenuUsuario } from './MenuUsuario';
+import { PantallaBloqueo } from './PantallaBloqueo';
 
 /** Datos opcionales que cada ruta puede declarar en `handle` para la barra superior. */
 export interface HandleRuta {
@@ -80,6 +81,9 @@ export function AppLayout() {
           <Outlet />
         </div>
       </main>
+
+      {/* Bloqueo por inactividad (ADR 0017 §1): tapa todo y deja el resto inerte. */}
+      <PantallaBloqueo />
     </div>
   );
 }

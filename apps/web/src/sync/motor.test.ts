@@ -48,6 +48,7 @@ function sesionFalsa(servidor: ServidorSync, usuario: Perfil | null): SesionFals
       permisos: s.usuario?.permisos ?? [],
       device_id: null,
       requiere_contrasena: s.requiere,
+      bloqueada: false,
     }),
     usuarioDeLaSesion: () => s.usuario,
     obtenerAccessToken: () =>
@@ -394,7 +395,19 @@ describe('partición y candado', () => {
     const resumen = await motor(s).sincronizar('online');
     expect(servidor.pushes()).toHaveLength(1);
     expect(resumen.error).toMatchObject({ code: 'AUTOR_NO_COINCIDE' });
-    expect(await contarPendientes(ana.id)).toBe(5);
+    // F4-05: la respuesta llegó cuando la sesión ya era de Beto, así que no se escribe nada en la
+    // partición de Ana (antes se aplicaban los 25 resultados y quedaban 5): el lote sigue
+    // `enviando` y nada de lo que llegue con otra sesión toca sus datos.
+    expect(await contarPendientes(ana.id)).toBe(30);
+    expect(await db.outbox.where('estado').equals('enviando').count()).toBe(25);
+
+    // Cuando Ana vuelve, el lote sale de nuevo y el servidor (idempotente) no duplica nada.
+    servidor.alRecibir = null;
+    s.usuario = ana;
+    const otra = await motor(s).sincronizar('manual');
+    expect(otra.error).toBeNull();
+    expect(await contarPendientes(ana.id)).toBe(0);
+    expect(servidor.entidades('consumptions')).toHaveLength(30);
   });
 
   it('dos sincronizar() simultáneos en la pestaña hacen un solo push', async () => {

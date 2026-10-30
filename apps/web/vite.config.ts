@@ -89,6 +89,9 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     emptyOutDir: true,
-    sourcemap: true,
+    // F4-08: los .map se generan para depurar en local, pero el bundle no los referencia
+    // (`hidden`: sin `//# sourceMappingURL`) y `public/.assetsignore` (copiado a la raíz de `dist`)
+    // evita que Wrangler los publique como assets (ni en `wrangler deploy` ni en `wrangler dev`).
+    sourcemap: 'hidden',
   },
 });

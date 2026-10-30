@@ -1,8 +1,10 @@
 // Verificador del login offline (docs/spec.md §5, ADR 0012 punto 4).
 //
 // PBKDF2-SHA256 con WebCrypto, 600.000 iteraciones, sal aleatoria de 16 bytes PROPIA DEL DISPOSITIVO
-// (distinta de la del servidor) y 32 bytes de salida, comparados en tiempo constante. El verificador
-// solo abre los datos locales: nunca se envía al servidor ni reemplaza su autenticación.
+// (distinta de la del servidor) y 32 bytes de salida, comparados en tiempo constante. Nunca se envía
+// al servidor ni reemplaza su autenticación, pero SÍ es un oráculo de la contraseña del servidor si
+// alguien extrae IndexedDB (enmienda de la ADR 0012, ADR 0017): por eso hay un mínimo de iteraciones
+// aceptadas, límite de intentos (sesion.ts) y ningún verificador para el admin.
 
 import type { VerificadorLocal } from '../datos/tipos';
 
@@ -10,6 +12,11 @@ import type { VerificadorLocal } from '../datos/tipos';
 export const ITERACIONES_VERIFICADOR = 600_000;
 export const BYTES_SAL = 16;
 export const BYTES_VERIFICADOR = 32;
+/**
+ * Mínimo de iteraciones de un verificador aceptado (ADR 0017 §6, F4-07): quien manipule IndexedDB no
+ * puede rebajar el costo de la fuerza bruta guardando un verificador barato.
+ */
+export const MIN_ITERACIONES_VERIFICADOR = 100_000;
 /** Cota de las iteraciones leídas de IndexedDB (un dato corrupto no debe colgar la tablet). */
 const MAX_ITERACIONES = 10_000_000;
 
@@ -95,24 +102,30 @@ export function igualesEnTiempoConstante(a: Uint8Array, b: Uint8Array): boolean 
   return diferencia === 0;
 }
 
-function esVerificadorValido(v: VerificadorLocal): boolean {
+function esVerificadorValido(v: VerificadorLocal, minimo: number): boolean {
   return (
     v.algoritmo === 'pbkdf2-sha256' &&
     Number.isInteger(v.iteraciones) &&
-    v.iteraciones >= 1 &&
+    v.iteraciones >= Math.max(1, minimo) &&
     v.iteraciones <= MAX_ITERACIONES
   );
 }
 
+export interface OpcionesComprobacion {
+  /** Solo pruebas unitarias: por defecto, `MIN_ITERACIONES_VERIFICADOR`. */
+  minimoIteraciones?: number;
+}
+
 /**
  * Comprueba la contraseña contra un verificador guardado, con sus propias iteraciones. Un
- * verificador malformado nunca valida.
+ * verificador malformado o con menos de `MIN_ITERACIONES_VERIFICADOR` iteraciones nunca valida.
  */
 export async function comprobarVerificador(
   password: string,
   guardado: VerificadorLocal,
+  opciones: OpcionesComprobacion = {},
 ): Promise<boolean> {
-  if (!esVerificadorValido(guardado)) {
+  if (!esVerificadorValido(guardado, opciones.minimoIteraciones ?? MIN_ITERACIONES_VERIFICADOR)) {
     return false;
   }
   const sal = deBase64(guardado.sal);

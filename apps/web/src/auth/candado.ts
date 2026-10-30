@@ -24,6 +24,14 @@ export interface OpcionesCandado {
   ahora?: () => number;
 }
 
+/**
+ * Candado del motor de sync (nunca dos sincronizaciones a la vez entre pestañas). Vive aquí y no en
+ * `sync/motor.ts` porque `cerrarSesion` también lo toma (F4-05) y `auth` no depende de `sync`.
+ */
+export const NOMBRE_CANDADO_SYNC = 'catmetal-sync';
+/** Vida del candado de sync en la alternativa de IndexedDB (una sync larga no debe perderlo). */
+export const DURACION_CANDADO_SYNC_MS = 120_000;
+
 const DURACION_MS = 30_000;
 const INTERVALO_MS = 50;
 

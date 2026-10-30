@@ -54,6 +54,55 @@ describe('arranque', () => {
     expect(obtenerSincronizacion()).toBe(sync);
   });
 
+  it('aplica la retención de la tablet ANTES de restaurar y vigila la inactividad después (ADR 0017)', async () => {
+    const orden: string[] = [];
+    const arranque = crearStoreArranque();
+    await arrancar({
+      iniciar: syncFalsa,
+      aplicarRetencion: () => {
+        orden.push('retencion');
+        expect(arranque.getState().listo).toBe(false);
+        return Promise.resolve();
+      },
+      sesion: {
+        restaurar: () => {
+          orden.push('restaurar');
+          return Promise.resolve();
+        },
+      },
+      vigilarInactividad: () => {
+        orden.push('inactividad');
+        return () => undefined;
+      },
+      arranque,
+      estadoSync: crearStoreEstadoSync(),
+      registrarBackgroundSync: () => Promise.resolve(true),
+    });
+    expect(orden).toEqual(['retencion', 'restaurar', 'inactividad']);
+    expect(arranque.getState().listo).toBe(true);
+  });
+
+  it('si la retención o la vigilancia fallan, la app arranca igual', async () => {
+    const arranque = crearStoreArranque();
+    const alError = vi.fn();
+    const restaurar = vi.fn(() => Promise.resolve());
+    await arrancar({
+      iniciar: syncFalsa,
+      aplicarRetencion: () => Promise.reject(new Error('IndexedDB')),
+      sesion: { restaurar },
+      vigilarInactividad: () => {
+        throw new Error('sin document');
+      },
+      arranque,
+      estadoSync: crearStoreEstadoSync(),
+      registrarBackgroundSync: () => Promise.resolve(false),
+      alError,
+    });
+    expect(restaurar).toHaveBeenCalledTimes(1);
+    expect(arranque.getState().listo).toBe(true);
+    expect(alError).toHaveBeenCalledTimes(2);
+  });
+
   it('si restaurar o el SW fallan, la app arranca igual (sin sesión)', async () => {
     const arranque = crearStoreArranque();
     const alError = vi.fn();

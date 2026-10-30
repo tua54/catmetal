@@ -59,6 +59,9 @@ function FormularioLogin() {
   const [errores, setErrores] = useState<{ correo?: string; contrasena?: string }>({});
   const [error, setError] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
+  // Perfil de la tablet elegido: el correo completo se usa para entrar pero nunca se muestra sin
+  // autenticar (F4-04, Ley 1581); el campo muestra el enmascarado.
+  const [elegido, setElegido] = useState<PerfilDelDispositivo | null>(null);
 
   async function enviar(evento: FormEvent) {
     evento.preventDefault();
@@ -66,7 +69,7 @@ function FormularioLogin() {
       return;
     }
     const nuevos: typeof errores = {};
-    if (correo.trim() === '') {
+    if (elegido === null && correo.trim() === '') {
       nuevos.correo = 'Escriba su correo.';
     }
     if (contrasena === '') {
@@ -81,7 +84,7 @@ function FormularioLogin() {
     setEnviando(true);
     try {
       // Al publicarse la sesión, `LoginPage` redirige.
-      await iniciarSesion(correo.trim(), contrasena);
+      await iniciarSesion(elegido?.email ?? correo.trim(), contrasena);
     } catch (causa) {
       setError(mensajeErrorLogin(causa));
       setContrasena('');
@@ -92,9 +95,18 @@ function FormularioLogin() {
   }
 
   function elegirPerfil(perfil: PerfilDelDispositivo) {
-    setCorreo(perfil.email);
+    setElegido(perfil);
+    setCorreo('');
     setErrores({});
+    setError(null);
     refContrasena.current?.focus();
+  }
+
+  function usarOtroCorreo() {
+    setElegido(null);
+    setErrores({});
+    // El campo deja de ser de solo lectura en el próximo render.
+    setTimeout(() => refCorreo.current?.focus(), 0);
   }
 
   return (
@@ -141,19 +153,39 @@ function FormularioLogin() {
             onSubmit={(evento) => void enviar(evento)}
             className="mt-6 flex flex-col gap-5"
           >
-            <Campo
-              ref={refCorreo}
-              etiqueta="Correo"
-              type="email"
-              inputMode="email"
-              autoComplete="username"
-              autoCapitalize="none"
-              spellCheck={false}
-              requerido
-              value={correo}
-              error={errores.correo}
-              onChange={(evento) => setCorreo(evento.target.value)}
-            />
+            {elegido === null ? (
+              <Campo
+                ref={refCorreo}
+                etiqueta="Correo"
+                type="email"
+                inputMode="email"
+                autoComplete="username"
+                autoCapitalize="none"
+                spellCheck={false}
+                requerido
+                value={correo}
+                error={errores.correo}
+                onChange={(evento) => setCorreo(evento.target.value)}
+              />
+            ) : (
+              <div className="flex flex-col gap-2">
+                <Campo
+                  etiqueta="Correo"
+                  type="text"
+                  readOnly
+                  autoComplete="off"
+                  value={elegido.email_enmascarado}
+                  ayuda={
+                    elegido.offline_disponible
+                      ? `${elegido.nombre} · Puede entrar sin conexión`
+                      : elegido.nombre
+                  }
+                />
+                <Boton variante="fantasma" className="self-start" onClick={usarOtroCorreo}>
+                  Usar otro correo
+                </Boton>
+              </div>
+            )}
             <Campo
               ref={refContrasena}
               etiqueta="Contraseña"
@@ -204,10 +236,7 @@ function FormularioLogin() {
                     className="flex min-h-14 w-full flex-col items-start justify-center rounded-lg border border-white/25 bg-white/10 px-4 py-2 text-left active:bg-white/20"
                   >
                     <span className="font-semibold">{perfil.nombre}</span>
-                    <span className="text-sm text-ink-300">
-                      {perfil.email}
-                      {perfil.offline_disponible ? ' · Puede entrar sin conexión' : ''}
-                    </span>
+                    <span className="text-sm text-ink-300">{perfil.email_enmascarado}</span>
                   </button>
                 </li>
               ))}

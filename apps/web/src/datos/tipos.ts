@@ -333,7 +333,11 @@ export interface PerfilLocal {
   device_id: string | null;
   verificador: VerificadorLocal | null;
   actualizado_at: string;
-  /** Último inicio de sesión (online u offline) en este dispositivo: "último perfil activo". */
+  /**
+   * Último uso del perfil en este dispositivo: inicio de sesión (online u offline), confirmación de
+   * identidad tras el bloqueo y actividad del usuario (como mucho una escritura por minuto). Decide el
+   * bloqueo al restaurar (ADR 0017 §1) y la caducidad del perfil a los 30 días (§5).
+   */
   ultimo_acceso_at: string | null;
   /**
    * El usuario cerró sesión sin poder avisar al servidor (sin conexión): su cookie de refresh puede
@@ -341,6 +345,14 @@ export interface PerfilLocal {
    * revoca en cuanto haya conexión (tablet compartida).
    */
   cierre_pendiente: boolean;
+  /**
+   * Fallos consecutivos contra el verificador local (login offline o confirmación de identidad) en
+   * este dispositivo (ADR 0017 §2). Opcional: los perfiles anteriores no lo tienen (= 0). No es un
+   * índice de Dexie, así que agregarlo no cambia el esquema.
+   */
+  intentos_offline?: number;
+  /** No se acepta otro intento contra el verificador antes de este instante (ISO), o `null`. */
+  espera_hasta?: string | null;
 }
 
 /** Candado entre pestañas en IndexedDB (alternativa a Web Locks), con expiración. */

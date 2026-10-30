@@ -1,0 +1,4 @@
+# Workers Static Assets (wrangler.jsonc: assets.directory = ../web/dist). Formato de .gitignore.
+# Vite copia este archivo a la raíz de dist. Wrangler no sube ni sirve lo que coincida (F4-08):
+# los sourcemaps quedan solo en la máquina que construye.
+*.map

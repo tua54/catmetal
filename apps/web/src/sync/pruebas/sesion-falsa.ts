@@ -35,6 +35,7 @@ export function sesionFalsa(servidor: ServidorSync, usuario: Perfil | null): Ses
       permisos: s.usuario?.permisos ?? [],
       device_id: null,
       requiere_contrasena: s.requiere,
+      bloqueada: false,
     }),
     usuarioDeLaSesion: () => s.usuario,
     obtenerAccessToken: () =>

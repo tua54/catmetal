@@ -14,6 +14,8 @@ export interface StoreSesion extends EstadoSesion {
   iniciarSesion: (email: string, password: string) => Promise<EstadoSesion>;
   cerrarSesion: () => Promise<ResultadoCierre>;
   restaurar: () => Promise<{ estado: EstadoSesion; perfiles: PerfilDelDispositivo[] }>;
+  /** "Confirme que es <nombre>" tras el bloqueo por inactividad (ADR 0017 §1). */
+  confirmarIdentidad: (password: string) => Promise<EstadoSesion>;
 }
 
 export function crearStoreSesion(gestor: GestorSesion): UseBoundStore<StoreApi<StoreSesion>> {
@@ -22,6 +24,7 @@ export function crearStoreSesion(gestor: GestorSesion): UseBoundStore<StoreApi<S
     iniciarSesion: (email, password) => gestor.iniciarSesion(email, password),
     cerrarSesion: () => gestor.cerrarSesion(),
     restaurar: () => gestor.restaurar(),
+    confirmarIdentidad: (password) => gestor.confirmarIdentidad(password),
   }));
   gestor.suscribir((estado) => store.setState({ ...estado }));
   return store;

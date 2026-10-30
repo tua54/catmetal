@@ -40,12 +40,23 @@ export function esErrorDeRed(error: unknown): error is ErrorRed {
   return error instanceof ErrorRed;
 }
 
+/** Usuario al que debe pertenecer el token (F4-05): nunca se devuelve el de otra persona. */
+export interface TokenEsperado {
+  esperado?: string;
+}
+
 /** Lo que el cliente necesita de la sesión. */
 export interface ProveedorSesion {
   /** Access token vigente (refrescándolo si está por vencer), o `null` si no hay sesión de servidor. */
-  obtenerAccessToken(): Promise<string | null>;
+  obtenerAccessToken(opciones?: TokenEsperado): Promise<string | null>;
   /** Fuerza un refresh (el servidor rechazó el token). Devuelve el nuevo token o `null`. */
-  refrescar(): Promise<string | null>;
+  refrescar(opciones?: TokenEsperado): Promise<string | null>;
+  /**
+   * Usuario de la sesión al empezar la petición. Si existe, el token y el reintento tras un 401 se
+   * piden ligados a ese usuario: si la sesión cambia a mitad de camino, no se reintenta con la de
+   * otra persona.
+   */
+  usuarioActual?(): string | null;
   /** El servidor respondió `SESION_REVOCADA` a una petición autenticada. */
   sesionRevocada?(error: ErrorApi): void;
 }
@@ -168,8 +179,11 @@ export function crearClienteApi(configuracion: ConfiguracionCliente = {}): Clien
     const autenticar = opciones.bearer === undefined && (opciones.autenticar ?? true);
     const proveedor = configuracion.proveedor;
     let token: string | null = opciones.bearer ?? null;
+    // El usuario se fija ANTES del primer `await`: el token y el reintento quedan ligados a él.
+    const esperado = autenticar ? (proveedor?.usuarioActual?.() ?? undefined) : undefined;
+    const ligado: TokenEsperado = esperado === undefined ? {} : { esperado };
     if (autenticar) {
-      token = (await proveedor?.obtenerAccessToken()) ?? null;
+      token = (await proveedor?.obtenerAccessToken(ligado)) ?? null;
       if (token === null) {
         throw new ErrorApi('NO_AUTENTICADO', 401);
       }
@@ -179,7 +193,7 @@ export function crearClienteApi(configuracion: ConfiguracionCliente = {}): Clien
     if (!respuesta.ok) {
       let error = await leerError(respuesta);
       if (autenticar && proveedor !== undefined && error.code === 'NO_AUTENTICADO') {
-        const nuevo = await proveedor.refrescar();
+        const nuevo = await proveedor.refrescar(ligado);
         if (nuevo === null) {
           throw error;
         }

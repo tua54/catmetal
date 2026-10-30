@@ -2,8 +2,11 @@
 //
 // Una sincronización, con el candado `catmetal-sync` (nunca dos a la vez entre pestañas):
 //   1. Precondiciones: sesión `online`, sin `requiere_contrasena`, access token, y la partición que se
-//      envía es la del usuario de la sesión. Se revalida antes de CADA petición: si la sesión cambió
-//      a mitad de camino, se detiene (una mutación solo sale con la sesión de su autor).
+//      envía es la del usuario de la sesión. Tras un login offline, al volver la red se intenta
+//      recuperar la sesión del servidor del MISMO usuario (F4-12). Cada petición lleva un token
+//      ligado al usuario del lote (`bearer`, sin auto-refresh ajeno) y la señal de la sesión; la
+//      sesión se revalida antes de CADA petición y después de cada respuesta, antes de escribir en
+//      la partición: si cambió a mitad de camino, se detiene sin escribir (F4-05).
 //   2. `recuperarEnviando`: lo que quedó en vuelo vuelve a la cola (el servidor es idempotente).
 //   3. Push en orden, lotes ≤ 25, hasta vaciar lo listo. Error de red/5xx/timeout → sin resultado →
 //      backoff. 403 `AUTOR_NO_COINCIDE` → se detiene y se pide la contraseña.
@@ -23,8 +26,19 @@ import {
   type SnapshotResponse,
 } from '@catmetal/shared';
 import { ZodError } from 'zod';
-import { conCandado, type GestorCandados } from '../auth/candado';
-import { ErrorApi, ErrorRed, type ClienteApi } from '../auth/cliente-api';
+import {
+  conCandado,
+  DURACION_CANDADO_SYNC_MS,
+  NOMBRE_CANDADO_SYNC,
+  type GestorCandados,
+} from '../auth/candado';
+import {
+  ErrorApi,
+  ErrorRed,
+  type ClienteApi,
+  type OpcionesPeticion,
+  type TokenEsperado,
+} from '../auth/cliente-api';
 import type { EstadoSesion } from '../auth/sesion';
 import {
   aplicarCambios,
@@ -51,7 +65,7 @@ import type { ErrorSync } from '../datos/tipos';
 import { registrarEvento } from '../datos/trazabilidad';
 import { actualizarContadores, useEstadoSync, type StoreEstadoSync } from './estado';
 
-export const NOMBRE_CANDADO_SYNC = 'catmetal-sync';
+export { NOMBRE_CANDADO_SYNC };
 
 export type MotivoSync =
   'apertura' | 'online' | 'intervalo' | 'manual' | 'visible' | 'background' | 'local' | 'sesion';
@@ -86,7 +100,12 @@ export interface ResumenSync {
 export interface SesionParaSync {
   estado(): EstadoSesion;
   usuarioDeLaSesion(): Perfil | null;
-  obtenerAccessToken(): Promise<string | null>;
+  /** Con `esperado`, nunca devuelve el token de otro usuario (F4-05). */
+  obtenerAccessToken(ligado?: TokenEsperado): Promise<string | null>;
+  /** Refresh ligado al usuario del lote, para reintentar UNA vez tras un 401. */
+  refrescar?(ligado: TokenEsperado): Promise<string | null>;
+  /** Se aborta cuando cambia o se cierra la sesión: corta las peticiones en vuelo. */
+  senalDeSesion?(): AbortSignal;
   marcarRequiereContrasena(): void;
   readonly api: ClienteApi;
 }
@@ -118,7 +137,29 @@ const CODIGOS_DE_SESION: readonly CodigoError[] = [
 /** La sesión cambió durante la sincronización: se detiene sin enviar nada más. */
 class SesionCambiada extends Error {
   override readonly name = 'SesionCambiada';
+
+  constructor() {
+    super('La sesión cambió durante la sincronización.');
+  }
 }
+
+/**
+ * Motivos que, con una sesión offline (login contra el verificador), intentan recuperar la sesión
+ * del servidor (F4-12). Un cambio local no: se registra muchas veces y sin red solo gastaría
+ * intentos; lo cubren `online`, `visible` y el intervalo.
+ */
+const MOTIVOS_RECONEXION: readonly MotivoSync[] = [
+  'apertura',
+  'online',
+  'intervalo',
+  'manual',
+  'visible',
+  'background',
+  'sesion',
+];
+
+/** Señal que nunca se aborta (sesiones sin `senalDeSesion`, por ejemplo en pruebas). */
+const SIN_SENAL = new AbortController().signal;
 
 /** El snapshot no terminó dentro del tope de páginas: error reintentable (M4). */
 class SnapshotIncompleto extends Error {
@@ -206,6 +247,8 @@ export class MotorSync {
   readonly #estado: StoreEstadoSync;
   #enCurso: Promise<ResumenSync> | null = null;
   #repetir = false;
+  /** Señal de la sesión de la sincronización en curso (una a la vez: candado). */
+  #senal: AbortSignal = SIN_SENAL;
 
   constructor(opciones: OpcionesMotor) {
     this.#opciones = opciones;
@@ -257,45 +300,148 @@ export class MotorSync {
   #conCandado(motivo: MotivoSync): Promise<ResumenSync> {
     return conCandado(NOMBRE_CANDADO_SYNC, () => this.#ejecutar(motivo), {
       locks: this.#opciones.locks,
-      duracionMs: this.#opciones.candado?.duracionMs ?? 120_000,
+      duracionMs: this.#opciones.candado?.duracionMs ?? DURACION_CANDADO_SYNC_MS,
       intervaloMs: this.#opciones.candado?.intervaloMs,
     });
   }
 
-  /** Comprueba que la sesión sigue siendo la del autor de la partición que se está enviando. */
+  /**
+   * Antes de cada petición: la sesión sigue siendo la del autor de la partición, `online`, sin
+   * `requiere_contrasena`, y no se cerró ni cambió (señal de sesión).
+   */
   #verificarSesion(userId: string): void {
+    this.#verificarAutor(userId);
     const estado = this.#opciones.sesion.estado();
-    if (
-      estado.modo !== 'online' ||
-      estado.requiere_contrasena ||
-      this.#opciones.sesion.usuarioDeLaSesion()?.id !== userId
-    ) {
-      throw new SesionCambiada('La sesión cambió durante la sincronización.');
+    if (estado.modo !== 'online' || estado.requiere_contrasena) {
+      throw new SesionCambiada();
     }
   }
 
-  async #precondiciones(resumen: ResumenSync): Promise<string | null> {
-    const estado = this.#opciones.sesion.estado();
-    const usuario = this.#opciones.sesion.usuarioDeLaSesion();
+  /**
+   * Antes de escribir en la partición lo que llegó por la red: la sesión sigue siendo la del autor y
+   * no se cerró (F4-05). Si solo perdió la sesión del servidor (`requiere_contrasena`), lo recibido
+   * con su propio token sigue siendo suyo y se guarda.
+   */
+  #verificarAutor(userId: string): void {
+    if (this.#senal.aborted || this.#opciones.sesion.usuarioDeLaSesion()?.id !== userId) {
+      throw new SesionCambiada();
+    }
+  }
+
+  /**
+   * Petición autenticada con un token ligado a `userId` (F4-05): nunca con el de otra persona ni con
+   * el auto-refresh del cliente (que tomaría la sesión que haya en ese momento). Ante 401 se
+   * refresca UNA vez para ese mismo usuario. La sesión se revalida tras cada `await`.
+   */
+  async #peticion(
+    userId: string,
+    ruta: string,
+    opciones: Omit<OpcionesPeticion, 'bearer' | 'signal' | 'autenticar'> = {},
+  ): Promise<unknown> {
+    const sesion = this.#opciones.sesion;
+    const token = await sesion.obtenerAccessToken({ esperado: userId });
+    this.#verificarSesion(userId);
+    if (token === null) {
+      throw new ErrorApi('NO_AUTENTICADO', 401);
+    }
+    try {
+      return await this.#enviarCon(userId, ruta, opciones, token);
+    } catch (error) {
+      if (
+        !(error instanceof ErrorApi && error.code === 'NO_AUTENTICADO') ||
+        sesion.refrescar === undefined
+      ) {
+        throw error;
+      }
+      const nuevo = await sesion.refrescar({ esperado: userId });
+      this.#verificarSesion(userId);
+      if (nuevo === null) {
+        throw error;
+      }
+      return this.#enviarCon(userId, ruta, opciones, nuevo);
+    }
+  }
+
+  async #enviarCon(
+    userId: string,
+    ruta: string,
+    opciones: Omit<OpcionesPeticion, 'bearer' | 'signal' | 'autenticar'>,
+    token: string,
+  ): Promise<unknown> {
+    const senal = this.#senal;
+    let respuesta: unknown;
+    try {
+      respuesta = await this.#api().peticion<unknown>(ruta, {
+        ...opciones,
+        bearer: token,
+        signal: senal,
+      });
+    } catch (error) {
+      if (senal.aborted) {
+        // `cerrarSesion` o un cambio de usuario cortó la petición en vuelo.
+        throw new SesionCambiada();
+      }
+      if (
+        error instanceof ErrorApi &&
+        error.code === 'SESION_REVOCADA' &&
+        this.#opciones.sesion.usuarioDeLaSesion()?.id === userId
+      ) {
+        // Con `bearer` el cliente no avisa a la sesión: se hace aquí, solo si sigue siendo la suya.
+        this.#opciones.sesion.marcarRequiereContrasena();
+      }
+      throw error;
+    }
+    this.#verificarAutor(userId);
+    return respuesta;
+  }
+
+  async #precondiciones(motivo: MotivoSync, resumen: ResumenSync): Promise<string | null> {
+    const sesion = this.#opciones.sesion;
+    let estado = sesion.estado();
+    const usuario = sesion.usuarioDeLaSesion();
     if (usuario === null || estado.usuario === null) {
       resumen.omitida = 'sin_sesion';
-    } else if (estado.requiere_contrasena) {
-      resumen.omitida = 'requiere_contrasena';
-    } else if (estado.modo !== 'online') {
-      resumen.omitida = 'offline';
-    } else if ((await this.#opciones.sesion.obtenerAccessToken()) === null) {
-      resumen.omitida = 'sin_token';
-    } else if (this.#opciones.sesion.usuarioDeLaSesion()?.id !== usuario.id) {
-      resumen.omitida = 'sin_sesion';
-    } else {
-      return usuario.id;
+      return null;
     }
-    return null;
+    if (
+      estado.modo === 'offline' &&
+      !estado.requiere_contrasena &&
+      MOTIVOS_RECONEXION.includes(motivo)
+    ) {
+      // F4-12: tras un login offline, la sesión del servidor del MISMO usuario se recupera con la
+      // cookie (refresh ligado a su id). Si la cookie es de otra persona, queda `requiere_contrasena`
+      // y el aviso ofrece escribir la contraseña; sin red, sigue offline.
+      await sesion.obtenerAccessToken({ esperado: usuario.id });
+      estado = sesion.estado();
+    }
+    if (sesion.usuarioDeLaSesion()?.id !== usuario.id) {
+      resumen.omitida = 'sin_sesion';
+      return null;
+    }
+    if (estado.requiere_contrasena) {
+      resumen.omitida = 'requiere_contrasena';
+      return null;
+    }
+    if (estado.modo !== 'online') {
+      resumen.omitida = 'offline';
+      return null;
+    }
+    if ((await sesion.obtenerAccessToken({ esperado: usuario.id })) === null) {
+      resumen.omitida = 'sin_token';
+      return null;
+    }
+    // Tras el `await`, la sesión pudo cambiar.
+    if (sesion.usuarioDeLaSesion()?.id !== usuario.id) {
+      resumen.omitida = 'sin_sesion';
+      return null;
+    }
+    return usuario.id;
   }
 
   async #ejecutar(motivo: MotivoSync): Promise<ResumenSync> {
     const resumen = resumenVacio(motivo);
-    const userId = await this.#precondiciones(resumen);
+    this.#senal = this.#opciones.sesion.senalDeSesion?.() ?? SIN_SENAL;
+    const userId = await this.#precondiciones(motivo, resumen);
     if (userId === null) {
       await actualizarContadores(
         this.#estado,
@@ -350,8 +496,12 @@ export class MotorSync {
         );
       }
       // Los contadores se recalculan ANTES de salir de "Sincronizando…": el indicador nunca
-      // muestra "Todo sincronizado" con un conteo viejo.
-      await actualizarContadores(this.#estado, userId);
+      // muestra "Todo sincronizado" con un conteo viejo. Son los del usuario de la sesión ACTUAL
+      // (si cambió durante la sync, nunca se muestran los de la partición anterior).
+      await actualizarContadores(
+        this.#estado,
+        this.#opciones.sesion.usuarioDeLaSesion()?.id ?? null,
+      );
     } finally {
       this.#estado.setState({
         sincronizando: false,
@@ -383,13 +533,18 @@ export class MotorSync {
 
       let resultados;
       try {
-        const respuesta = await this.#api().peticion<unknown>('/sync/push', {
+        const respuesta = await this.#peticion(userId, '/sync/push', {
           metodo: 'POST',
           // La época conocida viaja en el sobre (ADR 0016, A1). Sin época (nunca hubo pull) se omite.
           cuerpo: { user_id: userId, epoca: epoca ?? undefined, mutaciones: lote.map(aMutacion) },
         });
         resultados = syncPushResponseSchema.parse(respuesta).resultados;
       } catch (error) {
+        if (error instanceof SesionCambiada) {
+          // El lote queda `enviando`: vuelve a la cola con `recuperarEnviando` en la próxima sync de
+          // su autor y el servidor, idempotente, devuelve lo que ya hubiera aplicado.
+          throw error;
+        }
         if (error instanceof ErrorApi && error.code === 'EPOCA_CAMBIADA') {
           // El servidor no procesó ni guardó nada: el lote vuelve a la cola tal cual.
           await devolverAPendiente(userId, lote, this.#ahora());
@@ -397,19 +552,25 @@ export class MotorSync {
           return 'epoca_cambiada';
         }
         // Sin respuesta utilizable: todo el lote queda sin resultado (sigue pendiente, con backoff).
+        this.#verificarAutor(userId);
         const r = await aplicarResultados(userId, lote, [], {
           ahora: this.#ahora(),
           aleatorio: this.#opciones.aleatorio,
         });
         resumen.sin_resultado += r.sin_resultado;
         resumen.siguiente_intento_at = r.siguiente_intento_at;
-        if (error instanceof ErrorApi && error.code === 'AUTOR_NO_COINCIDE') {
+        if (
+          error instanceof ErrorApi &&
+          error.code === 'AUTOR_NO_COINCIDE' &&
+          this.#opciones.sesion.usuarioDeLaSesion()?.id === userId
+        ) {
           this.#opciones.sesion.marcarRequiereContrasena();
         }
         resumen.error = errorSyncDe(error);
         return 'ok';
       }
 
+      this.#verificarAutor(userId);
       const r = await aplicarResultados(userId, lote, resultados, {
         ahora: this.#ahora(),
         aleatorio: this.#opciones.aleatorio,
@@ -444,8 +605,9 @@ export class MotorSync {
       this.#verificarSesion(userId);
       meta = await leerMetaSync(userId);
       const respuesta = syncPullResponseSchema.parse(
-        await this.#api().peticion<unknown>(`/sync/pull?cursor=${meta.cursor}`),
+        await this.#peticion(userId, `/sync/pull?cursor=${meta.cursor}`),
       );
+      this.#verificarAutor(userId);
       const r = await aplicarCambios(userId, respuesta);
       resumen.cambios += respuesta.cambios.length;
       resumen.epoca_cambiada ||= r.epoca_cambiada;
@@ -473,6 +635,7 @@ export class MotorSync {
             throw error;
           }
         }
+        this.#verificarAutor(userId);
         await completarHidratacion(userId, accion.order_id);
       }
     }
@@ -498,9 +661,10 @@ export class MotorSync {
         parametros.set('pagina', pagina);
       }
       const respuesta = snapshotResponseSchema.parse(
-        await this.#api().peticion<unknown>(`/sync/snapshot?${parametros.toString()}`),
+        await this.#peticion(userId, `/sync/snapshot?${parametros.toString()}`),
       );
       primera ??= respuesta;
+      this.#verificarAutor(userId);
       await aplicarEntidades(userId, respuesta.entidades);
       resumen.paginas_snapshot += 1;
       pagina = respuesta.siguiente_pagina;
@@ -515,6 +679,7 @@ export class MotorSync {
       throw new SnapshotIncompleto();
     }
     if (consulta.alcance === 'inicial' && primera !== null) {
+      this.#verificarAutor(userId);
       // El cursor es el de la PRIMERA página (MAX(seq) leído antes del estado, ADR 0005 regla 7).
       const acciones = await completarSnapshot(userId, {
         cursor: primera.cursor,
@@ -539,14 +704,19 @@ export class MotorSync {
     for (const foto of listas) {
       this.#verificarSesion(userId);
       try {
-        await this.#api().peticion(`/evidences/${foto.id}`, {
+        await this.#peticion(userId, `/evidences/${foto.id}`, {
           metodo: 'PUT',
           binario: { datos: foto.datos, tipo: foto.mime },
           tiempoEsperaMs: 60_000,
         });
+        this.#verificarAutor(userId);
         await marcarEvidenciaSubida(userId, foto.id, this.#ahora());
         resumen.fotos_subidas += 1;
       } catch (error) {
+        if (error instanceof SesionCambiada) {
+          // Sigue `pendiente`: el servidor acepta otra vez los mismos bytes (mismo sha256).
+          throw error;
+        }
         const detalle = errorSyncDe(error);
         resumen.fotos_con_error += 1;
         if (error instanceof ErrorApi && [400, 413, 415].includes(error.status)) {

@@ -12,6 +12,7 @@ export {
 } from './db';
 export { ErrorDatosLocales, type CodigoErrorLocal } from './errores';
 export * from './outbox';
+export * from './retencion';
 export * from './consultas';
 export {
   aplicarCambios,
