@@ -1,0 +1,70 @@
+# Despliegue a STAGING. Solo manual (workflow_dispatch): nunca se dispara con un push ni un PR.
+# Requiere el environment protegido `staging` en GitHub (Settings → Environments) con revisores
+# obligatorios y los secretos CLOUDFLARE_API_TOKEN y CLOUDFLARE_ACCOUNT_ID (docs/despliegue.md).
+name: deploy-staging
+
+on:
+  workflow_dispatch:
+    inputs:
+      aplicar_migraciones:
+        description: 'Aplicar migraciones D1 pendientes antes de desplegar'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: false
+
+jobs:
+  calidad:
+    name: Gates antes de desplegar
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/setup@v3
+        with:
+          cache: true
+          install: false
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+
+  desplegar:
+    name: Desplegar a staging
+    needs: calidad
+    runs-on: ubuntu-latest
+    environment: staging
+    env:
+      WRANGLER_SEND_METRICS: 'false'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/setup@v3
+        with:
+          cache: true
+          install: false
+      - run: pnpm install --frozen-lockfile
+      - name: Compilar la PWA
+        run: pnpm --filter @catmetal/web build
+      - name: Aplicar migraciones D1 de staging
+        if: ${{ inputs.aplicar_migraciones }}
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: '4.156.0'
+          packageManager: pnpm
+          workingDirectory: apps/worker
+          command: d1 migrations apply mp-staging --env staging --remote
+      - name: Desplegar el Worker de staging
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: '4.156.0'
+          packageManager: pnpm
+          workingDirectory: apps/worker
+          command: deploy --env staging
