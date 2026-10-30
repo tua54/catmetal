@@ -165,6 +165,8 @@ Los cambios de la spec de esta ronda están en `docs/spec.md` §14 (v2.1).
 
 ### B7. El trigger de `settings` solo protege los UPDATE
 
+- **Estado**: RESUELTO (231ad15). Migración `0008_settings_insert_validos.sql`. Prueba: `apps/worker/test/correcciones-b7-settings-insert.test.ts`.
+
 - **Dónde**: `migrations/0004_integridad_reforzada_triggers.sql` (`settings_valores_validos`).
 - **Aceptación**:
   - Hay un trigger `BEFORE INSERT` equivalente: solo se aceptan claves conocidas y `tolerancia_pct` entre 0 y 100.
@@ -172,6 +174,8 @@ Los cambios de la spec de esta ronda están en `docs/spec.md` §14 (v2.1).
   - La prueba de `sqlite_master` se actualiza.
 
 ### B8. Restringir el despliegue a `main` dentro del workflow
+
+- **Estado**: RESUELTO (8f24550). Prueba: `apps/worker/test/correcciones-b8-workflow-despliegue.test.ts`.
 
 - **Dónde**: `.github/workflows/deploy-staging.yml`.
 - **Aceptación**: el job lleva `if: github.ref == 'refs/heads/main'`, además de la política del environment.
