@@ -43,6 +43,6 @@ describe('API pública de la capa de datos', () => {
       'rechazado_sync',
     ]);
     expect(datos.ESTADOS_SUBIDA).toEqual(['pendiente', 'subida', 'bloqueada', 'remota']);
-    expect(datos.ACCIONES_TRAZABILIDAD).toHaveLength(6);
+    expect(datos.ACCIONES_TRAZABILIDAD).toHaveLength(7);
   });
 });

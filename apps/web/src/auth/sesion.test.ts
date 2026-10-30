@@ -518,3 +518,14 @@ describe('nombreDispositivo', () => {
     expect(nombreDispositivo('')).toBe('Tablet · Navegador');
   });
 });
+
+describe('marcarRequiereContrasena (AUTOR_NO_COINCIDE en la sync)', () => {
+  it('descarta el token, pasa a offline y pide la contraseña', async () => {
+    const s = gestor();
+    await s.iniciarSesion('ana@catmetal.co', CLAVE_ANA);
+    s.marcarRequiereContrasena();
+    expect(s.estado()).toMatchObject({ modo: 'offline', requiere_contrasena: true });
+    expect(await s.obtenerAccessToken()).toBeNull();
+    expect(servidor.peticionesA('/api/v1/auth/refresh')).toHaveLength(0);
+  });
+});

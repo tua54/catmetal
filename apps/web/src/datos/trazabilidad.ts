@@ -12,6 +12,7 @@ export const DESCRIPCIONES_TRAZABILIDAD: Readonly<Record<AccionTrazabilidad, str
   'novedad.registrada': 'registró novedad',
   'consumo.aprobado': 'aprobó consumo',
   'consumo.rechazado': 'rechazó consumo',
+  'sync.completada': 'sincronizó',
 };
 
 /** "Juan Sebastián Pérez" → "Juan S."; un solo nombre se deja igual; vacío → "Usuario". */
@@ -36,6 +37,8 @@ export async function registrarEvento(
   entidadId: string,
   orderId: string | null,
   ts: string,
+  /** Texto propio (por ejemplo, el resumen de una sincronización); por defecto, el de la acción. */
+  descripcion?: string,
 ): Promise<void> {
   const perfil = await db.perfiles.get(userId);
   await db.trazabilidad.add({
@@ -43,7 +46,7 @@ export async function registrarEvento(
     user_id: userId,
     ts,
     accion,
-    descripcion: DESCRIPCIONES_TRAZABILIDAD[accion],
+    descripcion: descripcion ?? DESCRIPCIONES_TRAZABILIDAD[accion],
     actor_nombre: nombreCorto(perfil?.perfil.nombre),
     entidad_id: entidadId,
     order_id: orderId,

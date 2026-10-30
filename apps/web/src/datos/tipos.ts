@@ -345,6 +345,7 @@ export const ACCIONES_TRAZABILIDAD = [
   'novedad.registrada',
   'consumo.aprobado',
   'consumo.rechazado',
+  'sync.completada',
 ] as const;
 export type AccionTrazabilidad = (typeof ACCIONES_TRAZABILIDAD)[number];
 

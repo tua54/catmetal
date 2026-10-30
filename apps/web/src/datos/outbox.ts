@@ -1239,3 +1239,21 @@ export async function programarReintentoEvidencia(
     });
   });
 }
+
+/**
+ * Error permanente de subida (413/415/400 o `EVIDENCIA_YA_SUBIDA` con otro sha): la foto deja de
+ * reintentarse, pero sus bytes se CONSERVAN (dato de planta) y queda visible con su error.
+ */
+export async function bloquearEvidencia(
+  userId: string,
+  id: string,
+  error: ErrorSync,
+  ahora: Date = new Date(),
+): Promise<void> {
+  await db.evidencias.update([userId, id], {
+    estado_subida: 'bloqueada',
+    error_subida: error,
+    siguiente_intento_at: null,
+    actualizado_at: ahora.toISOString(),
+  });
+}

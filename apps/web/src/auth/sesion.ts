@@ -171,6 +171,14 @@ export class GestorSesion {
     return this.#estado.usuario;
   }
 
+  /**
+   * El servidor dijo que la sesión no corresponde al autor (`AUTOR_NO_COINCIDE`) u otra señal de
+   * que la sesión del servidor no es confiable: se descarta el token y se pide la contraseña.
+   */
+  marcarRequiereContrasena(): void {
+    this.#perderSesionDelServidor();
+  }
+
   /** Se llama con cada cambio de estado. Devuelve la función para desuscribirse. */
   suscribir(oyente: Oyente): () => void {
     this.#oyentes.add(oyente);
