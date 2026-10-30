@@ -5,11 +5,12 @@
 ## Estado actual
 
 - Rama de trabajo: `build/v1` (línea base en `main`: `bfa8975`).
-- Fases 0 y 1 cerradas (tags `fase-0`, `fase-1`). Fase en curso: **Fase 2 — API de negocio**.
+- Fases 0, 1 y 2 cerradas (tags `fase-0`, `fase-1`, `fase-2`). Fase en curso: **Fase 3 — Sincronización**.
+- Ya confirmadas de la Fase 3 (adelantadas): 3.3 (Dexie + outbox), 3.4 (cliente de auth), contrato de `/sync/snapshot`. En curso: 3.5 (motor de sync del cliente, `react-developer`).
 
 ## Siguiente paso
 
-Confirmar `docs/plan-fase-2.md` (ya redactado, con los patrones de la ADR 0010) y delegar la tarea 2.1 (infraestructura de comandos de dominio, materiales, settings, órdenes y asignaciones).
+Confirmar `docs/plan-fase-3.md` y delegar las tareas de servidor 3.1 (`/sync/push`) y 3.2 (`/sync/pull` y `/sync/snapshot`) a `general-purpose`; al terminar la 3.5, integrar y pedir la revisión 3.6 a `database-specialist`.
 
 ## Mapeo de subagentes
 
@@ -70,7 +71,7 @@ No se usan `mvc-dotnet-developer`, `angular-developer` ni `orchestrator`.
 - Preguntas nuevas: P20 (lote obligatorio), P21 (fotos HEIC).
 - Cierre: gates en verde, 466 pruebas. Evidencia: `docs/evidencia/fase-1.md`.
 
-### Fase 2 — API de negocio (en curso)
+### Fase 2 — API de negocio (cerrada)
 
 - 2.1 Infraestructura de comandos de dominio, materiales, settings, órdenes y asignaciones (general-purpose), en curso.
 - **Tarea adelantada 4.1** (sistema visual y componentes base, `ui-ux-designer`, ADR 0011): se ejecuta en paralelo con la Fase 2 porque solo toca `apps/web/src/components/ui` y no depende del backend. Su commit lleva `Fase: 4`.
@@ -81,3 +82,5 @@ No se usan `mvc-dotnet-developer`, `angular-developer` ni `orchestrator`.
 - Tareas adelantadas confirmadas: 3.3 (Dexie + outbox) y 3.4 (cliente de auth, Dexie v2 con tabla `candados`).
 - Decisión menor (3.4): el login cae al verificador offline solo ante error de red o 5xx del servidor; un rechazo del servidor (credenciales, bloqueo, origen) nunca abre la sesión offline. Se revisará en la seguridad de la Fase 4.
 - `pnpm audit --prod`: sin vulnerabilidades conocidas.
+- 2.8 correcciones de seguridad confirmadas (`2594d7e`).
+- Cierre: 1.428 pruebas en verde; `pnpm audit --prod` sin vulnerabilidades. Evidencia: `docs/evidencia/fase-2.md`.

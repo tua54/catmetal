@@ -27,7 +27,10 @@
 
 | # | Estado | Commit / referencia |
 |---|---|---|
-| H-01, H-02, H-03, H-04, H-05, H-06, H-07, H-10, H-11 (correo), H-12, H-13 | En corrección (tarea 2.8) | — |
+| H-01, H-02, H-03, H-04, H-05, H-06, H-07, H-10, H-11 (correo), H-12, H-13 | **Corregidos** con pruebas (`apps/worker/test/fase2-seguridad-correcciones.test.ts`, `auth-middleware.test.ts`, `auth-unidades.test.ts`) | Commit `2594d7e` (tarea 2.8) |
+| H-03 (detalle) | Si el renombre gana la carrera, la desactivación recibe 409 y la PWA relee y reintenta; no hay pérdida de actualizaciones | — |
+| H-04 (detalle) | `?entidad=users\|devices\|refresh_tokens` sin `admin.gestionar` devuelve lista vacía (no 403), coherente con el filtrado del supervisor | ADR 0013 |
+| H-07 (detalle) | Regla de secretos (≥ 43 caracteres y distintos) a documentar en `docs/despliegue.md` (Fase 6) | — |
 | H-08 | Aceptado: UUID v7 con CSPRNG | `packages/shared/src/uuid.ts` |
 | H-09 | Pregunta abierta P23 | `docs/preguntas-abiertas.md` |
 | H-11 (EXIF) | Fase 4 (recodificación en la PWA) | — |
