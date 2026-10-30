@@ -106,7 +106,7 @@ npx wrangler d1 execute mp-staging --env staging --remote --file="$env:TEMP\catm
 Remove-Item "$env:TEMP\catmetal-desbloqueo-emergencia.sql"
 ```
 
-En Linux o macOS, el archivo queda en `$(node -p "require('os').tmpdir()")/catmetal-desbloqueo-emergencia.sql`, o donde indique `--salida`. Después, la persona entra con su contraseña desde cualquier dispositivo. Si el ataque continúa, conviene que entre desde un dispositivo conocido.
+En Linux o macOS, el archivo queda en `$(node -p "require('os').tmpdir()")/catmetal-desbloqueo-emergencia.sql`, o donde indique `--salida`. **El archivo contiene el correo en claro (S-07): bórrelo apenas lo aplique**, como hace el último comando de arriba. Después, la persona entra con su contraseña desde cualquier dispositivo. Si el ataque continúa, conviene que entre desde un dispositivo conocido.
 
 ## 6. Desplegar
 
@@ -236,6 +236,8 @@ Procedimiento (ADR 0021, que reemplaza el de la revisión de esquema H9). La bas
 11. **Ponga la base en servicio.** Apunte el binding del entorno a la base nueva (`database_id` en `wrangler.jsonc`), despliegue y verifique (secciones 9.3 y 9.4).
     - **Avise a planta: todos deben iniciar sesión otra vez con conexión**, porque `refresh_tokens` no se restaura. El inicio de sesión sin conexión de la tablet y su cola de pendientes no se ven afectados: lo pendiente se envía después de ese inicio de sesión.
 12. **Rehaga** lo que el informe lista como hecho por REST en la ventana (por ejemplo, las decisiones del jefe y los cambios de usuarios) y revise los rechazos.
+    - **Seguridad (S-04):** `users` vuelve a su valor exportado. Una desactivación, una baja de rol o un restablecimiento de contraseña hechos **después** de exportar `users` y antes del desastre no aparecen en `revisar_seguridad`. Reaplíquelos desde la base dañada (Time Travel de solo lectura) o desde Workers Logs.
+    - Si la restauración se debe a un incidente de seguridad, **rote `JWT_SECRET` y `REFRESH_SECRET`** (sección 3) antes de reabrir. Eso invalida las sesiones y las cookies de dispositivo `mp_dispositivo` (ADR 0018), que dependen de `REFRESH_SECRET`.
 13. **Borre** la carpeta temporal.
 
 **Ensayo en local** (autorizado; no toca nada remoto). Con dos carpetas de estado local:

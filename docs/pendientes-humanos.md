@@ -51,3 +51,7 @@ Los comandos exactos, en orden, están en `docs/despliegue.md` (secciones 2 a 6)
 
 - **D1 remota (M3/M4)**: en un ensayo de restauración en staging, verificar que exista `octet_length`, el límite de 100 KB por sentencia, el tope de 5 términos por `UNION ALL`, si `wrangler d1 execute --file` es atómico y que `PRAGMA foreign_key_check` funcione. Los resultados van a `docs/notas-plataforma.md`.
 - **Rate limit de `/sync/push` (ADR 0020, D.4)**: evaluar un binding de Rate Limiting por usuario para el push.
+
+## Seguridad (revisión de las correcciones v1.1)
+
+- **S-08 (anterior a la v1.1)**: `mp_refresh` se lee con `getCookie` (una sola aparición) y solo se borra la del host. Un subdominio hermano de `catmetal.com` podría plantar otra con `Domain=` para forzar un cierre de sesión o fijar una sesión. Mitigación recomendada: no delegar subdominios de `catmetal.com` a terceros, o servir la app desde un dominio propio. Si no, aplicar la misma lectura robusta de `mp_dispositivo` (ADR 0018) a `mp_refresh` en una versión futura.
