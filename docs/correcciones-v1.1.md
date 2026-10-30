@@ -139,6 +139,8 @@ Los cambios de la spec de esta ronda están en `docs/spec.md` §14 (v2.1).
 
 ### B3. Una colisión de PK con una fila ajena debe responder `conflicto` (spec §4)
 
+- **Estado**: PARCIAL: servidor RESUELTO (f8b5c1b); falta que el cliente lo muestre como conflicto. Prueba: `apps/worker/test/correcciones-b3-colision-pk.test.ts`.
+
 - **Dónde**: `apps/worker/src/dominio/errores-d1.ts:226` y `apps/worker/src/sync/push.ts:456` (hoy responde `rechazada` con `ID_DUPLICADO`).
 - **Aceptación**:
   - La respuesta es `conflicto`, sin datos de la fila ajena (no se filtra nada a otros usuarios). El cliente la muestra como conflicto.
@@ -200,12 +202,16 @@ Los cambios de la spec de esta ronda están en `docs/spec.md` §14 (v2.1).
 
 ### B11. Aprobar y rechazar dependen de cómo D1 cuenta los cambios
 
+- **Estado**: RESUELTO (69eb496). Prueba: `apps/worker/test/correcciones-b11-validaciones.test.ts`.
+
 - **Dónde**: `apps/worker/src/dominio/validaciones.ts:171` (`cambiosEsperados: 2`); `docs/notas-plataforma.md:63`.
 - **Aceptación**:
   - La verificación del resultado no depende de que `meta.changes` incluya las filas que actualiza un trigger. Por ejemplo, comprueba con una lectura en el mismo batch o con `RETURNING`.
   - Hay una prueba que no asume ese conteo.
 
 ### B12. Tope de consultas por invocación del push en condiciones de contención
+
+- **Estado**: RESUELTO (65e4732). ADR 0025. Prueba: `apps/worker/test/correcciones-b12-presupuesto-push.test.ts`.
 
 - **Dónde**: `apps/worker/src/sync/push.ts` (`MAX_INTENTOS`).
 - **Aceptación**:
