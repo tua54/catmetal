@@ -5,7 +5,7 @@
 //
 // 1. `leerMutationId`; ilegible → `rechazada VALIDACION` por `indice`, sin guardar.
 // 2. `sync_mutations` existente: del mismo usuario → su respuesta guardada; de otro usuario →
-//    `rechazada ID_DUPLICADO` sin revelar nada.
+//    `conflicto ID_DUPLICADO` sin revelar nada (colisión de clave primaria, B3).
 // 3. Tamaño > 64 KiB o `mutacionSchema.safeParse` inválida → `rechazada VALIDACION`, guardada.
 // 4. Dependencia: el consumo del que depende (edición, novedad, aprobación, rechazo) tuvo su creación
 //    no aplicada en este lote, o no existe y su creación quedó rechazada guardada →
@@ -18,7 +18,8 @@
 // 6. Clasificador de errores:
 //    - `ErrorApi` de negocio (incluidos los errores de restricción o de trigger de D1, que
 //      `ejecutarPlan` ya traduce) → `conflicto` (CONFLICTO sobre un consumo existente, con su
-//      versión del servidor) o `rechazada`, guardada en su propio batch con `payload_json`.
+//      versión del servidor; o colisión de clave primaria, sin datos de la fila existente) o
+//      `rechazada`, guardada en su propio batch con `payload_json`.
 //    - Antes de clasificar se relee `sync_mutations`: si otra petición la escribió entretanto, se
 //      devuelve esa respuesta (reintento concurrente).
 //    - TRANSITORIO (detiene el lote; esta y las siguientes quedan sin resultado y el cliente las
@@ -186,6 +187,17 @@ function rechazo(code: CodigoError, message: string = MENSAJES_ERROR[code]): Res
   return { resultado: 'rechazada', code, message };
 }
 
+/**
+ * Colisión de clave primaria (docs/spec.md §4; B3): el id que generó el cliente (de la entidad o el
+ * `mutation_id`) ya existe y NO es la misma fila que describe la mutación. Es un `conflicto`, nunca
+ * una sobrescritura. Sin `servidor` ni ningún dato de la fila existente: puede ser de otro usuario.
+ */
+const COLISION_DE_ID: RespuestaGuardada = {
+  resultado: 'conflicto',
+  code: 'ID_DUPLICADO',
+  message: MENSAJES_ERROR.ID_DUPLICADO,
+};
+
 const COLUMNAS_SYNC =
   'mutation_id, user_id, device_id, tipo, resultado, respuesta_json, payload_json, procesada_at, created_at, updated_at';
 
@@ -206,7 +218,7 @@ function respuestaDeGuardada(
 ): RespuestaGuardada {
   // Idempotencia ligada al usuario (ADR 0009): nunca se revela la respuesta de otro.
   if (fila.user_id !== sesion.actor.id) {
-    return rechazo('ID_DUPLICADO');
+    return { ...COLISION_DE_ID };
   }
   return JSON.parse(fila.respuesta_json) as RespuestaGuardada;
 }
@@ -464,10 +476,8 @@ async function clasificar(
   error: ErrorApi,
 ): Promise<RespuestaGuardada> {
   if (error.code === 'ID_DUPLICADO') {
-    const yaAplicada = await aplicadaPorClaveNatural(sesion, m);
-    if (yaAplicada !== null) {
-      return yaAplicada;
-    }
+    // La misma fila (mismo autor y datos de identidad) → ya aplicada (ADR 0016). Si no, colisión.
+    return (await aplicadaPorClaveNatural(sesion, m)) ?? { ...COLISION_DE_ID };
   }
   const dependeDe = consumoDelQueDepende(m);
   if (

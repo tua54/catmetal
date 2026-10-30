@@ -112,7 +112,8 @@ describe('idempotencia por mutation_id', () => {
     ).toBe(1);
   });
 
-  it('un mutation_id de otro usuario responde ID_DUPLICADO sin revelar la respuesta guardada', async () => {
+  // B3 (docs/spec.md §4): una colisión de clave primaria es `conflicto` (antes `rechazada`).
+  it('un mutation_id de otro usuario responde conflicto ID_DUPLICADO sin revelar la respuesta guardada', async () => {
     const { orden, material } = await escenarioOrden(jefe, supervisor);
     await asignar(orden, otroSupervisor.usuario.id, admin.usuario.id);
     const m = crearConsumo(orden, material);
@@ -124,7 +125,7 @@ describe('idempotencia por mutation_id', () => {
     expect(r).toEqual({
       indice: 0,
       mutation_id: m.mutation_id,
-      resultado: 'rechazada',
+      resultado: 'conflicto',
       code: 'ID_DUPLICADO',
       message: expect.any(String) as string,
     });

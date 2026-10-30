@@ -125,7 +125,8 @@ describe('M2: idempotencia por clave natural (entidad sin su fila de sync_mutati
     expect(await pushOk(supervisor.token, supervisor.usuario.id, [m])).toEqual([r]);
   });
 
-  it('si la clave natural no coincide sigue siendo rechazada ID_DUPLICADO', async () => {
+  // B3 (docs/spec.md §4): la colisión de clave primaria es `conflicto` (antes `rechazada`).
+  it('si la clave natural no coincide es conflicto ID_DUPLICADO (sin datos de la fila)', async () => {
     const { m } = await consumoPorRest();
     const otraHora = {
       ...m,
@@ -133,7 +134,7 @@ describe('M2: idempotencia por clave natural (entidad sin su fila de sync_mutati
       payload: { ...m.payload, client_created_at: new Date(Date.now() - 60_000).toISOString() },
     };
     const [r] = await pushOk(supervisor.token, supervisor.usuario.id, [otraHora]);
-    expect(r).toMatchObject({ resultado: 'rechazada', code: 'ID_DUPLICADO' });
+    expect(r).toMatchObject({ resultado: 'conflicto', code: 'ID_DUPLICADO' });
     expect(r?.servidor).toBeUndefined();
 
     // Otro autor con los mismos datos tampoco (no se reconoce lo de otro como propio).
@@ -142,7 +143,8 @@ describe('M2: idempotencia por clave natural (entidad sin su fila de sync_mutati
     void orden;
     const ajena = { ...m, mutation_id: uuidv7() };
     const [r2] = await pushOk(otroSupervisor.token, otroSupervisor.usuario.id, [ajena]);
-    expect(r2).toMatchObject({ resultado: 'rechazada', code: 'ID_DUPLICADO' });
+    expect(r2).toMatchObject({ resultado: 'conflicto', code: 'ID_DUPLICADO' });
+    expect(r2?.servidor).toBeUndefined();
   });
 
   it('novedad.crear ya registrada por REST → aplicada con sus evidencias', async () => {
@@ -155,7 +157,7 @@ describe('M2: idempotencia por clave natural (entidad sin su fila de sync_mutati
     expect((await filaSync(n.mutation_id))?.resultado).toBe('aplicada');
   });
 
-  it('consumo.aprobar ya aplicado por REST con la misma decisión → aplicada; con otra decisión → ID_DUPLICADO', async () => {
+  it('consumo.aprobar ya aplicado por REST con la misma decisión → aplicada; con otra decisión → conflicto ID_DUPLICADO', async () => {
     const { consumo } = await consumoPorRest();
     const m = decidirMut('aprobar', consumo.id, 1);
     const rest = await api(`/consumptions/${consumo.id}/approve`, {
@@ -175,7 +177,8 @@ describe('M2: idempotencia por clave natural (entidad sin su fila de sync_mutati
     const rechazo = { ...decidirMut('rechazar', consumo.id, 1), mutation_id: uuidv7() };
     rechazo.payload.id = m.payload.id;
     const [r2] = await pushOk(jefe.token, jefe.usuario.id, [rechazo]);
-    expect(r2).toMatchObject({ resultado: 'rechazada', code: 'ID_DUPLICADO' });
+    expect(r2).toMatchObject({ resultado: 'conflicto', code: 'ID_DUPLICADO' });
+    expect(r2?.servidor).toBeUndefined();
   });
 });
 

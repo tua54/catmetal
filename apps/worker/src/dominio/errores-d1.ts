@@ -110,7 +110,8 @@ function leerUnico(lista: string): DetalleRestriccionUnica {
  * red, sobrecarga, SQL inválido…), para que el llamador lo relance como error interno o transitorio.
  *
  * - PK propia (`id`, `mutation_id`) → `ID_DUPLICADO` (un id del cliente que ya existe: nunca se
- *   sobrescribe) con `details: { entidad, campos }`. Sin el código extendido (PK y UNIQUE dan el
+ *   sobrescribe) con `details: { entidad, campos }`: 409 en el REST y `conflicto` sin datos de la
+ *   fila existente en `/sync/push` (docs/spec.md §4; B3). Sin el código extendido (PK y UNIQUE dan el
  *   mismo texto), una única columna `id`/`mutation_id` se trata como PK propia.
  * - Otro UNIQUE o PK compuesta → `CONFLICTO` con `details: { entidad, campos }` (código repetido o
  *   carrera entre dos peticiones).
