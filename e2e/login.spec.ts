@@ -77,7 +77,8 @@ test.describe('Sesión persistente', () => {
 
     const sesionRecuperada = botonCuenta(page, JEFE);
     const perfilEnLogin = page.getByRole('button', {
-      name: /Roberto Martínez\s+jefe@catmetal\.test/,
+      // Correo enmascarado en el login (revisión de seguridad F4-04).
+      name: /Roberto Martínez\s*j\*\*\*@catmetal\.test/,
     });
     // Lo que no puede pasar en ningún navegador es una pantalla vacía o con error.
     await expect(sesionRecuperada.or(perfilEnLogin)).toBeVisible();

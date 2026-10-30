@@ -27,7 +27,10 @@ test.describe('Login sin conexión (verificador local, ADR 0012)', () => {
     await iniciarSesionPorUI(page, JEFE);
     await esperarShellPrecacheado(page);
     await cerrarSesionPorUI(page, JEFE);
-    await expect(page.getByText('Puede entrar sin conexión')).toBeVisible();
+    // Desde la revisión de seguridad F4-04 el correo se muestra enmascarado y la indicación de que el
+    // perfil puede entrar sin conexión aparece al elegirlo.
+    await page.getByRole('button', { name: /Roberto Martínez\s*j\*\*\*@catmetal\.test/ }).click();
+    await expect(page.getByText(/Puede entrar sin conexión/)).toBeVisible();
 
     // 2. Sin red (se recarga para comprobar que el shell también abre sin conexión).
     await cortarRed(context);
