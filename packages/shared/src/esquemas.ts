@@ -386,6 +386,12 @@ export const mutacionSchema = z.discriminatedUnion(
  */
 export const syncPushRequestSchema = z.object({
   user_id: uuidV7Schema,
+  /**
+   * Época de sync que conoce el cliente (ADR 0009/0016). Si no coincide con la del servidor, el push
+   * responde 409 `EPOCA_CAMBIADA` sin procesar ni guardar nada. Ausente = cliente viejo o primer
+   * arranque (se procesa).
+   */
+  epoca: z.string().min(1).max(64).optional(),
   mutaciones: z
     .array(z.unknown(), { error: 'La lista de mutaciones es obligatoria.' })
     .min(1, { error: 'Envíe al menos una mutación.' })

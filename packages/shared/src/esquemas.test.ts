@@ -874,3 +874,18 @@ describe('caracteres de control en textos libres', () => {
     invalido(crearOrdenSchema, { ...orden, linea: `Línea${NUL}1` });
   });
 });
+
+describe('syncPushRequestSchema: época opcional (ADR 0016)', () => {
+  const base = { user_id: '019a3000-0000-7000-8000-000000000001', mutaciones: [{}] };
+
+  it('acepta el sobre sin época y con época', () => {
+    expect(syncPushRequestSchema.safeParse(base).success).toBe(true);
+    const r = syncPushRequestSchema.safeParse({ ...base, epoca: 'abc' });
+    expect(r.success && r.data.epoca).toBe('abc');
+  });
+
+  it('rechaza una época vacía o demasiado larga', () => {
+    expect(syncPushRequestSchema.safeParse({ ...base, epoca: '' }).success).toBe(false);
+    expect(syncPushRequestSchema.safeParse({ ...base, epoca: 'x'.repeat(65) }).success).toBe(false);
+  });
+});

@@ -915,7 +915,7 @@ describe('retención y cierre de sesión', () => {
     );
   }
 
-  it('purga solo las aplicadas con más de 7 días, nunca las rechazadas', async () => {
+  it('purga solo las aplicadas con más de 30 días (RETENCION_MUTACIONES_APLICADAS_DIAS), nunca las rechazadas', async () => {
     await registrarConsumoLocal(A, entradaConsumo());
     await aplicarTodo(A, new Date('2026-10-01T10:00:00.000Z'));
     await registrarConsumoLocal(A, entradaConsumo());
@@ -928,7 +928,7 @@ describe('retención y cierre de sesión', () => {
     await registrarConsumoLocal(B, entradaConsumo());
     await aplicarTodo(B, new Date('2026-10-01T10:00:00.000Z'));
 
-    const purgado = await purgarAplicadasAntiguas(A, new Date('2026-10-29T10:00:00.000Z'));
+    const purgado = await purgarAplicadasAntiguas(A, new Date('2026-11-05T10:00:00.000Z'));
     expect(purgado.mutaciones).toBe(1);
     const restantes = (await db.outbox.toArray()).filter((m) => m.user_id === A);
     expect(restantes.map((m) => m.estado).sort()).toEqual(['aplicada', 'rechazada']);
@@ -936,7 +936,7 @@ describe('retención y cierre de sesión', () => {
     expect((await db.outbox.toArray()).filter((m) => m.user_id === B)).toHaveLength(1);
   });
 
-  it('libera los bytes de fotos subidas hace más de 7 días', async () => {
+  it('libera los bytes de fotos subidas hace más de 30 días', async () => {
     const r = await registrarConsumoConNovedadLocal(
       A,
       entradaConsumo(),
@@ -945,7 +945,7 @@ describe('retención y cierre de sesión', () => {
     );
     const [foto] = await db.evidencias.toArray();
     await marcarEvidenciaSubida(A, foto!.id, new Date('2026-10-01T10:00:00.000Z'));
-    const purgado = await purgarAplicadasAntiguas(A, new Date('2026-10-29T10:00:00.000Z'));
+    const purgado = await purgarAplicadasAntiguas(A, new Date('2026-11-05T10:00:00.000Z'));
     expect(purgado.fotos_liberadas).toBe(1);
     expect((await db.evidencias.get([A, foto!.id]))?.datos).toBeNull();
     expect(r.novedad_id).toBeDefined();

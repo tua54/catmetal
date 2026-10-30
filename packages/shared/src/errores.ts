@@ -33,6 +33,7 @@ const LISTA_CODIGOS_ERROR = [
   'ID_DUPLICADO',
   'LOTE_DEMASIADO_GRANDE',
   'AUTOR_NO_COINCIDE',
+  'EPOCA_CAMBIADA',
   'ULTIMO_ADMIN',
   'ERROR_INTERNO',
 ] as const;
@@ -93,6 +94,8 @@ export const MENSAJES_ERROR: Readonly<Record<CodigoError, string>> = {
   // /sync/push con un user_id distinto del de la sesión (tablet compartida, ADR 0008 punto 8).
   AUTOR_NO_COINCIDE:
     'Estas mutaciones pertenecen a otro usuario. Inicie sesión con su propio usuario para enviarlas.',
+  // /sync/push con una época distinta de la del servidor (restauración, ADR 0009): no se procesa nada.
+  EPOCA_CAMBIADA: 'El servidor fue restaurado. Se están sincronizando de nuevo sus registros.',
   ULTIMO_ADMIN: 'No se puede desactivar ni cambiar el rol del último administrador activo.',
   ERROR_INTERNO: 'Ocurrió un error inesperado en el servidor. Intente de nuevo más tarde.',
 };
@@ -129,6 +132,7 @@ export const ESTADO_HTTP_POR_CODIGO: Readonly<Record<CodigoError, number>> = {
   ID_DUPLICADO: 409,
   LOTE_DEMASIADO_GRANDE: 413,
   AUTOR_NO_COINCIDE: 403,
+  EPOCA_CAMBIADA: 409,
   ULTIMO_ADMIN: 422,
   ERROR_INTERNO: 500,
 };

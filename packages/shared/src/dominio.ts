@@ -93,8 +93,12 @@ export const ALERTA_RELOJ_MS = 600_000;
  * perdida y no como robo (ADR 0008 punto 3), en ms: 30 s.
  */
 export const VENTANA_GRACIA_REFRESH_MS = 30_000;
-/** Días mínimos que el cliente conserva las mutaciones `aplicada` antes de purgarlas (ADR 0009). */
-export const RETENCION_MUTACIONES_APLICADAS_DIAS = 7;
+/**
+ * Días mínimos que el cliente conserva las mutaciones `aplicada` (y los bytes de sus fotos) antes de
+ * purgarlas (ADR 0009 y 0016): igual al horizonte de Time Travel de D1 (30 días), para poder
+ * reenviarlas tras una restauración.
+ */
+export const RETENCION_MUTACIONES_APLICADAS_DIAS = 30;
 /** Tamaño máximo de una mutación serializada en JSON, en bytes: 64 KiB (ADR 0009). */
 export const MAX_PAYLOAD_MUTACION_BYTES = 65_536;
 export const ZONA_HORARIA = 'America/Bogota';

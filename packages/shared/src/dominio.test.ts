@@ -63,7 +63,7 @@ describe('dominio', () => {
     expect(ALERTA_RELOJ_MS).toBe(10 * 60 * 1000);
     expect(ZONA_HORARIA).toBe('America/Bogota');
     expect(VENTANA_GRACIA_REFRESH_MS).toBe(30_000);
-    expect(RETENCION_MUTACIONES_APLICADAS_DIAS).toBe(7);
+    expect(RETENCION_MUTACIONES_APLICADAS_DIAS).toBe(30);
     expect(MAX_PAYLOAD_MUTACION_BYTES).toBe(64 * 1024);
   });
 

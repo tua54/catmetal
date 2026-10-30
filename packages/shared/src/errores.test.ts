@@ -39,6 +39,7 @@ const MINIMOS = [
   'ID_DUPLICADO',
   'LOTE_DEMASIADO_GRANDE',
   'AUTOR_NO_COINCIDE',
+  'EPOCA_CAMBIADA',
   'ULTIMO_ADMIN',
   'ERROR_INTERNO',
 ];
@@ -127,6 +128,10 @@ describe('errores', () => {
     expect(MENSAJES_ERROR.AUTOR_NO_COINCIDE).toBe(
       'Estas mutaciones pertenecen a otro usuario. Inicie sesión con su propio usuario para enviarlas.',
     );
+    expect(MENSAJES_ERROR.EPOCA_CAMBIADA).toBe(
+      'El servidor fue restaurado. Se están sincronizando de nuevo sus registros.',
+    );
+    expect(ESTADO_HTTP_POR_CODIGO.EPOCA_CAMBIADA).toBe(409);
     expect(MENSAJES_ERROR.ULTIMO_ADMIN).toBe(
       'No se puede desactivar ni cambiar el rol del último administrador activo.',
     );
