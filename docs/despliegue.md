@@ -250,6 +250,8 @@ R2 no se restaura con D1: tras una restauración puede haber evidencias con `sub
 SELECT id, storage_key, sha256 FROM evidences WHERE subido = 0;
 ```
 
+Fuera de una restauración pasa lo mismo cuando una subida no llega a confirmarse en D1: el Worker nunca borra el objeto (ADR 0024) y registra el aviso `evidencia_no_confirmada` con el `evidencia_id` en Workers Logs. Queda como máximo un objeto por evidencia, que se reconcilia con este mismo procedimiento.
+
 ## 10. Datos personales (Ley 1581 de 2012)
 
 | Dato | Dónde | Para qué | Retención |

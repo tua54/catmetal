@@ -17,7 +17,6 @@ import { sha256Hex } from '../src/dominio/evidencias';
 import { LIMITE_CUERPO_BYTES } from '../src/middleware/limite-cuerpo';
 import { diagnosticarSecretos, LONGITUD_MINIMA_SECRETO } from '../src/middleware/secretos';
 import { TIEMPO_MINIMO_LOGIN_FALLIDO_MS } from '../src/rutas/auth';
-import { borrarObjetoHuerfano } from '../src/rutas/evidencias';
 import {
   BASE,
   crearUsuarioConClave,
@@ -514,23 +513,9 @@ describe('H-05: límite de tamaño del cuerpo en /api/v1/*', () => {
 });
 
 // ---------------------------------------------------------------------------------------------
-// Extra (revisión 2.5): borrado del objeto huérfano de R2
+// Extra (revisión 2.5): el borrado del objeto huérfano de R2 (`borrarObjetoHuerfano`) se eliminó en
+// B4: una subida que no confirma ya no borra nada (ver correcciones-b4-evidencias-concurrencia).
 // ---------------------------------------------------------------------------------------------
-
-describe('borrarObjetoHuerfano', () => {
-  it('borra el objeto de R2 local', async () => {
-    const clave = `evidencias/prueba/${uuidv7()}`;
-    await env.EVIDENCE.put(clave, new Uint8Array([1, 2, 3]));
-    await borrarObjetoHuerfano(env.EVIDENCE, clave);
-    expect(await env.EVIDENCE.get(clave)).toBeNull();
-  });
-
-  it('no lanza si la clave no existe', async () => {
-    await expect(
-      borrarObjetoHuerfano(env.EVIDENCE, `evidencias/prueba/${uuidv7()}`),
-    ).resolves.toBeUndefined();
-  });
-});
 
 // ---------------------------------------------------------------------------------------------
 // H-07: secretos fuertes y distintos

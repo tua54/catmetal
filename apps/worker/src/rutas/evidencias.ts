@@ -4,7 +4,7 @@
 // Esta sub-app se monta en la RAÍZ de `/api/v1` (app.ts) y declara sus rutas completas, con los
 // middlewares POR RUTA.
 
-import { idParamSchema, MAX_EVIDENCIA_BYTES } from '@catmetal/shared';
+import { type Evidencia, idParamSchema, MAX_EVIDENCIA_BYTES } from '@catmetal/shared';
 import { Hono } from 'hono';
 import { contextoDesdeHono } from '../dominio/contexto';
 import {
@@ -16,7 +16,7 @@ import {
   tipoDeContenido,
   validarArchivo,
 } from '../dominio/evidencias';
-import { ejecutarPlan } from '../dominio/plan';
+import { ejecutarPlan, type PlanDeEscritura } from '../dominio/plan';
 import { puedeVerConsumo } from '../dominio/visibilidad';
 import { ErrorApi } from '../errores';
 import { registrar } from '../log';
@@ -24,18 +24,13 @@ import { autenticar, requierePermiso } from '../middleware/autenticar';
 import type { AppEnv } from '../tipos';
 import { validar } from '../validacion';
 
-/** Borra un objeto de R2 sin lanzar: si falla, solo deja un log sin datos personales. */
-export async function borrarObjetoHuerfano(bucket: R2Bucket, clave: string): Promise<void> {
-  try {
-    await bucket.delete(clave);
-  } catch (error) {
-    registrar('aviso', 'evidencia_huerfana_no_borrada', {
-      error: error instanceof Error ? error.name : 'desconocido',
-    });
-  }
+export interface OpcionesRutasEvidencias {
+  /** Solo pruebas: confirma la subida en D1 (por defecto, `ejecutarPlan`). */
+  confirmarSubida?: (db: D1Database, plan: PlanDeEscritura<Evidencia>) => Promise<Evidencia>;
 }
 
-export function crearRutasEvidencias(): Hono<AppEnv> {
+export function crearRutasEvidencias(opciones: OpcionesRutasEvidencias = {}): Hono<AppEnv> {
+  const confirmarSubida = opciones.confirmarSubida ?? ejecutarPlan;
   const rutas = new Hono<AppEnv>();
 
   rutas.put(
@@ -77,23 +72,22 @@ export function crearRutasEvidencias(): Hono<AppEnv> {
       });
       const plan = planMarcarSubida(ctx, evidencia);
       try {
-        return c.json(await ejecutarPlan(ctx.db, plan));
+        return c.json(await confirmarSubida(ctx.db, plan));
       } catch (error) {
-        // Otra subida de la misma foto (mismo sha256, ya verificado) ganó la carrera: idempotente.
-        // El objeto de R2 es el mismo contenido en la misma clave: se conserva.
-        // `undefined` = no se pudo releer: ante la duda, el objeto de R2 no se borra.
-        const actual = await buscarEvidencia(ctx.db, evidencia.id).catch(() => undefined);
-        if (actual?.subido === 1) {
-          if (error === plan.siNoAplica) {
+        // B4: una subida que no confirma NUNCA borra el objeto de R2. La clave es fija por evidencia
+        // (inmutable en D1) y todo contenido aceptado es el mismo (sha256 y tamaño declarados), así
+        // que el objeto puede ser el que otra petición concurrente confirma ahora o un instante
+        // después; releer D1 antes de borrar no lo evita (R2 no tiene borrado condicional). Si nadie
+        // lo confirma, queda UN objeto en la clave de una evidencia `subido = 0`: el reintento del
+        // cliente lo sobrescribe y confirma (docs/despliegue.md §9.4 para reconciliar).
+        if (error === plan.siNoAplica) {
+          // Otra subida de la misma foto ganó la carrera: idempotente, 200 con lo que hay en D1.
+          const actual = await buscarEvidencia(ctx.db, evidencia.id).catch(() => null);
+          if (actual?.subido === 1) {
             return c.json(evidenciaPublica(actual));
           }
-          // D1 ya la marca como subida (otra petición): el objeto es suyo y no se toca.
-          throw error;
-        }
-        if (actual !== undefined) {
-          // El batch de D1 falló después del put y la evidencia sigue sin subir: se borra el objeto
-          // para no dejar en R2 una foto huérfana (mejor esfuerzo; se propaga el error original).
-          await borrarObjetoHuerfano(c.env.EVIDENCE, evidencia.storage_key);
+        } else {
+          registrar('aviso', 'evidencia_no_confirmada', { evidencia_id: evidencia.id });
         }
         throw error;
       }

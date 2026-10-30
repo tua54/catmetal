@@ -11,6 +11,11 @@
 // `subido = 0`, el cliente reintenta y el `put` sobrescribe el mismo objeto (misma clave, mismo
 // contenido verificado por sha256), así que la subida es idempotente. Una evidencia ya subida no se
 // vuelve a escribir en R2.
+//
+// B4: el Worker nunca borra un objeto de evidencia. Dos subidas concurrentes escriben la misma clave
+// con el mismo contenido; si la que falla al confirmar borrara, podría llevarse el objeto que la otra
+// confirma en D1 (R2 no tiene borrado condicional y releer D1 antes no cierra la carrera). Lo que
+// puede quedar es, como máximo, un objeto por evidencia `subido = 0` (docs/despliegue.md §9.4).
 
 import { type Evidencia, MAX_EVIDENCIA_BYTES, type MimeEvidencia } from '@catmetal/shared';
 import { sentenciaAuditoriaCondicional } from '../auditoria/auditar';
