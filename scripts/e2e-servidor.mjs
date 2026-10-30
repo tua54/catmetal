@@ -18,7 +18,6 @@ import { createWriteStream, mkdirSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, relative } from 'node:path';
 import { createInterface } from 'node:readline';
-import { pathToFileURL } from 'node:url';
 import { generarDevVars } from './gen-dev-vars.mjs';
 import { CONTRASENA_E2E, DIR_ESTADO_E2E, PUERTO_E2E, RAIZ } from './e2e-config.mjs';
 
@@ -88,15 +87,9 @@ ejecutar(
 );
 ejecutar(
   'Sembrando la D1 local E2E…',
-  [
-    '--import',
-    // En Windows --import exige una URL file://, no una ruta absoluta.
-    pathToFileURL(join(RAIZ, 'scripts', 'e2e-precarga-seed.mjs')).href,
-    join(RAIZ, 'scripts', 'seed.mjs'),
-    '--persist-to',
-    DIR_ESTADO_E2E,
-  ],
-  { cwd: RAIZ, env: { ...entorno, E2E_SEED_PASSWORD: CONTRASENA_E2E } },
+  [join(RAIZ, 'scripts', 'seed.mjs'), '--persist-to', DIR_ESTADO_E2E],
+  // seed.mjs da prioridad a la variable de entorno SEED_PASSWORD sobre apps/worker/.dev.vars.
+  { cwd: RAIZ, env: { ...entorno, SEED_PASSWORD: CONTRASENA_E2E } },
 );
 
 // 5. wrangler dev. Su salida normal va a un log (cada petición genera una línea); stderr se reenvía.

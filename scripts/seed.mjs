@@ -100,7 +100,20 @@ function leerArgumentos(argv) {
 // ---------------------------------------------------------------------------------------------
 // .dev.vars
 // ---------------------------------------------------------------------------------------------
+/** Origen de la contraseña del seed, para el resumen final (nunca se imprime el valor). */
+let origenContrasena = `SEED_PASSWORD de ${relative(raiz, rutaDevVars)}`;
+
 function leerSeedPassword() {
+  // La variable de entorno SEED_PASSWORD (si está definida) tiene prioridad sobre .dev.vars. La usan
+  // las pruebas E2E con una contraseña de prueba fija sobre una base local desechable.
+  const deEntorno = process.env.SEED_PASSWORD;
+  if (deEntorno !== undefined && deEntorno !== '') {
+    if (deEntorno.length < LONGITUD_MINIMA_CONTRASENA) {
+      fallar(`SEED_PASSWORD debe tener al menos ${LONGITUD_MINIMA_CONTRASENA} caracteres.`);
+    }
+    origenContrasena = 'variable de entorno SEED_PASSWORD';
+    return deEntorno;
+  }
   const ayuda = 'Ejecute `pnpm setup:dev-vars` para generarlo.';
   if (!existsSync(rutaDevVars)) {
     fallar(`no existe ${relative(raiz, rutaDevVars)}. ${ayuda}`);
@@ -507,7 +520,7 @@ function main() {
     );
   }
 
-  paso(`Usuarios (contraseña: SEED_PASSWORD de ${relative(raiz, rutaDevVars)}):`);
+  paso(`Usuarios (contraseña: ${origenContrasena}):`);
   for (const u of datos.usuarios) {
     paso(`  ${u.rol.padEnd(10)} ${u.email}`);
   }
