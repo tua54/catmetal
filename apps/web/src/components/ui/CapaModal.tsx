@@ -1,6 +1,7 @@
 import { useEffect, useRef, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { cx } from './clases';
+import { retenerFondo } from './inercia';
 
 const ENFOCABLES = [
   'a[href]',
@@ -67,28 +68,17 @@ export function CapaModal({
     const fondo = refFondo.current;
     const panel = refPanel.current;
 
-    // Vuelve inerte todo lo que no es este modal (solo lo que no lo estaba ya).
-    const inertes: Element[] = [];
-    for (const hermano of Array.from(document.body.children)) {
-      if (hermano !== fondo && !hermano.hasAttribute('inert')) {
-        hermano.setAttribute('inert', '');
-        inertes.push(hermano);
-      }
-    }
-    const bloqueabaScroll = document.body.classList.contains('overflow-hidden');
-    document.body.classList.add('overflow-hidden');
+    // Vuelve inerte todo lo que no es este modal y bloquea el scroll. Es una pila (F6-09): al
+    // cerrar, lo que otra capa abierta retiene (p. ej. la pantalla de bloqueo) sigue inerte.
+    const liberarFondo = retenerFondo(fondo);
 
     const inicial = refFocoInicial?.current ?? (panel ? enfocables(panel)[0] : undefined) ?? panel;
     inicial?.focus();
 
     return () => {
-      for (const elemento of inertes) {
-        elemento.removeAttribute('inert');
-      }
-      if (!bloqueabaScroll) {
-        document.body.classList.remove('overflow-hidden');
-      }
-      if (previo?.isConnected) {
+      liberarFondo();
+      // Si otra capa sigue reteniendo el elemento que abrió este modal, el foco se queda en esa capa.
+      if (previo?.isConnected && previo.closest('[inert]') === null) {
         previo.focus();
       }
     };

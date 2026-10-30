@@ -45,7 +45,7 @@ export function obtenerDetalleOrden(
   signal?: AbortSignal,
   api: ClienteApi = clienteApi,
 ): Promise<DetalleOrden> {
-  return api.peticion<DetalleOrden>(`/orders/${id}`, { signal });
+  return api.peticion<DetalleOrden>(`/orders/${encodeURIComponent(id)}`, { signal });
 }
 
 export function crearOrden(cuerpo: CrearOrden, api: ClienteApi = clienteApi): Promise<OrdenCreada> {
@@ -53,7 +53,7 @@ export function crearOrden(cuerpo: CrearOrden, api: ClienteApi = clienteApi): Pr
 }
 
 export function iniciarOrden(id: string, api: ClienteApi = clienteApi): Promise<Orden> {
-  return api.peticion<Orden>(`/orders/${id}/start`, { metodo: 'POST' });
+  return api.peticion<Orden>(`/orders/${encodeURIComponent(id)}/start`, { metodo: 'POST' });
 }
 
 /** `force: true` solo tras la segunda confirmación explícita (queda en la auditoría). */
@@ -62,7 +62,7 @@ export function finalizarOrden(
   force: boolean,
   api: ClienteApi = clienteApi,
 ): Promise<Orden> {
-  return api.peticion<Orden>(`/orders/${id}/finish`, {
+  return api.peticion<Orden>(`/orders/${encodeURIComponent(id)}/finish`, {
     metodo: 'POST',
     cuerpo: force ? { force: true } : {},
   });
@@ -73,7 +73,9 @@ export function obtenerResumenOrden(
   signal?: AbortSignal,
   api: ClienteApi = clienteApi,
 ): Promise<ResumenOrden> {
-  return api.peticion<ResumenOrden>(`/reports/orders/${id}/summary`, { signal });
+  return api.peticion<ResumenOrden>(`/reports/orders/${encodeURIComponent(id)}/summary`, {
+    signal,
+  });
 }
 
 export function obtenerLineaTiempo(
@@ -86,9 +88,12 @@ export function obtenerLineaTiempo(
   if (cursor !== null) {
     parametros.set('cursor', String(cursor));
   }
-  return api.peticion<LineaTiempoOrden>(`/orders/${id}/audit?${parametros.toString()}`, {
-    signal,
-  });
+  return api.peticion<LineaTiempoOrden>(
+    `/orders/${encodeURIComponent(id)}/audit?${parametros.toString()}`,
+    {
+      signal,
+    },
+  );
 }
 
 /** Catálogo de materiales ACTIVOS completo (recorre todas las páginas por cursor). */
@@ -119,6 +124,8 @@ export async function listarMaterialesActivos(
 
 /** Descarga el CSV de la orden con el token de la sesión y lo guarda con `<a download>`. */
 export async function exportarCsv(id: string, codigo: string): Promise<void> {
-  const { blob, nombre } = await descargarAutenticado(`/reports/orders/${id}/export.csv`);
+  const { blob, nombre } = await descargarAutenticado(
+    `/reports/orders/${encodeURIComponent(id)}/export.csv`,
+  );
   guardarArchivo(blob, nombre ?? nombreArchivoCsv(codigo));
 }

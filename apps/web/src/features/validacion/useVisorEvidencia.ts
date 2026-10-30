@@ -53,7 +53,7 @@ export function useVisorEvidencia() {
       try {
         let blob: Blob | null = null;
         try {
-          blob = (await descargarAutenticado(`/evidences/${id}`)).blob;
+          blob = (await descargarAutenticado(`/evidences/${encodeURIComponent(id)}`)).blob;
         } catch (error) {
           const local =
             esFaltaDeServidor(error) && userId !== null ? await evidenciaLocal(userId, id) : null;

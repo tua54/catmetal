@@ -19,9 +19,13 @@ if (!contenedor) {
   throw new Error('No se encontró el elemento #root en index.html');
 }
 
+const queryClient = createQueryClient();
+
 // Una sola vez por pestaña, fuera de React (StrictMode monta dos veces los efectos en desarrollo).
 const sincronizacion = obtenerSincronizacion();
 void arrancar({
+  // F6-04: la caché de consultas se vacía cada vez que cambia el usuario de la sesión.
+  cacheConsultas: queryClient,
   // En desarrollo no se registra el SW: no debe cachear builds intermedios.
   registrarServiceWorker: import.meta.env.PROD
     ? () => registrarServiceWorker(registerSW)
@@ -29,7 +33,6 @@ void arrancar({
 });
 
 const router = createBrowserRouter(routes);
-const queryClient = createQueryClient();
 
 createRoot(contenedor).render(
   <StrictMode>

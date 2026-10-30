@@ -704,7 +704,7 @@ export class MotorSync {
     for (const foto of listas) {
       this.#verificarSesion(userId);
       try {
-        await this.#peticion(userId, `/evidences/${foto.id}`, {
+        await this.#peticion(userId, `/evidences/${encodeURIComponent(foto.id)}`, {
           metodo: 'PUT',
           binario: { datos: foto.datos, tipo: foto.mime },
           tiempoEsperaMs: 60_000,

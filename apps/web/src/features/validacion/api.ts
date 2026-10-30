@@ -51,10 +51,13 @@ export function aprobarEnServidor(
   cuerpo: Aprobar,
   api: ClienteApi = clienteApi,
 ): Promise<ResultadoValidacion> {
-  return api.peticion<ResultadoValidacion>(`/consumptions/${consumoId}/approve`, {
-    metodo: 'POST',
-    cuerpo,
-  });
+  return api.peticion<ResultadoValidacion>(
+    `/consumptions/${encodeURIComponent(consumoId)}/approve`,
+    {
+      metodo: 'POST',
+      cuerpo,
+    },
+  );
 }
 
 export function rechazarEnServidor(
@@ -62,10 +65,13 @@ export function rechazarEnServidor(
   cuerpo: Rechazar,
   api: ClienteApi = clienteApi,
 ): Promise<ResultadoValidacion> {
-  return api.peticion<ResultadoValidacion>(`/consumptions/${consumoId}/reject`, {
-    metodo: 'POST',
-    cuerpo,
-  });
+  return api.peticion<ResultadoValidacion>(
+    `/consumptions/${encodeURIComponent(consumoId)}/reject`,
+    {
+      metodo: 'POST',
+      cuerpo,
+    },
+  );
 }
 
 /** Claves de TanStack Query del panel del jefe (invalidar por prefijo). */

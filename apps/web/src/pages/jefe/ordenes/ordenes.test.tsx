@@ -409,3 +409,23 @@ describe('lista vacía (tarea 6.2)', () => {
     );
   });
 });
+
+describe('id de la URL (F6-05)', () => {
+  it.each([
+    ['un texto cualquiera', 'no-es-un-uuid'],
+    ['un UUID v4', '0d9d4d3c-6a1f-4b2e-9c3d-1f2e3d4c5b6a'],
+    ['una ruta codificada', '..%2Fusers'],
+  ])('con %s muestra "no encontrada" sin llamar a la API', async (_caso, id) => {
+    await entrarComoJefeEnLinea(servidor);
+    renderizarApp(`/jefe/ordenes/${id}`);
+
+    expect(
+      await screen.findByRole('heading', { level: 1, name: 'Página no encontrada' }),
+    ).toBeInTheDocument();
+    expect(
+      servidor.peticiones.filter(
+        (p) => p.ruta.startsWith('/orders') || p.ruta.startsWith('/reports'),
+      ),
+    ).toEqual([]);
+  });
+});

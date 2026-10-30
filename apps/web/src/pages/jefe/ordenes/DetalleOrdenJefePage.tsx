@@ -1,4 +1,9 @@
-import { formatearCantidad, formatearFechaHora, type DetalleOrden } from '@catmetal/shared';
+import {
+  esUuidV7,
+  formatearCantidad,
+  formatearFechaHora,
+  type DetalleOrden,
+} from '@catmetal/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link, useParams } from 'react-router';
@@ -30,6 +35,7 @@ import {
   reintentarConsulta,
   textoPendientes,
 } from '../../../features/validacion/mensajes';
+import { NotFoundPage } from '../../NotFoundPage';
 
 const CLASE_ENLACE =
   'inline-flex min-h-11 items-center font-semibold text-brand-600 underline underline-offset-4';
@@ -83,9 +89,19 @@ function PlanVsConsumo({ orden }: { orden: DetalleOrden }) {
   );
 }
 
-/** `/jefe/ordenes/:id`: plan vs consumo, iniciar, finalizar (con `force` explícito), CSV y auditoría. */
+/**
+ * `/jefe/ordenes/:id`: plan vs consumo, iniciar, finalizar (con `force` explícito), CSV y auditoría.
+ * F6-05: un id que no es UUID v7 no llega a la API (se muestra "no encontrada").
+ */
 export function DetalleOrdenJefePage() {
   const { id = '' } = useParams();
+  if (!esUuidV7(id)) {
+    return <NotFoundPage />;
+  }
+  return <DetalleOrdenJefe id={id} />;
+}
+
+function DetalleOrdenJefe({ id }: { id: string }) {
   const enLinea = useSesion((s) => s.modo === 'online');
   const clienteQuery = useQueryClient();
   const avisos = useAvisos();
