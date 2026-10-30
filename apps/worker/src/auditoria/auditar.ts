@@ -18,7 +18,8 @@ export const COLUMNAS_AUDITABLES = {
   users: [
     'id',
     'nombre',
-    'email',
+    // Sin 'email' (ADR 0013, H-11): un dato personal que la auditoría inmutable no puede rectificar
+    // ni suprimir (Ley 1581). El id identifica al usuario.
     'rol',
     'activo',
     'intentos_fallidos',
@@ -155,6 +156,11 @@ export const COLUMNAS_BOOLEANAS: Readonly<Record<EntidadAuditada, readonly strin
 export type DatosAuditoria = Record<string, unknown>;
 
 export interface EntradaAuditoria {
+  /**
+   * Id de la fila de auditoría; por defecto, un UUID v7 nuevo. Se fija cuando una sentencia
+   * posterior del mismo batch debe depender de que ESTA fila se haya insertado.
+   */
+  id?: string;
   entidad: EntidadAuditada;
   entidad_id: string;
   accion: string;
@@ -234,7 +240,7 @@ function valores(entrada: EntradaAuditoria): (string | number | null)[] {
   const antes = filtrarDatos(entrada.entidad, entrada.antes);
   const despues = filtrarDatos(entrada.entidad, entrada.despues);
   return [
-    uuidv7(),
+    entrada.id ?? uuidv7(),
     entrada.entidad,
     entrada.entidad_id,
     entrada.accion,

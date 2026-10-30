@@ -140,12 +140,14 @@ export function tipoDeContenido(cabecera: string | undefined): string | null {
 }
 
 /**
- * Valida el archivo recibido contra la evidencia declarada. Lanza 415 `EVIDENCIA_TIPO_INVALIDO`
- * si la cabecera o los magic bytes no corresponden al `mime` declarado, y 422 `VALIDACION` si el
- * sha256 no coincide. Devuelve el sha256 calculado.
+ * Valida el archivo recibido contra la evidencia declarada, en este orden: 415
+ * `EVIDENCIA_TIPO_INVALIDO` si la cabecera o los magic bytes no corresponden al `mime` declarado;
+ * 400 `VALIDACION` si el tamaño no es el `tamano_bytes` declarado (H-12); 400 `VALIDACION` si el
+ * sha256 no coincide.
+ * Devuelve el sha256 calculado.
  */
 export async function validarArchivo(
-  evidencia: Pick<FilaEvidenciaCompleta, 'mime' | 'sha256'>,
+  evidencia: Pick<FilaEvidenciaCompleta, 'mime' | 'sha256' | 'tamano_bytes'>,
   bytes: Uint8Array,
   contentType: string | null,
 ): Promise<string> {
@@ -155,6 +157,14 @@ export async function validarArchivo(
       mime_declarado: evidencia.mime,
       ...(real === null ? {} : { mime_detectado: real }),
     });
+  }
+  if (bytes.byteLength !== evidencia.tamano_bytes) {
+    throw new ErrorApi('VALIDACION', [
+      {
+        campo: 'tamano_bytes',
+        mensaje: 'El tamaño de la foto no coincide con el declarado al registrar la novedad.',
+      },
+    ]);
   }
   const sha256 = await sha256Hex(bytes);
   if (sha256 !== evidencia.sha256) {

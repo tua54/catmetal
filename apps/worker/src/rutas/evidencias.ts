@@ -19,9 +19,21 @@ import {
 import { ejecutarPlan } from '../dominio/plan';
 import { puedeVerConsumo } from '../dominio/visibilidad';
 import { ErrorApi } from '../errores';
+import { registrar } from '../log';
 import { autenticar, requierePermiso } from '../middleware/autenticar';
 import type { AppEnv } from '../tipos';
 import { validar } from '../validacion';
+
+/** Borra un objeto de R2 sin lanzar: si falla, solo deja un log sin datos personales. */
+export async function borrarObjetoHuerfano(bucket: R2Bucket, clave: string): Promise<void> {
+  try {
+    await bucket.delete(clave);
+  } catch (error) {
+    registrar('aviso', 'evidencia_huerfana_no_borrada', {
+      error: error instanceof Error ? error.name : 'desconocido',
+    });
+  }
+}
 
 export function crearRutasEvidencias(): Hono<AppEnv> {
   const rutas = new Hono<AppEnv>();
@@ -68,10 +80,20 @@ export function crearRutasEvidencias(): Hono<AppEnv> {
         return c.json(await ejecutarPlan(ctx.db, plan));
       } catch (error) {
         // Otra subida de la misma foto (mismo sha256, ya verificado) ganó la carrera: idempotente.
-        const actual =
-          error === plan.siNoAplica ? await buscarEvidencia(ctx.db, evidencia.id) : null;
+        // El objeto de R2 es el mismo contenido en la misma clave: se conserva.
+        // `undefined` = no se pudo releer: ante la duda, el objeto de R2 no se borra.
+        const actual = await buscarEvidencia(ctx.db, evidencia.id).catch(() => undefined);
         if (actual?.subido === 1) {
-          return c.json(evidenciaPublica(actual));
+          if (error === plan.siNoAplica) {
+            return c.json(evidenciaPublica(actual));
+          }
+          // D1 ya la marca como subida (otra petición): el objeto es suyo y no se toca.
+          throw error;
+        }
+        if (actual !== undefined) {
+          // El batch de D1 falló después del put y la evidencia sigue sin subir: se borra el objeto
+          // para no dejar en R2 una foto huérfana (mejor esfuerzo; se propaga el error original).
+          await borrarObjetoHuerfano(c.env.EVIDENCE, evidencia.storage_key);
         }
         throw error;
       }

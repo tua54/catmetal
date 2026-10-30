@@ -30,8 +30,13 @@ function binDe(dir, paquete, rutaBin) {
 const WRANGLER = binDe(dirWorker, 'wrangler', join('bin', 'wrangler.js'));
 const VITE = binDe(dirWeb, 'vite', join('bin', 'vite.js'));
 
-// Sin telemetría de Wrangler en desarrollo local.
+// Sin telemetría de Wrangler en desarrollo local, y sin selección de entorno o cuenta heredada del
+// shell (igual que scripts/seed.mjs): `CLOUDFLARE_ENV=production` cargaría la configuración de
+// producción en local, y un token o una cuenta no tienen nada que hacer en un entorno local.
 const entorno = { ...process.env, WRANGLER_SEND_METRICS: 'false', FORCE_COLOR: '1' };
+for (const variable of ['CLOUDFLARE_ENV', 'CLOUDFLARE_API_TOKEN', 'CLOUDFLARE_ACCOUNT_ID']) {
+  delete entorno[variable];
+}
 
 function paso(texto) {
   console.log(`[dev] ${texto}`);

@@ -2,6 +2,7 @@
 import { MENSAJES_ERROR, uuidv7 } from '@catmetal/shared';
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
+import { app } from '../src/app';
 import { emitirAccessToken } from '../src/auth/tokens';
 import { origenesPermitidos } from '../src/middleware/origen';
 import { BASE, crearUsuarioConClave, iniciarSesion, perfil, peticion } from './auth-helpers';
@@ -53,11 +54,55 @@ describe('CSRF por Origin', () => {
   });
 
   it('origenesPermitidos ignora entradas vacías y espacios', () => {
-    expect([...origenesPermitidos('https://a.test/x?y=1', ' http://b.test , ,')]).toEqual([
-      'https://a.test',
+    expect([
+      ...origenesPermitidos('https://a.test/x?y=1', ' http://localhost:5173 , ,', 'local'),
+    ]).toEqual(['https://a.test', 'http://localhost:5173']);
+    expect([...origenesPermitidos('https://a.test/', '', 'local')]).toEqual(['https://a.test']);
+  });
+
+  it('H-06: en local solo acepta orígenes loopback por HTTP con puerto', () => {
+    const dev = [
+      'http://localhost:5173',
+      'http://127.0.0.1:8787',
       'http://b.test',
+      'https://localhost:5173',
+      'http://localhost',
+      'http://localhost:5173/',
+      'http://localhost:99999',
+      'http://localhost.evil.test:5173',
+      'http://127.0.0.1.evil.test:5173',
+    ].join(',');
+    expect([...origenesPermitidos('https://a.test/', dev, 'local')]).toEqual([
+      'https://a.test',
+      'http://localhost:5173',
+      'http://127.0.0.1:8787',
     ]);
-    expect([...origenesPermitidos('https://a.test/', '')]).toEqual(['https://a.test']);
+  });
+
+  it('H-06: fuera de local ignora ORIGENES_DEV aunque traiga orígenes loopback', () => {
+    for (const entorno of ['staging', 'production', '']) {
+      expect([...origenesPermitidos('https://a.test/', 'http://localhost:5173', entorno)]).toEqual([
+        'https://a.test',
+      ]);
+    }
+  });
+
+  it('H-06: con ENTORNO de producción, la app rechaza el Origin del proxy de Vite', async () => {
+    const envProduccion = { ...env, ENTORNO: 'production' } as unknown as Env;
+    const pedir = (origen: string) =>
+      app.fetch(
+        new Request(`${BASE}/api/v1/auth/login`, {
+          method: 'POST',
+          headers: { Origin: origen, 'Content-Type': 'application/json' },
+          body: JSON.stringify(cuerpoLogin()),
+        }),
+        envProduccion,
+      );
+    const vite = await pedir('http://localhost:5173');
+    expect(vite.status).toBe(403);
+    expect(await vite.json()).toMatchObject({ code: 'ORIGEN_INVALIDO' });
+    // El propio origen sigue funcionando (credenciales inválidas → 401, no 403).
+    expect((await pedir(BASE)).status).toBe(401);
   });
 });
 

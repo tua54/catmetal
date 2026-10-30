@@ -175,7 +175,7 @@ describe('tokens (ADR 0008)', () => {
 });
 
 describe('auditoría', () => {
-  it('filtra con la lista blanca: nunca password_hash ni token_hash', () => {
+  it('filtra con la lista blanca: nunca password_hash, token_hash ni el correo (ADR 0013)', () => {
     expect(
       filtrarDatos('users', {
         id: 'u1',
@@ -184,7 +184,7 @@ describe('auditoría', () => {
         password: 'secreto',
         rol: 'jefe',
       }),
-    ).toEqual({ id: 'u1', email: 'a@b.co', rol: 'jefe' });
+    ).toEqual({ id: 'u1', rol: 'jefe' });
     expect(
       filtrarDatos('refresh_tokens', {
         id: 't1',

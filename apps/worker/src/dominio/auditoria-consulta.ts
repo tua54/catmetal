@@ -2,6 +2,7 @@
 //
 // - `GET /audit`: jefe y admin (`auditoria.ver_todo`) ven todas las filas; el supervisor solo las
 //   que él hizo (`actor_id` = él). No es un error: se filtra. Orden descendente por `seq`.
+//   Sin `admin.gestionar`, nadie ve `users`, `devices` ni `refresh_tokens` (ADR 0013).
 // - `GET /orders/:id/audit`: línea de tiempo de la orden, cronológica (ascendente por `seq`), con
 //   el índice parcial `audit_log_order_id_seq` (ADR 0010). Cada evento lleva actor (nombre y rol),
 //   un `tipo` para el color de la UI y una `descripcion` en español generada aquí.
@@ -62,6 +63,17 @@ interface FilaAuditoriaConActor {
 const COLUMNAS = `a.seq, a.id, a.entidad, a.entidad_id, a.order_id, a.accion, a.actor_id,
   u.nombre AS actor_nombre, u.rol AS actor_rol, a.device_id, a.datos_antes, a.datos_despues,
   a.client_at, a.server_at, a.alerta_reloj`;
+
+/**
+ * ADR 0013 (H-04): las entidades de administración de identidades solo las ve quien tiene
+ * `admin.gestionar`. Literal fijo del código en el SQL. Si alguien sin ese permiso pide
+ * `?entidad=users` (o devices, refresh_tokens), recibe una lista vacía, igual que el supervisor
+ * que filtra por una entidad ajena: se filtra, no es un error, y no revela si hay filas.
+ */
+const SOLO_NEGOCIO: CondicionSql = {
+  sql: `a.entidad NOT IN ('users', 'devices', 'refresh_tokens')`,
+  parametros: [],
+};
 
 type Datos = Record<string, unknown>;
 
@@ -134,6 +146,9 @@ export async function listarAuditoria(
   if (!tienePermiso(ctx.actor.rol, 'auditoria.ver_todo')) {
     // "Solo lo propio" (§3): filas donde el supervisor es el actor.
     condiciones.push({ sql: 'a.actor_id = ?', parametros: [ctx.actor.id] });
+  }
+  if (!tienePermiso(ctx.actor.rol, 'admin.gestionar')) {
+    condiciones.push(SOLO_NEGOCIO);
   }
   if (query.cursor !== undefined) {
     condiciones.push({ sql: 'a.seq < ?', parametros: [query.cursor] });
@@ -210,6 +225,10 @@ export async function lineaTiempoOrden(
     { sql: 'a.seq > ?', parametros: [query.cursor ?? 0] },
     { sql: NO_ES_EFECTO_DE_VALIDACION, parametros: [] },
   ];
+  if (!tienePermiso(ctx.actor.rol, 'admin.gestionar')) {
+    // Defensa en profundidad: hoy esas filas no llevan `order_id`, pero el filtro no depende de ello.
+    condiciones.push(SOLO_NEGOCIO);
+  }
   if (!tienePermiso(ctx.actor.rol, 'auditoria.ver_todo')) {
     condiciones.push({
       sql: `a.actor_id = ? OR (a.entidad = 'validations' AND EXISTS (

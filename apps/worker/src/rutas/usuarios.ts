@@ -142,14 +142,18 @@ export function crearRutasUsuarios(): Hono<AppEnv> {
         throw new ErrorApi('NO_ENCONTRADO');
       }
 
-      const ahora = ahoraIso();
+      // Marca estrictamente posterior a la leída: así `updated_at = ahora` distingue esta escritura.
+      const ahora = marcaPosterior(actual.updated_at);
+      const auditoriaId = uuidv7();
+      const desbloquear = datos.desbloquear === true;
+      const activoNuevo = datos.activo === undefined ? null : datos.activo ? 1 : 0;
       const nuevo: FilaUsuario = {
         ...actual,
         nombre: datos.nombre ?? actual.nombre,
         rol: datos.rol ?? actual.rol,
-        activo: datos.activo === undefined ? actual.activo : datos.activo ? 1 : 0,
-        intentos_fallidos: datos.desbloquear === true ? 0 : actual.intentos_fallidos,
-        bloqueado_hasta: datos.desbloquear === true ? null : actual.bloqueado_hasta,
+        activo: activoNuevo ?? actual.activo,
+        intentos_fallidos: desbloquear ? 0 : actual.intentos_fallidos,
+        bloqueado_hasta: desbloquear ? null : actual.bloqueado_hasta,
         updated_at: ahora,
       };
       const quitaAdmin =
@@ -163,43 +167,65 @@ export function crearRutasUsuarios(): Hono<AppEnv> {
       const passwordHash =
         datos.password === undefined ? null : await hashearContrasena(datos.password);
 
-      // Guardia atómica del último admin (ADR 0008 punto 9): el UPDATE solo aplica si, cuando quita
-      // un admin activo, queda otro admin activo. Las demás sentencias dependen de que haya aplicado.
+      // H-03: solo se escriben los campos enviados (COALESCE/CASE sobre la fila actual) y el
+      // UPDATE exige que `rol`, `activo` y `updated_at` sigan como se leyeron. Así una edición
+      // concurrente nunca reescribe con valores viejos lo que otro admin cambió (reactivar a un
+      // desactivado, borrar un bloqueo), y las decisiones derivadas de lo leído (revocar sesiones,
+      // último admin, `antes` de la auditoría) siguen siendo ciertas al escribir.
+      // `intentos_fallidos`/`bloqueado_hasta` solo cambian con `desbloquear`.
+      // Guardia atómica del último admin (ADR 0008 punto 9): si quita un admin activo, debe quedar
+      // otro admin activo. Las demás sentencias dependen de que el UPDATE haya aplicado.
       const guardia = quitaAdmin
         ? `EXISTS (SELECT 1 FROM users AS otro WHERE otro.rol = 'admin' AND otro.activo = 1 AND otro.id <> ?)`
         : '1 = 1';
       const parametrosGuardia = quitaAdmin ? [id] : [];
+      // Este UPDATE aplicó: la fila lleva `updated_at = ahora` y ninguna otra edición del mismo
+      // milisegundo auditó antes (si dos PATCH concurrentes calculan el mismo `ahora`, solo el que
+      // escribió encuentra la fila sin auditoría). La revocación depende de ESTA fila de auditoría.
       const aplicado = {
-        sql: 'EXISTS (SELECT 1 FROM users WHERE id = ? AND updated_at = ?)',
-        parametros: [id, ahora],
+        sql: `EXISTS (SELECT 1 FROM users WHERE id = ? AND updated_at = ?)
+          AND NOT EXISTS (SELECT 1 FROM audit_log WHERE entidad = 'users' AND entidad_id = ?
+            AND accion = 'usuario.editar' AND server_at = ?)`,
+        parametros: [id, ahora, id, ahora],
+      };
+      const auditado = {
+        sql: 'EXISTS (SELECT 1 FROM audit_log WHERE id = ?)',
+        parametros: [auditoriaId],
       };
 
       const sentencias: D1PreparedStatement[] = [
         db
           .prepare(
-            `UPDATE users SET nombre = ?, rol = ?, activo = ?, intentos_fallidos = ?, bloqueado_hasta = ?,
-               password_hash = COALESCE(?, password_hash), updated_at = ?
-             WHERE id = ? AND ${guardia}`,
+            `UPDATE users SET
+               nombre = COALESCE(?, nombre),
+               rol = COALESCE(?, rol),
+               activo = COALESCE(?, activo),
+               intentos_fallidos = CASE WHEN ? = 1 THEN 0 ELSE intentos_fallidos END,
+               bloqueado_hasta = CASE WHEN ? = 1 THEN NULL ELSE bloqueado_hasta END,
+               password_hash = COALESCE(?, password_hash),
+               updated_at = ?
+             WHERE id = ? AND rol = ? AND activo = ? AND updated_at = ? AND ${guardia}`,
           )
           .bind(
-            nuevo.nombre,
-            nuevo.rol,
-            nuevo.activo,
-            nuevo.intentos_fallidos,
-            nuevo.bloqueado_hasta,
+            datos.nombre ?? null,
+            datos.rol ?? null,
+            activoNuevo,
+            desbloquear ? 1 : 0,
+            desbloquear ? 1 : 0,
             passwordHash,
             ahora,
             id,
+            actual.rol,
+            actual.activo,
+            actual.updated_at,
             ...parametrosGuardia,
           ),
       ];
-      if (revocaSesiones) {
-        sentencias.push(sentenciaRevocarTodas(db, id, ahora, aplicado));
-      }
       sentencias.push(
         sentenciaAuditoriaCondicional(
           db,
           {
+            id: auditoriaId,
             entidad: 'users',
             entidad_id: id,
             accion: 'usuario.editar',
@@ -215,14 +241,45 @@ export function crearRutasUsuarios(): Hono<AppEnv> {
           aplicado,
         ),
       );
+      if (revocaSesiones) {
+        sentencias.push(sentenciaRevocarTodas(db, id, ahora, auditado));
+      }
 
       const [actualizacion] = await db.batch(sentencias);
       if (actualizacion?.meta.changes !== 1) {
-        throw new ErrorApi('ULTIMO_ADMIN');
+        throw new ErrorApi(await motivoNoAplicado(db, actual, quitaAdmin));
       }
       return c.json(usuarioDe(nuevo));
     },
   );
 
   return rutas;
+}
+
+/** Hora actual en ISO, o 1 ms después de `anterior` si el reloj no avanzó desde entonces. */
+function marcaPosterior(anterior: string): string {
+  const ahora = ahoraIso();
+  if (ahora > anterior) {
+    return ahora;
+  }
+  return new Date(Date.parse(anterior) + 1).toISOString();
+}
+
+/**
+ * El UPDATE del PATCH no aplicó. Se relee la fila: si nadie la cambió desde la lectura, lo que
+ * falló fue la guardia del último admin (422 `ULTIMO_ADMIN`); si cambió, otra edición ganó la
+ * carrera (409 `CONFLICTO`: el cliente relee y reintenta).
+ */
+async function motivoNoAplicado(
+  db: D1Database,
+  leido: FilaUsuario,
+  quitaAdmin: boolean,
+): Promise<'ULTIMO_ADMIN' | 'CONFLICTO'> {
+  const ahora = await buscarUsuario(db, leido.id);
+  const sinCambios =
+    ahora !== null &&
+    ahora.rol === leido.rol &&
+    ahora.activo === leido.activo &&
+    ahora.updated_at === leido.updated_at;
+  return quitaAdmin && sinCambios ? 'ULTIMO_ADMIN' : 'CONFLICTO';
 }

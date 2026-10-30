@@ -29,6 +29,7 @@ import {
   syncPullResponseSchema,
   syncPushRequestSchema,
   syncPushResponseSchema,
+  tieneCaracteresDeControl,
   TIPOS_CAMBIO_SYNC,
   toleranciaSchema,
   uuidV7Schema,
@@ -803,5 +804,73 @@ describe('mensajes y detalles de validación', () => {
       { campo: '', mensaje: 'Sin código.' },
     ]);
     expect(detallesValidacion({ issues: [] })).toEqual([]);
+  });
+});
+
+describe('caracteres de control en textos libres', () => {
+  const NUL = String.fromCharCode(0);
+  const ESC = String.fromCharCode(0x1b);
+  const DEL = String.fromCharCode(0x7f);
+  const CR = String.fromCharCode(0x0d);
+  const VT = String.fromCharCode(0x0b);
+  const US = String.fromCharCode(0x1f);
+
+  it('tieneCaracteresDeControl detecta C0 y DEL; en multilínea permite salto de línea y tabulador', () => {
+    for (const control of [NUL, ESC, DEL, CR, VT, US, '\n', '\t']) {
+      expect(tieneCaracteresDeControl(`a${control}b`), JSON.stringify(control)).toBe(true);
+    }
+    for (const control of [NUL, ESC, DEL, CR, VT, US]) {
+      expect(tieneCaracteresDeControl(`a${control}b`, true), JSON.stringify(control)).toBe(true);
+    }
+    expect(tieneCaracteresDeControl('línea 1\nlínea 2\tcon tab', true)).toBe(false);
+    expect(tieneCaracteresDeControl('Ñandú — 5 % · “ok” é ü')).toBe(false);
+    expect(tieneCaracteresDeControl('')).toBe(false);
+  });
+
+  it('los textos de una línea rechazan caracteres de control (material, usuario, orden, lote)', () => {
+    const material = { codigo: 'MP-1', nombre: 'Arena', unidad: 'kg', costo_unitario_cop: 1 };
+    valido(crearMaterialSchema, material);
+    for (const control of [NUL, ESC, DEL, '\n', '\t']) {
+      invalido(crearMaterialSchema, { ...material, nombre: `Are${control}na` });
+      invalido(crearMaterialSchema, { ...material, codigo: `MP${control}1` });
+      invalido(editarMaterialSchema, { nombre: `Are${control}na` });
+      invalido(editarUsuarioSchema, { nombre: `Ana${control}Gómez` });
+      invalido(loteSchema, `L-${control}1`);
+      invalido(crearConsumoSchema, { ...consumoValido(), lote: `L${control}9` });
+    }
+    const resultado = editarMaterialSchema.safeParse({ nombre: `Are${ESC}na` });
+    expect(resultado.success).toBe(false);
+    expect(resultado.error?.issues.map((i) => i.message)).toEqual([
+      'El nombre tiene caracteres no permitidos.',
+    ]);
+  });
+
+  it('el recorte de espacios sigue funcionando: un salto de línea al borde se elimina', () => {
+    expect(loteSchema.parse('\n L-1 \t')).toBe('L-1');
+    expect(editarMaterialSchema.parse({ nombre: ' Arena\n' })).toEqual({ nombre: 'Arena' });
+  });
+
+  it('descripción de novedad y motivo de rechazo admiten saltos de línea y tabuladores, nada más', () => {
+    valido(crearNovedadSchema, { ...novedadValida(), descripcion: 'Merma:\n\t- 2 kg' });
+    for (const control of [NUL, ESC, DEL, CR, VT]) {
+      invalido(crearNovedadSchema, { ...novedadValida(), descripcion: `Mer${control}ma` });
+    }
+    const rechazo = { id: uuidv7(), version: 1, client_created_at: FECHA };
+    valido(rechazarSchema, { ...rechazo, motivo: 'Lote no\ncoincide' });
+    invalido(rechazarSchema, { ...rechazo, motivo: `Lote${NUL} no coincide` });
+    const resultado = rechazarSchema.safeParse({ ...rechazo, motivo: `Lote${DEL} no coincide` });
+    expect(resultado.error?.issues.map((i) => i.message)).toEqual([
+      'El motivo del rechazo tiene caracteres no permitidos (solo se admiten saltos de línea y tabuladores).',
+    ]);
+  });
+
+  it('la línea de una orden rechaza caracteres de control', () => {
+    const orden = {
+      codigo: 'OP-2026-0001',
+      linea: 'Línea 1',
+      materiales: [{ material_id: uuidv7(), cantidad_planeada: 1, unidad: 'kg' }],
+    };
+    valido(crearOrdenSchema, orden);
+    invalido(crearOrdenSchema, { ...orden, linea: `Línea${NUL}1` });
   });
 });

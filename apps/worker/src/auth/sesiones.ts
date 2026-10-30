@@ -52,8 +52,6 @@ export interface DatosNuevaSesion {
   instalacionId: string | null;
   nombreDispositivo: string | null;
   userAgent: string | null;
-  /** El usuario tenía intentos fallidos o un bloqueo vencido: se reinician. */
-  reiniciarIntentos: boolean;
 }
 
 /**
@@ -130,15 +128,33 @@ export async function iniciarSesion(
     );
   }
 
-  if (datos.reiniciarIntentos) {
-    sentencias.push(
-      db
-        .prepare(
-          `UPDATE users SET intentos_fallidos = 0, bloqueado_hasta = NULL, updated_at = ? WHERE id = ?`,
-        )
-        .bind(ahora, datos.userId),
-    );
-  }
+  // Reinicio del contador (H-01): la reserva del intento lo dejó en ≥ 1 y, si este era el
+  // intento que alcanzaba el máximo, también fijó `bloqueado_hasta`. La contraseña correcta lo
+  // deshace; si había un bloqueo se audita el desbloqueo ANTES del UPDATE (condición previa).
+  sentencias.push(
+    sentenciaAuditoriaCondicional(
+      db,
+      {
+        entidad: 'users',
+        entidad_id: datos.userId,
+        accion: 'usuario.desbloqueado',
+        actor_id: datos.userId,
+        device_id: datos.deviceId,
+        despues: { id: datos.userId, intentos_fallidos: 0, bloqueado_hasta: null },
+        server_at: ahora,
+      },
+      {
+        sql: 'EXISTS (SELECT 1 FROM users WHERE id = ? AND bloqueado_hasta IS NOT NULL)',
+        parametros: [datos.userId],
+      },
+    ),
+    db
+      .prepare(
+        `UPDATE users SET intentos_fallidos = 0, bloqueado_hasta = NULL, updated_at = ?
+         WHERE id = ? AND (intentos_fallidos <> 0 OR bloqueado_hasta IS NOT NULL)`,
+      )
+      .bind(ahora, datos.userId),
+  );
 
   sentencias.push(
     // ADR 0008 punto 7: una sesión por usuario y dispositivo.

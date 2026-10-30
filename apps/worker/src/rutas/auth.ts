@@ -39,11 +39,18 @@ interface FilaUsuarioLogin {
   nombre: string;
   email: string;
   rol: Rol;
-  activo: number;
   password_hash: string;
-  intentos_fallidos: number;
-  bloqueado_hasta: string | null;
 }
+
+/**
+ * Tiempo mínimo, desde que empieza el login, de toda respuesta 401 `CREDENCIALES_INVALIDAS`
+ * (H-02 de docs/auditoria/seguridad-fase-2.md). Cubre la derivación PBKDF2 (real o ficticia) y las
+ * idas a D1, para que la latencia no distinga una cuenta inexistente, inactiva, bloqueada o con la
+ * contraseña equivocada. Es un piso, no un valor exacto.
+ */
+export const TIEMPO_MINIMO_LOGIN_FALLIDO_MS = 400;
+
+type LoginValidado = ReturnType<typeof loginSchema.parse>;
 
 interface FilaPerfil {
   id: string;
@@ -99,73 +106,106 @@ async function limitarIntentos(c: Context<AppEnv>, email: string): Promise<void>
   }
 }
 
+/** Espera `ms` milisegundos: `scheduler.wait` de workerd si existe; si no, `setTimeout`. */
+export async function esperar(ms: number): Promise<void> {
+  if (ms <= 0) {
+    return;
+  }
+  if (typeof scheduler !== 'undefined' && typeof scheduler.wait === 'function') {
+    await scheduler.wait(ms);
+    return;
+  }
+  await new Promise<void>((resolver) => setTimeout(resolver, ms));
+}
+
 /**
- * Intento fallido: contador atómico en SQL (ADR 0008 punto 6). Si el bloqueo anterior ya venció,
- * el contador vuelve a 1; al llegar a MAX_INTENTOS_LOGIN se fija `bloqueado_hasta`. La auditoría
- * `usuario.bloqueado` es condicional en el mismo batch.
+ * Reserva un intento de login ANTES de comparar el hash (H-01; ADR 0008 punto 6). Un único
+ * `UPDATE … RETURNING` condicional cuenta el intento como fallido de antemano:
+ *
+ * - solo aplica si la cuenta está activa y no bloqueada (`bloqueado_hasta` NULL o vencido);
+ * - si el bloqueo anterior ya venció, el contador vuelve a 1 y se limpia `bloqueado_hasta`;
+ * - al llegar a MAX_INTENTOS_LOGIN fija `bloqueado_hasta`, y la auditoría `usuario.bloqueado` se
+ *   inserta en el MISMO batch, condicionada a que este intento haya fijado ese bloqueo (y sin
+ *   duplicarla si otro intento del mismo milisegundo calculó el mismo `bloqueado_hasta`).
+ *
+ * D1 ejecuta cada batch de forma serial y atómica: N intentos concurrentes no pueden reservar más
+ * de MAX_INTENTOS_LOGIN; los demás no obtienen fila. Si la contraseña resulta correcta,
+ * `iniciarSesion` reinicia el contador (y audita el desbloqueo si la cuenta quedó bloqueada).
+ * Devuelve `true` si el intento quedó reservado.
  */
-async function registrarFallo(db: D1Database, usuario: FilaUsuarioLogin): Promise<void> {
+async function reservarIntento(db: D1Database, userId: string): Promise<boolean> {
   const ahora = ahoraIso();
   const hasta = new Date(Date.parse(ahora) + BLOQUEO_MINUTOS * 60_000).toISOString();
   const nuevoContador = `CASE WHEN bloqueado_hasta IS NOT NULL AND bloqueado_hasta <= ?1 THEN 1 ELSE intentos_fallidos + 1 END`;
-  await db.batch([
+  const [reserva] = await db.batch<{ intentos_fallidos: number; bloqueado_hasta: string | null }>([
     db
       .prepare(
         `UPDATE users SET
            intentos_fallidos = ${nuevoContador},
-           bloqueado_hasta = CASE
-             WHEN ${nuevoContador} >= ?2 THEN ?3
-             WHEN bloqueado_hasta IS NOT NULL AND bloqueado_hasta <= ?1 THEN NULL
-             ELSE bloqueado_hasta
-           END,
+           bloqueado_hasta = CASE WHEN ${nuevoContador} >= ?2 THEN ?3 ELSE NULL END,
            updated_at = ?1
-         WHERE id = ?4`,
+         WHERE id = ?4 AND activo = 1 AND (bloqueado_hasta IS NULL OR bloqueado_hasta <= ?1)
+         RETURNING intentos_fallidos, bloqueado_hasta`,
       )
-      .bind(ahora, MAX_INTENTOS_LOGIN, hasta, usuario.id),
+      .bind(ahora, MAX_INTENTOS_LOGIN, hasta, userId),
     sentenciaAuditoriaCondicional(
       db,
       {
         entidad: 'users',
-        entidad_id: usuario.id,
+        entidad_id: userId,
         accion: 'usuario.bloqueado',
         actor_id: null,
         device_id: null,
-        despues: { id: usuario.id, intentos_fallidos: MAX_INTENTOS_LOGIN, bloqueado_hasta: hasta },
+        despues: { id: userId, intentos_fallidos: MAX_INTENTOS_LOGIN, bloqueado_hasta: hasta },
         server_at: ahora,
       },
       {
-        sql: 'EXISTS (SELECT 1 FROM users WHERE id = ? AND bloqueado_hasta = ?)',
-        parametros: [usuario.id, hasta],
+        sql: `EXISTS (SELECT 1 FROM users WHERE id = ? AND bloqueado_hasta = ? AND updated_at = ?)
+          AND NOT EXISTS (SELECT 1 FROM audit_log WHERE entidad = 'users' AND entidad_id = ?
+            AND accion = 'usuario.bloqueado'
+            AND json_extract(datos_despues, '$.bloqueado_hasta') = ?)`,
+        parametros: [userId, hasta, ahora, userId, hasta],
       },
     ),
   ]);
+  return (reserva?.results.length ?? 0) === 1;
 }
 
-async function login(c: Context<AppEnv>, datos: ReturnType<typeof loginSchema.parse>) {
+async function login(c: Context<AppEnv>, datos: LoginValidado): Promise<Response> {
+  const inicio = Date.now();
+  try {
+    return await intentarLogin(c, datos);
+  } catch (error) {
+    // H-02: toda 401 del login tarda al menos el mínimo uniforme contado desde el inicio.
+    if (error instanceof ErrorApi && error.code === 'CREDENCIALES_INVALIDAS') {
+      await esperar(inicio + TIEMPO_MINIMO_LOGIN_FALLIDO_MS - Date.now());
+    }
+    throw error;
+  }
+}
+
+async function intentarLogin(c: Context<AppEnv>, datos: LoginValidado): Promise<Response> {
   const db = c.env.DB;
   await limitarIntentos(c, datos.email);
 
   const usuario = await db
-    .prepare(
-      `SELECT id, nombre, email, rol, activo, password_hash, intentos_fallidos, bloqueado_hasta
-       FROM users WHERE email = ?`,
-    )
+    .prepare('SELECT id, nombre, email, rol, password_hash FROM users WHERE email = ?')
     .bind(datos.email)
     .first<FilaUsuarioLogin>();
 
-  // Inexistente o inactivo: derivación ficticia y la misma respuesta (no se audita el correo).
-  if (usuario === null || usuario.activo !== 1) {
+  // Inexistente: derivación ficticia y la misma respuesta (no se audita el correo).
+  if (usuario === null) {
     await derivacionFicticia();
     throw new ErrorApi('CREDENCIALES_INVALIDAS');
   }
-  const ahora = ahoraIso();
-  // Bloqueado: no se compara el hash; la respuesta es idéntica con contraseña correcta o no.
-  if (usuario.bloqueado_hasta !== null && usuario.bloqueado_hasta > ahora) {
+  // Inactivo o bloqueado: no hay reserva ni se compara el hash; la respuesta es idéntica con la
+  // contraseña correcta o no.
+  if (!(await reservarIntento(db, usuario.id))) {
     await derivacionFicticia();
     throw new ErrorApi('CREDENCIALES_INVALIDAS');
   }
   if (!(await verificarContrasena(datos.password, usuario.password_hash))) {
-    await registrarFallo(db, usuario);
+    // El intento ya quedó contado (y, si tocaba, la cuenta bloqueada) en la reserva.
     throw new ErrorApi('CREDENCIALES_INVALIDAS');
   }
 
@@ -178,6 +218,7 @@ async function login(c: Context<AppEnv>, datos: ReturnType<typeof loginSchema.pa
   const deviceId = ajeno ? uuidv7() : datos.device_id;
   const userAgent = c.req.header('User-Agent')?.slice(0, MAX_USER_AGENT) ?? null;
 
+  // `iniciarSesion` siempre reinicia el contador: la reserva lo dejó en ≥ 1.
   const emitido = await iniciarSesion(db, c.env.REFRESH_SECRET, {
     userId: usuario.id,
     deviceId,
@@ -185,7 +226,6 @@ async function login(c: Context<AppEnv>, datos: ReturnType<typeof loginSchema.pa
     instalacionId: datos.instalacion_id ?? null,
     nombreDispositivo: datos.device_nombre ?? null,
     userAgent,
-    reiniciarIntentos: usuario.intentos_fallidos !== 0 || usuario.bloqueado_hasta !== null,
   });
   return responderSesion(c, emitido, usuario);
 }
@@ -265,17 +305,30 @@ async function resolverRevocado(
   throw new ErrorApi('SESION_REVOCADA');
 }
 
-/** Cierra la sesión: revoca la familia de la cookie o, si no hay cookie, la del access token. */
+interface FamiliaARevocar {
+  familiaId: string;
+  userId: string;
+  deviceId: string;
+  tokenId: string;
+}
+
+/**
+ * Cierra la sesión: revoca la familia de la cookie o, si no hay cookie, la del access token.
+ *
+ * H-10 (tablet compartida): si la cookie es de un usuario y el Bearer de OTRO, se revocan las dos
+ * familias. La del Bearer, porque quien pulsa "Salir" es el usuario de la pantalla (el del
+ * access token) y su sesión no debe sobrevivir; la de la cookie, porque fue presentada en este
+ * dispositivo y no se sabe a quién pertenece la intención: lo seguro es cerrarla también.
+ */
 async function cerrarSesion(c: Context<AppEnv>): Promise<Response> {
   const db = c.env.DB;
-  let familia: { familiaId: string; userId: string; deviceId: string; tokenId: string } | null =
-    null;
+  let deCookie: FamiliaARevocar | null = null;
 
   const token = leerCookieRefresh(c);
   if (token !== undefined) {
     const fila = await buscarRefresh(db, await hashRefreshToken(c.env.REFRESH_SECRET, token));
     if (fila !== null) {
-      familia = {
+      deCookie = {
         familiaId: fila.familia_id,
         userId: fila.user_id,
         deviceId: fila.device_id,
@@ -283,19 +336,21 @@ async function cerrarSesion(c: Context<AppEnv>): Promise<Response> {
       };
     }
   }
-  if (familia === null) {
-    const bearer = tokenBearer(c.req.header('Authorization'));
-    const claims = bearer === null ? null : await verificarAccessToken(c.env.JWT_SECRET, bearer);
-    if (claims !== null) {
-      familia = {
-        familiaId: claims.fam,
-        userId: claims.sub,
-        deviceId: claims.did,
-        tokenId: claims.fam,
-      };
-    }
+  const bearer = tokenBearer(c.req.header('Authorization'));
+  const claims = bearer === null ? null : await verificarAccessToken(c.env.JWT_SECRET, bearer);
+  const delBearer: FamiliaARevocar | null =
+    claims === null
+      ? null
+      : { familiaId: claims.fam, userId: claims.sub, deviceId: claims.did, tokenId: claims.fam };
+
+  const familias: FamiliaARevocar[] = [];
+  if (deCookie !== null) {
+    familias.push(deCookie);
   }
-  if (familia !== null) {
+  if (delBearer !== null && (deCookie === null || deCookie.userId !== delBearer.userId)) {
+    familias.push(delBearer);
+  }
+  for (const familia of familias) {
     await revocarFamilia(db, familia, 'sesion.cierre');
   }
   borrarCookieRefresh(c);

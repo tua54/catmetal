@@ -6,7 +6,9 @@
 import { Hono } from 'hono';
 import { cabecerasSeguridad } from './cabeceras';
 import { manejarError, manejarNoEncontrado } from './errores';
+import { limitarCuerpo } from './middleware/limite-cuerpo';
 import { verificarOrigen } from './middleware/origen';
+import { verificarSecretos } from './middleware/secretos';
 import { crearRutasAuditoria } from './rutas/auditoria';
 import { crearRutasAuth } from './rutas/auth';
 import { crearRutasConsumos } from './rutas/consumos';
@@ -58,9 +60,14 @@ export function crearApp(): Hono<AppEnv> {
   app.use('*', cabecerasSeguridad);
   app.onError(manejarError);
   app.notFound(manejarNoEncontrado);
+  // Secretos fuertes y distintos (H-07): si no, toda la API responde 500 sin firmar nada.
+  app.use('/api', verificarSecretos);
+  app.use('/api/*', verificarSecretos);
   // CSRF por Origin en toda la API, antes de cualquier ruta (también en /auth/login y /auth/refresh).
   app.use('/api', verificarOrigen);
   app.use('/api/*', verificarOrigen);
+  // Tamaño máximo del cuerpo (H-05), antes de autenticar, validar o tocar D1.
+  app.use('/api/v1/*', limitarCuerpo);
 
   app.route('/api/v1', crearApi());
   app.all('/api', manejarNoEncontrado);

@@ -56,11 +56,41 @@ export const cantidadSchema = z
   .max(1e9, { error: 'La cantidad es demasiado grande.' })
   .refine(tieneMaximo3Decimales, { error: 'La cantidad admite máximo 3 decimales.' });
 
+const TAB = 0x09;
+const SALTO_DE_LINEA = 0x0a;
+
+/**
+ * `true` si el texto tiene caracteres de control C0 (U+0000–U+001F) o DEL (U+007F). Con
+ * `multilinea`, se permiten el salto de línea (U+000A) y el tabulador (U+0009), para descripciones
+ * y motivos escritos en un área de texto. Se recorre por código y no con una expresión regular para
+ * no escribir caracteres de control en el código fuente.
+ */
+export function tieneCaracteresDeControl(texto: string, multilinea = false): boolean {
+  for (let i = 0; i < texto.length; i += 1) {
+    const codigo = texto.charCodeAt(i);
+    const esControl = codigo <= 0x1f || codigo === 0x7f;
+    const permitido = multilinea && (codigo === SALTO_DE_LINEA || codigo === TAB);
+    if (esControl && !permitido) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function mensajeControl(campo: string, multilinea: boolean): string {
+  return multilinea
+    ? `${campo} tiene caracteres no permitidos (solo se admiten saltos de línea y tabuladores).`
+    : `${campo} tiene caracteres no permitidos.`;
+}
+
 export const loteSchema = z
   .string({ error: 'El lote es obligatorio.' })
   .trim()
   .min(1, { error: 'El lote es obligatorio.' })
-  .max(64, { error: 'El lote admite máximo 64 caracteres.' });
+  .max(64, { error: 'El lote admite máximo 64 caracteres.' })
+  .refine((valor) => !tieneCaracteresDeControl(valor), {
+    error: mensajeControl('El lote', false),
+  });
 
 export const emailSchema = z
   .string({ error: 'El correo es obligatorio.' })
@@ -80,7 +110,11 @@ export const passwordSchema = z
 const unidadSchema = z.enum(UNIDADES, { error: 'La unidad no es válida.' });
 const rolSchema = z.enum(ROLES, { error: 'El rol no es válido.' });
 
-function textoSchema(campo: string, min: number, max: number) {
+/**
+ * Texto libre recortado, con longitud entre `min` y `max` y sin caracteres de control (salvo
+ * salto de línea y tabulador si `multilinea`).
+ */
+function textoSchema(campo: string, min: number, max: number, multilinea = false) {
   return z
     .string({ error: `${campo} es obligatorio.` })
     .trim()
@@ -88,7 +122,10 @@ function textoSchema(campo: string, min: number, max: number) {
       error:
         min <= 1 ? `${campo} es obligatorio.` : `${campo} debe tener al menos ${min} caracteres.`,
     })
-    .max(max, { error: `${campo} admite máximo ${max} caracteres.` });
+    .max(max, { error: `${campo} admite máximo ${max} caracteres.` })
+    .refine((valor) => !tieneCaracteresDeControl(valor, multilinea), {
+      error: mensajeControl(campo, multilinea),
+    });
 }
 
 function sinRepetidos<T>(valores: readonly T[]): boolean {
@@ -277,7 +314,7 @@ export const crearNovedadSchema = z.object({
   id: uuidV7Schema,
   consumption_id: uuidV7Schema,
   tipo: z.enum(TIPOS_NOVEDAD, { error: 'El tipo de novedad no es válido.' }),
-  descripcion: textoSchema('La descripción', 1, 2000),
+  descripcion: textoSchema('La descripción', 1, 2000, true),
   client_created_at: isoFechaSchema,
   evidencias: z
     .array(evidenciaMetaSchema, { error: 'La lista de evidencias es obligatoria.' })
@@ -306,7 +343,7 @@ export const aprobarSchema = z.object({
 export const rechazarSchema = z.object({
   id: uuidV7Schema,
   version: versionConsumoSchema,
-  motivo: textoSchema('El motivo del rechazo', 3, 500),
+  motivo: textoSchema('El motivo del rechazo', 3, 500, true),
   client_created_at: isoFechaSchema,
 });
 
