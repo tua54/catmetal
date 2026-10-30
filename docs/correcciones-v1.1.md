@@ -44,6 +44,8 @@ Los cambios de la spec de esta ronda están en `docs/spec.md` §14 (v2.1).
 
 ### M1. El bloqueo de cuentas se puede abusar (spec §5, v2.1)
 
+- **Estado**: RESUELTO (e8e5a27). ADR 0018. Pruebas: `apps/worker/test/correcciones-m1-login-cupos.test.ts` y `correcciones-m1-dispositivo.test.ts`.
+
 - **Dónde**: `apps/worker/src/rutas/auth.ts:103` (clave `${ip}:${email}` del limitador) y `:136-172` (`reservarIntento`, bloqueo por cuenta).
 - **Escenario**: un tercero sin cuenta manda 5 contraseñas erróneas a cada admin y jefe cada 15 min. Nadie de esos roles puede iniciar sesión, y si todos los admin están bloqueados nadie puede desbloquear.
 - **Aceptación**: el diseño cumple (a)–(d) de la spec §5 v2.1 y tiene su ADR. Pruebas que lo demuestren:
@@ -205,3 +207,17 @@ Los cambios de la spec de esta ronda están en `docs/spec.md` §14 (v2.1).
 - **Hallazgo**: en jsdom, `new Response(blob)` no lee el Blob. Lo convierte al texto `"[object Blob]"`. Así, `tieneExif(...) === false` pasaba siempre, también con Node 24. La alternativa con `Response` del código tenía el mismo defecto en entornos sin `Blob.arrayBuffer`.
 - **Corrección**: el helper `apps/web/src/lib/blob.ts` (`leerBlob`) usa `arrayBuffer()` o, si no existe, `FileReader`. La prueba ahora exige el tamaño y el SOI del JPEG.
 - **Estado**: RESUELTO (e06919d).
+
+### N2. Volver a correr el seed deja la D1 local sin poder auditar (P2, local)
+
+- **Dónde**: `scripts/seed.mjs` (`sentenciasDe`: la auditoría usa `INSERT … SELECT … ON CONFLICT DO NOTHING`).
+- **Hallazgo**: en SQLite, un `INSERT` que se omite por `ON CONFLICT DO NOTHING` u `OR IGNORE` **igual hace avanzar** `sqlite_sequence` en una tabla AUTOINCREMENT. Comprobado con SQLite 3.53.1. Al volver a correr el seed idempotente, `audit_log` queda con `sqlite_sequence` por encima de `max(seq)`, y el trigger `audit_log_seq_sin_saltos` rechaza **toda** auditoría posterior: la D1 local de desarrollo tenía 31 filas y la secuencia en 60. El código del Worker y los scripts de producción (`crear-admin-sql.mjs` y `desbloqueo-emergencia-sql.mjs`) no usan esa forma sobre `audit_log`.
+- **Corrección**: la auditoría del seed usa `WHERE NOT EXISTS`. Una prueba estática impide `ON CONFLICT` y `OR IGNORE` en las inserciones a `audit_log` de `apps/worker/src` y `scripts/`.
+- **Estado**: pendiente.
+
+### N3. El filtro de auditoría no acepta la entidad `login_cupos` (P2)
+
+- **Dónde**: `ENTIDADES_AUDITORIA` en `packages/shared/src/reportes.ts`.
+- **Hallazgo**: el admin ve las filas de `login_cupos` en `/audit` sin filtro, pero `?entidad=login_cupos` responde 400.
+- **Estado**: pendiente (P2).
+
