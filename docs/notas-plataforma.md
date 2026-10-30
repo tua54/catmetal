@@ -82,3 +82,15 @@ Fuente: informe de `documentation-researcher` (URLs en cada punto).
 ## AUTOINCREMENT y conflictos ignorados (N2)
 
 - En SQLite (3.53.1 de Node 24) y en la D1 local, un `INSERT` que se omite por `ON CONFLICT DO NOTHING` u `OR IGNORE` **hace avanzar igual** `sqlite_sequence` en una tabla AUTOINCREMENT. En cambio, un fallo por CHECK, por trigger (`RAISE(ABORT)`) o por rollback de la transacción no lo hace avanzar. En `audit_log`, ese avance abre un hueco en `seq`, y `audit_log_seq_sin_saltos` rechaza toda auditoría posterior. Las inserciones idempotentes en `audit_log` usan `INSERT … SELECT … WHERE NOT EXISTS`. Lo protege `apps/worker/test/correcciones-n2-autoincrement.test.ts`.
+
+## Backup acotado por bytes y restauración (M3 y M4, ADR 0020 y 0021)
+
+- `octet_length(x)` está disponible en la D1 local de workerd (verificado con `wrangler d1 execute --local`: `octet_length('ñ') = 2`, `octet_length(12345) = 5`, `octet_length(NULL) = NULL`). `sqlite_version()` no se puede consultar en D1 ("not authorized"), así que la versión de SQLite no se verifica por SQL. Queda por confirmar en la D1 remota: si `octet_length` no existiera allí, el respaldo es `length(CAST(col AS BLOB))` (la ventana adaptativa acota igual lo que lee SQLite).
+- Las funciones de ventana (`SUM(...) OVER (ORDER BY ... ROWS UNBOUNDED PRECEDING)`, `COUNT(*) OVER ()`) funcionan en la D1 local.
+- **D1 admite como mucho 5 términos en un SELECT compuesto** (`UNION ALL`): con 6 falla con "too many terms in compound SELECT". Una lista `VALUES` larga (40 filas o más) sí funciona. Las consultas de verificación de la restauración van una por tabla por eso.
+- `PRAGMA foreign_key_check` y la lectura de `sqlite_sequence` funcionan en la D1 local.
+- `wrangler d1 execute --local --file` con `CREATE TRIGGER … BEGIN … END;` funciona, y se comportó de forma **atómica**: un archivo que falla a mitad (la guardia de `restauracion.sql`) no dejó ningún cambio (ni la tabla de la guardia). No se verificó contra la D1 remota (prohibido): el procedimiento de §9.2 asume lo peor y manda descartar la base si falla.
+- `sqlite_master.sql` de un trigger es el texto del `CREATE TRIGGER` tal como está en la migración (desde `CREATE` hasta `END`, sin el `;` ni los comentarios previos): `triggersDeMigraciones` lo reproduce exactamente (lo comprueba `fase6-restauracion.test.ts`).
+- Límite de tamaño de sentencia: el script de restauración parte los `INSERT` en 90 000 bytes como mucho (el límite documentado de D1 es de 100 KB por sentencia). No se verificó contra la D1 remota.
+- workerd local (Miniflare y el pool de Vitest) no aplica el límite de 128 MB de memoria de producción: la cota de memoria del backup se prueba con el medidor `observarPagina`, no con el runtime.
+- En Windows, `spawnSync('npx', [...], { shell: true })` no cita los argumentos: un `--command` con espacios hay que pasarlo entre comillas.

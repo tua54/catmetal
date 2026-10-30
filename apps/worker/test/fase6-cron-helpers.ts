@@ -90,26 +90,42 @@ export async function filasDeTabla(tabla: string): Promise<Fila[]> {
   return results;
 }
 
+/** Entradas `completa` del manifest (las que tienen archivo). */
+export function completas(manifest: ManifestBackup): ArchivoBackup[] {
+  return manifest.tablas.filter((t): t is ArchivoBackup => t.estado === 'completa');
+}
+
 /**
- * Comprueba el backup completo de `fecha` contra el contenido ACTUAL de la base: un archivo por
- * tabla, en el orden de la ADR, con exactamente las mismas filas (sin duplicados ni faltantes).
+ * Comprueba el backup terminado de `fecha` contra el contenido ACTUAL de la base: una entrada por
+ * tabla, en el orden de `TABLAS_BACKUP`, y un archivo por cada tabla `completa` con exactamente las
+ * mismas filas (sin duplicados ni faltantes). `audit_log` se compara hasta `seq_final` (ADR 0021).
+ * Sin `incompletas`, el backup debe ser `completo` (ADR 0020).
  */
 export async function verificarBackupCompleto(
   fecha: string,
   /** Filas que el backup tiene y la base ya no (purgadas después por el mantenimiento). */
   purgadas: Record<string, string[]> = {},
+  /** Tablas que deben haber quedado `incompleta` (backup `parcial`). */
+  incompletas: string[] = [],
 ): Promise<ManifestBackup> {
   const manifest = await leerManifest(fecha);
   expect(manifest).not.toBeNull();
   const m = manifest as ManifestBackup;
+  expect(m.formato).toBe(2);
   expect(m.fecha).toBe(fecha);
+  expect(m.estado).toBe(incompletas.length > 0 ? 'parcial' : 'completo');
   expect(m.tablas.map((t) => t.tabla)).toEqual(TABLAS_BACKUP.map((t) => t.nombre));
-  for (const entrada of m.tablas) {
+  expect(m.tablas.filter((t) => t.estado === 'incompleta').map((t) => t.tabla)).toEqual(
+    incompletas,
+  );
+  for (const entrada of completas(m)) {
     expect(entrada.archivo).toBe(archivoDeTabla(entrada.tabla));
     const ids = purgadas[entrada.tabla] ?? [];
     const enBackup = (await leerTabla(fecha, entrada)).filter((f) => !ids.includes(String(f.id)));
     expect(entrada.filas - enBackup.length, entrada.tabla).toBe(ids.length);
-    const enBase = await filasDeTabla(entrada.tabla);
+    const enBase = (await filasDeTabla(entrada.tabla)).filter(
+      (f) => entrada.tabla !== 'audit_log' || Number(f.seq) <= m.seq_final,
+    );
     expect(enBackup.length, entrada.tabla).toBe(enBase.length);
     expect(enBackup, entrada.tabla).toEqual(enBase);
   }

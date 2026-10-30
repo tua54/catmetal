@@ -13,6 +13,8 @@
     "scripts/e2e-config.d.mts",
     // Tipos del script de desbloqueo de emergencia (lo importa una prueba del Worker; ADR 0018).
     "scripts/desbloqueo-emergencia-sql.d.mts",
+    // Tipos del núcleo de la restauración del backup (lo importa una prueba del Worker; ADR 0021).
+    "scripts/restauracion-nucleo.d.mts",
     "e2e/**/*.ts"
   ]
 }

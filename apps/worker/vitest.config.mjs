@@ -48,6 +48,9 @@ export default defineConfig({
     cloudflareTest({
       wrangler: { configPath: './wrangler.jsonc' },
       miniflare: {
+        // Segunda D1 local, SOLO de pruebas: la base limpia donde la prueba de restauración importa
+        // el NDJSON del backup (ADR 0021, punto 9). No existe en wrangler.jsonc.
+        d1Databases: { DB_RESTAURADA: 'restauracion-pruebas' },
         bindings: {
           ...SECRETOS_DE_PRUEBA,
           TEST_MIGRATIONS: migraciones,

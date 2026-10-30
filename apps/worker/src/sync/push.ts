@@ -137,17 +137,49 @@ function tamanoSerializado(mutacion: unknown): number {
 }
 
 /**
- * `payload_json` de una mutación rechazada o en conflicto: la mutación tal como llegó. Si supera
- * 64 KiB (el CHECK de la columna), se guarda un marcador JSON con el tamaño y el motivo en lugar de
- * truncarla (un JSON truncado no es válido). Una mutación válida nunca llega a ese tamaño (la
- * descripción más larga es de 2000 caracteres), así que solo se omite lo que se rechaza por tamaño.
+ * Tamaño máximo del `payload_json` que se guarda ENTERO para una mutación no aplicada (ADR 0020).
+ * Acota el crecimiento de `sync_mutations` por rechazos (y el tamaño de las filas del backup). La
+ * mutación válida más grande, con el peor escape JSON (sustitutos UTF-16 sueltos: 6 bytes por
+ * unidad), mide bastante menos: lo comprueba `fase3-push-recorte.test.ts`.
+ */
+export const MAX_PAYLOAD_NO_APLICADA_BYTES = 16 * 1024;
+
+/** El valor si es un UUID v7, o `undefined` (para el JSON reducido). */
+function uuidV7O(valor: unknown): string | undefined {
+  return esUuidV7(valor) ? valor : undefined;
+}
+
+/**
+ * `payload_json` de una mutación rechazada o en conflicto (ADR 0020, punto 4): la mutación tal
+ * como llegó si mide hasta `MAX_PAYLOAD_NO_APLICADA_BYTES`. Si mide más, un JSON reducido con el
+ * tamaño, el tipo declarado y solo los ids que el servidor consulta (`$.payload.id` en
+ * `CONSULTA_CREACION_NO_APLICADA` y su índice de la migración 0006; `$.payload.consumption_id`), sin
+ * truncar el JSON (uno truncado no es válido). No se pierde ningún dato de planta: solo se recorta lo
+ * que NO se aplicó, y la mutación sigue en el outbox del cliente. Límite conocido: un cliente puede
+ * rellenar con espacios los textos (`trim` los quita antes de validar el largo); si esa mutación se
+ * rechaza o entra en conflicto, se recorta, pero el relleno no es dato de planta.
  */
 export function payloadJson(mutacion: unknown): string {
   const texto = serializar(mutacion);
   const tamano = bytes(texto);
-  return tamano <= MAX_PAYLOAD_MUTACION_BYTES
-    ? texto
-    : JSON.stringify({ omitido: true, motivo: 'supera 64 KiB', tamano_bytes: tamano });
+  if (tamano <= MAX_PAYLOAD_NO_APLICADA_BYTES) {
+    return texto;
+  }
+  const payload: unknown =
+    typeof mutacion === 'object' && mutacion !== null
+      ? (mutacion as { payload?: unknown }).payload
+      : undefined;
+  const ids =
+    typeof payload === 'object' && payload !== null
+      ? (payload as { id?: unknown; consumption_id?: unknown })
+      : {};
+  return JSON.stringify({
+    recortado: true,
+    motivo: 'supera 16 KiB',
+    tamano_bytes: tamano,
+    tipo: tipoDeclarado(mutacion),
+    payload: { id: uuidV7O(ids.id), consumption_id: uuidV7O(ids.consumption_id) },
+  });
 }
 
 function rechazo(code: CodigoError, message: string = MENSAJES_ERROR[code]): RespuestaGuardada {

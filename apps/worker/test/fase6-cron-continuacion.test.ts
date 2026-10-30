@@ -2,7 +2,14 @@
 // D1 y R2, `seq_final` en el manifest y el error `backup_incompleto_del_dia`. D1 y R2 locales reales.
 import { env } from 'cloudflare:workers';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { ejecutarBackup, prefijoDelDia, TAMANO_PAGINA } from '../src/cron/backup';
+import {
+  ejecutarBackup,
+  MAX_BYTES_PAGINA,
+  MAX_INTENTOS_TABLA,
+  MIN_FILAS_MEDICION,
+  prefijoDelDia,
+  TAMANO_PAGINA,
+} from '../src/cron/backup';
 import {
   CRON_CONTINUACION,
   CRON_INICIO,
@@ -58,11 +65,14 @@ async function maxSeq(): Promise<number> {
 }
 
 describe('configuración', () => {
-  it('constantes de la ADR 0016: crons, página de 2000 y presupuestos separados', () => {
+  it('constantes de las ADR 0016 y 0020: crons, página de 2000 filas y 4 MiB, intentos y presupuestos', () => {
     expect(CRON_INICIO).toBe('0 8 * * *');
     expect(CRON_CONTINUACION).toBe('0 9-13 * * *');
     expect(HORA_ULTIMA_CONTINUACION_UTC).toBe(13);
     expect(TAMANO_PAGINA).toBe(2000);
+    expect(MAX_BYTES_PAGINA).toBe(4 * 1024 * 1024);
+    expect(MIN_FILAS_MEDICION).toBe(64);
+    expect(MAX_INTENTOS_TABLA).toBe(3);
     expect(MAX_CONSULTAS_D1_POR_INVOCACION).toBe(950);
     expect(MAX_OPERACIONES_R2_POR_INVOCACION).toBeLessThan(10_000);
     expect(modoDeCron('0 8 * * *')).toBe('inicio');
@@ -90,18 +100,52 @@ describe('modo continuación', () => {
     expect(presupuesto.usadas).toBe(1);
   });
 
-  it('continúa un backup en pausa hasta completarlo; seq_final es MAX(seq) al terminar', async () => {
+  // ADR 0021: `seq_final` es MAX(seq) al EMPEZAR audit_log (la última tabla), no al terminar: el
+  // archivo de audit_log tiene exactamente los seq 1..seq_final aunque se escriba durante el backup.
+  it('continúa un backup en pausa hasta completarlo; seq_final es MAX(seq) al empezar audit_log', async () => {
     const fecha = '2027-01-03';
     await inicioPausado(fecha);
-    const progreso = (await leerProgreso(fecha)) as { seq_inicial: number };
+    const progreso = (await leerProgreso(fecha)) as { seq_inicial: number; seq_final: null };
+    expect(progreso.seq_final).toBeNull();
     // Escrituras entre el inicio y la continuación (el backup no es una foto de un instante).
     await sembrarAuditoria(5);
     const r = await ejecutarBackup(env, a(fecha, 9), { modo: 'continuacion', tamanoPagina: 100 });
     expect(r.estado).toBe('completo');
     const manifest = await verificarBackupCompleto(fecha);
     expect(manifest.seq_inicial).toBe(progreso.seq_inicial);
+    expect(manifest.corte.seq).toBe(progreso.seq_inicial);
     expect(manifest.seq_final).toBe(await maxSeq());
     expect(manifest.seq_final).toBeGreaterThanOrEqual(manifest.seq_inicial + 5);
+  });
+
+  it('lo escrito después de empezar audit_log queda fuera de su archivo', async () => {
+    const fecha = '2027-01-12';
+    // Pausa ya dentro de audit_log (seq_final fijado), escritura nueva y continuación.
+    interface Progreso {
+      en_curso: { tabla: string } | null;
+      seq_final: number | null;
+    }
+    let seqFinal: number | null = null;
+    for (let i = 0; i < 100 && seqFinal === null; i++) {
+      await ejecutarBackup(env, a(fecha, 8), {
+        tamanoPagina: 100,
+        presupuesto: new Presupuesto({ maxOperaciones: 40 }),
+      });
+      const progreso = (await leerProgreso(fecha)) as Progreso | null;
+      if (progreso?.en_curso?.tabla === 'audit_log') {
+        seqFinal = progreso.seq_final;
+      }
+    }
+    expect(seqFinal).toBe(await maxSeq());
+    await sembrarAuditoria(3);
+    expect((await ejecutarBackup(env, a(fecha, 9), { modo: 'continuacion' })).estado).toBe(
+      'completo',
+    );
+    const manifest = await leerManifest(fecha);
+    expect(manifest?.seq_final).toBe(seqFinal);
+    const auditoria = manifest?.tablas.find((t) => t.tabla === 'audit_log');
+    expect(auditoria).toMatchObject({ estado: 'completa', filas: seqFinal });
+    expect(await maxSeq()).toBe((seqFinal ?? 0) + 3);
   });
 
   it('seq_final también va en un backup completo en una sola invocación', async () => {

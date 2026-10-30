@@ -11,9 +11,18 @@
 // del error, truncado).
 
 import { registrar } from '../log';
-import { ejecutarBackup, fechaBackup, type ModoBackup, type ResultadoBackup } from './backup';
+import {
+  ejecutarBackup,
+  fechaBackup,
+  type ModoBackup,
+  type OpcionesBackup,
+  type ResultadoBackup,
+} from './backup';
+import { describirError } from './errores';
 import { ejecutarMantenimiento } from './mantenimiento';
 import { Presupuesto } from './presupuesto';
+
+export { describirError };
 
 export const CRON_INICIO = '0 8 * * *';
 export const CRON_CONTINUACION = '0 9-13 * * *';
@@ -29,18 +38,16 @@ export interface OpcionesCron {
   /** Momento de ejecución (por defecto, ahora). Define la fecha del backup. */
   ahora?: Date;
   presupuesto?: Presupuesto;
+  /** Opciones del backup inyectables solo en las pruebas (medidor, fallos y tamaños). */
+  opcionesBackup?: Pick<
+    OpcionesBackup,
+    'tamanoPagina' | 'maxBytesPagina' | 'observarPagina' | 'fallarEn'
+  >;
 }
 
 export interface ResultadoCron {
   backup: ResultadoBackup['estado'] | 'error';
   mantenimiento: 'hecho' | 'omitido' | 'error';
-}
-
-const MAX_MENSAJE_ERROR = 300;
-
-export function describirError(error: unknown): string {
-  const texto = error instanceof Error ? `${error.name}: ${error.message}` : 'Error desconocido';
-  return texto.slice(0, MAX_MENSAJE_ERROR);
 }
 
 export function modoDeCron(cron: string): ModoBackup {
@@ -63,9 +70,22 @@ export async function ejecutarCron(
 
   let backup: ResultadoBackup | null = null;
   try {
-    backup = await ejecutarBackup(env, ahora, { presupuesto, modo });
-    const nivel = backup.estado === 'pausado' || backup.estado === 'sin_iniciar' ? 'aviso' : 'info';
-    registrar(nivel, 'backup_resumen', { ...backup });
+    backup = await ejecutarBackup(env, ahora, { ...opciones.opcionesBackup, presupuesto, modo });
+    if (backup.estado === 'parcial') {
+      // ADR 0020: el día terminó sin alguna tabla (cada una ya registró `backup_tabla_incompleta`
+      // con su motivo). Los logs no admiten listas: las tablas van separadas por coma.
+      const { tablas_incompletas: incompletas, ...resto } = backup;
+      const tablasIncompletas = incompletas.join(',');
+      registrar('aviso', 'backup_resumen', { ...resto, tablas_incompletas: tablasIncompletas });
+      registrar('error', 'backup_parcial', {
+        fecha: backup.fecha,
+        tablas_incompletas: tablasIncompletas,
+      });
+    } else {
+      const nivel =
+        backup.estado === 'pausado' || backup.estado === 'sin_iniciar' ? 'aviso' : 'info';
+      registrar(nivel, 'backup_resumen', { ...backup });
+    }
   } catch (error) {
     registrar('error', 'backup_fallido', { error: describirError(error) });
   }
@@ -73,7 +93,11 @@ export async function ejecutarCron(
   const ultimaDelDia =
     modo === 'continuacion' &&
     new Date(disparo.scheduledTime).getUTCHours() === HORA_ULTIMA_CONTINUACION_UTC;
-  const completo = backup?.estado === 'completo' || backup?.estado === 'ya_existia';
+  // Un backup `parcial` también terminó (tiene manifest): no es un día sin backup.
+  const completo =
+    backup?.estado === 'completo' ||
+    backup?.estado === 'parcial' ||
+    backup?.estado === 'ya_existia';
   if (ultimaDelDia && !completo) {
     // Ya no habrá más continuaciones hoy: el día queda sin backup completo (sin manifest).
     registrar('error', 'backup_incompleto_del_dia', {

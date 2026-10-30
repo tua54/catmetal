@@ -132,12 +132,19 @@ npx wrangler deploy --env staging
 ## 7. Observabilidad
 
 - Workers Logs habilitado con `invocation_logs: false` (las trazas automáticas podrían incluir cabeceras sensibles); quedan los logs estructurados del Worker (`console.log(JSON.stringify(...))`) sin datos personales ni secretos. Retención de Workers Logs: 7 días (Paid).
-- Alertas a revisar en los logs: `backup_incompleto_del_dia`, `backup_fallido`, `secretos_invalidos`, `sync_mutation_no_registrada`, `sync_push_transitorio`, `error_no_controlado`.
+- Alertas a revisar en los logs: `backup_incompleto_del_dia`, `backup_fallido`, `backup_tabla_incompleta`, `backup_parcial`, `secretos_invalidos`, `sync_mutation_no_registrada`, `sync_push_transitorio`, `error_no_controlado`.
+  - `backup_tabla_incompleta` (con `tabla`, `intentos` y `motivo`): una tabla falló `MAX_INTENTOS_TABLA` = 3 veces seguidas sin avanzar y el backup siguió con las demás (ADR 0020).
+  - `backup_parcial` (con `tablas_incompletas`, separadas por coma): el backup del día terminó, pero sin esas tablas. Solo es restaurable si las incompletas son `sync_mutations`, `login_cupos` o `refresh_tokens` (sección 9.2). Investigue el `motivo` el mismo día.
 
 ## 8. Backups
 
 - **Primera línea: Time Travel de D1** (30 días en Paid), sin configuración.
-- **Backup diario a R2**, en el bucket propio `mp-backups-*` (binding `BACKUPS`), separado de las evidencias (cron `0 8 * * *` = 03:00 Bogotá, con continuaciones `0 9-13 * * *`): cada tabla en NDJSON comprimido en `backups/AAAA-MM-DD/<tabla>.ndjson.gz` + `manifest.json` (conteos, bytes, sha256, época, `seq_inicial`, `seq_final`, última migración). Un día sin `manifest.json` es un backup **incompleto** (log `backup_incompleto_del_dia`). Retención: 90 días por la regla de ciclo de vida (sección 2). ADR 0014 y 0016.
+- **Backup diario a R2**, en el bucket propio `mp-backups-*` (binding `BACKUPS`), separado de las evidencias (cron `0 8 * * *` = 03:00 Bogotá, con continuaciones `0 9-13 * * *`): cada tabla en NDJSON comprimido en `backups/AAAA-MM-DD/<tabla>.ndjson.gz` + `manifest.json`. Retención: 90 días por la regla de ciclo de vida (sección 2). ADR 0014, 0016, 0020 y 0021.
+  - El manifest (`formato: 2`) trae `estado` (`completo` o `parcial`), la marca de corte `corte` (`seq` = `MAX(audit_log.seq)` al empezar y la hora), `seq_final`, la época, la última migración y, por tabla, su `estado` (`completa` con conteo, bytes, sha256 y `segmentos_gzip`, o `incompleta` con `motivo` e `intentos`).
+  - `audit_log` se exporta **al final** y hasta `seq_final`: así el backup permite reconstruir el estado exacto en el corte (sección 9.2).
+  - Cada página se acota a 2000 filas **y** a 4 MiB (medidos en SQL con `octet_length`), y se escribe al compresor por partes: una tabla con filas grandes ya no agota la memoria del Worker (ADR 0020).
+  - Un día sin `manifest.json` es un backup **sin terminar** (log `backup_incompleto_del_dia`). Un manifest `parcial` es un backup terminado sin alguna tabla (log `backup_parcial`).
+  - Riesgo vigilado: `audit_log` es la tabla más grande y va al final de la ventana. Si no termina antes de las 13:00 UTC, el día queda sin manifest. Revise `backup_resumen` (operaciones y tabla en curso) si el tamaño de la base crece mucho.
 - El backup contiene datos personales y hashes de contraseñas: el bucket es privado y solo el Worker y las personas autorizadas acceden.
 
 ## 9. Restaurar
@@ -165,32 +172,69 @@ npx wrangler d1 execute mp-prod --env production --remote --command "UPDATE sett
 
 ### 9.2 Desde el backup en R2 (si Time Travel no alcanza)
 
-Procedimiento (revisión de esquema H9 y M2; ADR 0014):
+Procedimiento (ADR 0021, que reemplaza el de la revisión de esquema H9). La base restaurada queda **exactamente como estaba en el corte** del backup (`manifest.corte`): lo que se escribió durante la ventana del backup se pierde en el servidor, igual que todo lo posterior. Las tablets lo reenvían tras el cambio de época, y lo hecho por REST queda listado en el informe para rehacerlo.
 
-1. Elija una fecha con `manifest.json` (sin manifest, el backup está incompleto).
-2. Descargue el prefijo (por cada archivo del manifest) en una carpeta **fuera del repositorio** (el backup contiene hashes y datos personales; F6-03), por ejemplo `$env:TEMP\catmetal-restaurar`, y bórrela al terminar:
+1. **Elija la fecha.** El `manifest.json` debe tener `formato: 2` y `estado: 'completo'`, o `estado: 'parcial'` con solo `sync_mutations`, `login_cupos` o `refresh_tokens` incompletas. Sin manifest, el backup está sin terminar. Los backups de `formato: 1` no se restauran con el script.
+2. **Descargue** el manifest y cada archivo que lista en una carpeta **fuera del repositorio**, porque el backup contiene hashes y datos personales (F6-03). Por ejemplo, `$env:TEMP\catmetal-restaurar\<fecha>`; bórrela al terminar. Son comandos remotos: los ejecuta el equipo humano.
    ```powershell
-   New-Item -ItemType Directory -Force "$env:TEMP\catmetal-restaurar" | Out-Null
-   npx wrangler r2 object get mp-backups-prod/backups/2026-11-02/manifest.json --file "$env:TEMP\catmetal-restaurar\manifest.json" --remote
-   npx wrangler r2 object get mp-backups-prod/backups/2026-11-02/consumptions.ndjson.gz --file "$env:TEMP\catmetal-restaurar\consumptions.ndjson.gz" --remote
+   New-Item -ItemType Directory -Force "$env:TEMP\catmetal-restaurar\2026-11-02" | Out-Null
+   npx wrangler r2 object get mp-backups-prod/backups/2026-11-02/manifest.json --file "$env:TEMP\catmetal-restaurar\2026-11-02\manifest.json" --remote
+   npx wrangler r2 object get mp-backups-prod/backups/2026-11-02/consumptions.ndjson.gz --file "$env:TEMP\catmetal-restaurar\2026-11-02\consumptions.ndjson.gz" --remote
+   # … un comando por cada archivo de "tablas" del manifest
    ```
-3. Verifique `bytes` y `sha256` de cada archivo contra el manifest. Descomprima con `gunzip`/`zcat` o `zlib` de Node (leen los archivos de varios miembros gzip; `DecompressionStream` de workerd no).
-4. Cree una D1 vacía (`wrangler d1 create`) y aplique las migraciones hasta `ultima_migracion` del manifest.
-5. Guarde el SQL de todos los triggers (`SELECT sql FROM sqlite_master WHERE type = 'trigger'`) y elimínelos (`DROP TRIGGER …`).
-6. Vacíe `settings` y `audit_log`, que la migración 0002 deja sembradas.
-7. Cargue las tablas en el **orden inverso** al del manifest (`users`, …, `audit_log`) con `PRAGMA defer_foreign_keys = on` en cada lote, con los valores tal cual (incluido `seq`).
-8. Vuelva a crear los triggers con el SQL guardado.
-9. Verifique conteos contra el manifest y ejecute `PRAGMA foreign_key_check`.
-10. Cambie `settings.sync_epoca` (sección 9.1).
-11. Apunte el binding del entorno a la base nueva (`database_id` en `wrangler.jsonc`), despliegue y verifique (sección 9.3).
+3. **Ponga el repositorio en la revisión** cuya última migración sea `ultima_migracion` del manifest (por ejemplo, `git worktree add <carpeta> <tag>`), y trabaje desde ahí en los pasos 4 a 8.
+4. **Cree una D1 nueva y aplique las migraciones** (`wrangler d1 create …` y `wrangler d1 migrations apply … --remote`; lo hace el equipo humano). La base debe quedar recién migrada: el script se niega a importar sobre una base con datos.
+5. **Genere el SQL** (Node 24; solo lee archivos y no se conecta a nada):
+   ```powershell
+   node scripts/restaurar-backup.mjs --backup "$env:TEMP\catmetal-restaurar\2026-11-02" --salida "$env:TEMP\catmetal-restaurar\salida"
+   ```
+   - El script comprueba `bytes` y `sha256` de cada archivo, descomprime (lee los gzip de varios miembros) y reconcilia al corte.
+   - Escribe `restauracion.sql`, `verificacion.sql`, `post-restauracion.sql` e `informe-restauracion.json`. Se niega a escribir dentro del repositorio.
+   - Códigos de salida: 0 correcto; 1 uso o E/S; 2 backup no íntegro o no admitido; 3 filas sin ninguna auditoría en el origen. Con 3, revise la lista. `--conservar-sin-auditoria` las conserva tal cual y la verificación las excluye; nunca se descartan en silencio.
+   - Si se queda sin memoria con tablas grandes: `node --max-old-space-size=8192 scripts/restaurar-backup.mjs …`.
+6. **Revise el informe** antes de seguir:
+   - `revisar_seguridad`: usuarios creados o modificados después del corte. Los creados no se restauran. Los modificados conservan su valor más reciente (una desactivación, un bloqueo o una contraseña nueva se mantienen); confirme que es lo deseado.
+   - `cambios_tras_el_corte`: lo que se escribió en la ventana del backup y no está en la base restaurada.
+   - `rechazos_tras_el_corte`: mutaciones rechazadas o en conflicto después del corte. El cliente no las reenvía solo; avise a su autor para que rehaga lo que corresponda.
+7. **Importe** `restauracion.sql`. El archivo:
+   - comprueba con una guardia que la base está recién migrada, con la misma última migración y exactamente los triggers de las migraciones;
+   - borra los triggers, inserta los datos (padres primero, sin ningún `DELETE`), recrea los triggers con el mismo SQL y quita la guardia.
+
+   Si falla a mitad, **descarte la base y vuelva al paso 4**.
+   ```powershell
+   npx wrangler d1 execute <base-nueva> --remote --file "$env:TEMP\catmetal-restaurar\salida\restauracion.sql"
+   ```
+8. **Verifique.** Cada consulta de `verificacion.sql` debe devolver **0 filas**. Incluye consumos decididos sin su validación, filas sin auditoría, filas distintas de su última auditoría, auditoría hasta el corte, `sqlite_sequence`, mutaciones aplicadas sin efecto, FK (`PRAGMA foreign_key_check`), triggers y conteos. Si alguna devuelve filas, no siga: descarte la base.
+   ```powershell
+   npx wrangler d1 execute <base-nueva> --remote --json --file "$env:TEMP\catmetal-restaurar\salida\verificacion.sql"
+   ```
+9. **Cambie la época** con `post-restauracion.sql`, que equivale al comando de la sección 9.1 y escribe su auditoría:
+   ```powershell
+   npx wrangler d1 execute <base-nueva> --remote --file "$env:TEMP\catmetal-restaurar\salida\post-restauracion.sql"
+   ```
+10. **Aplique las migraciones posteriores** a `ultima_migracion`, si las hay, ya desde la rama actual.
+11. **Ponga la base en servicio.** Apunte el binding del entorno a la base nueva (`database_id` en `wrangler.jsonc`), despliegue y verifique (secciones 9.3 y 9.4).
+    - **Avise a planta: todos deben iniciar sesión otra vez con conexión**, porque `refresh_tokens` no se restaura. El inicio de sesión sin conexión de la tablet y su cola de pendientes no se ven afectados: lo pendiente se envía después de ese inicio de sesión.
+12. **Rehaga** lo que el informe lista como hecho por REST en la ventana (por ejemplo, las decisiones del jefe y los cambios de usuarios) y revise los rechazos.
+13. **Borre** la carpeta temporal.
+
+**Ensayo en local** (autorizado; no toca nada remoto). Con dos carpetas de estado local:
+- aplique las migraciones y el seed en la de origen (`wrangler d1 migrations apply DB --local --persist-to <origen>` y `node scripts/seed.mjs --persist-to <origen>`);
+- genere un backup (cron local o exportación equivalente);
+- haga los pasos 4 a 9 con `--local --persist-to <destino>` en lugar de `--remote`.
+
+La evidencia del ensayo de la v1.1 está en `docs/evidencia/correcciones.md`.
 
 ### 9.3 Verificaciones después de restaurar
+
+- Después de una restauración desde R2, `verificacion.sql` (paso 8 de la sección 9.2) ya cubre la coherencia entre tablas.
+- Después de Time Travel (sección 9.1), compruebe al menos esto:
 
 ```sql
 -- Consumos decididos sin su validación (no deberían existir)
 SELECT c.id FROM consumptions c WHERE c.estado <> 'pendiente'
-  AND NOT EXISTS (SELECT 1 FROM validations v WHERE v.consumption_id = c.id);
--- Consumos sin auditoría (posibles en un backup de R2: el backup no es una foto de un instante)
+  AND NOT EXISTS (SELECT 1 FROM validations v WHERE v.consumption_id = c.id AND v.decision = c.estado);
+-- Consumos sin auditoría
 SELECT c.id FROM consumptions c
   WHERE NOT EXISTS (SELECT 1 FROM audit_log a WHERE a.entidad = 'consumptions' AND a.entidad_id = c.id);
 ```

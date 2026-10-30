@@ -6,13 +6,20 @@ import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import {
   ejecutarBackup,
+  MAX_BYTES_PAGINA,
   TAMANO_PAGINA,
   TAMANO_PARTE_BYTES,
+  type InfoPagina,
   type ResultadoBackup,
 } from '../src/cron/backup';
 import { Presupuesto } from '../src/cron/presupuesto';
 import { TABLAS_BACKUP } from '../src/cron/tablas';
-import { leerProgreso, sembrarAuditoria, verificarBackupCompleto } from './fase6-cron-helpers';
+import {
+  completas,
+  leerProgreso,
+  sembrarAuditoria,
+  verificarBackupCompleto,
+} from './fase6-cron-helpers';
 
 const dia = (fecha: string) => new Date(`${fecha}T08:00:00.000Z`);
 
@@ -22,23 +29,35 @@ beforeAll(async () => {
 }, 120_000);
 
 describe('multipart upload', () => {
-  // ADR 0016: con la página por defecto (TAMANO_PAGINA = 2000) las ~1500 filas de ~6 KB de
-  // audit_log (~9 MB de NDJSON, mucho más que una fila real) llegan en UNA consulta: es el peor caso
-  // de memoria por página. Se mide el tiempo y que la página no se partió.
+  // ADR 0016 enmendada por la ADR 0020: las ~1500 filas de ~6 KB de audit_log (~9 MB de NDJSON)
+  // YA NO llegan en una consulta de 2000 filas: la página se acota a MAX_BYTES_PAGINA (más una fila)
+  // y la ventana de medición crece desde MIN_FILAS_MEDICION. Se mide el tiempo, el número de
+  // consultas (una por página, más el corte y `seq_final`) y la cota de cada página.
   it('una tabla de más de 5 MiB comprimidos se sube por partes en una invocación', async () => {
     const fecha = '2026-12-01';
     const presupuesto = new Presupuesto();
+    const paginas: InfoPagina[] = [];
     const inicio = performance.now();
-    const resultado = await ejecutarBackup(env, dia(fecha), { presupuesto });
+    const resultado = await ejecutarBackup(env, dia(fecha), {
+      presupuesto,
+      observarPagina: (info) => paginas.push(info),
+    });
     const ms = performance.now() - inicio;
     expect(resultado.estado).toBe('completo');
     expect(TAMANO_PAGINA).toBe(2000);
-    // Una página por tabla (todas caben en 2000 filas) + MAX(seq) inicial y final.
-    expect(presupuesto.usadasD1).toBe(TABLAS_BACKUP.length + 2);
+    // Una consulta por página que trajo filas, como mucho una página vacía por tabla para cerrarla
+    // (no la ve el medidor), más el corte inicial y `seq_final`.
+    expect(presupuesto.usadasD1).toBeGreaterThanOrEqual(paginas.length + 2);
+    expect(presupuesto.usadasD1).toBeLessThanOrEqual(paginas.length + TABLAS_BACKUP.length + 2);
+    const deAuditoria = paginas.filter((p) => p.tabla === 'audit_log');
+    expect(deAuditoria.length).toBeGreaterThan(1);
+    expect(Math.max(...deAuditoria.map((p) => p.bytesNdjson))).toBeLessThanOrEqual(
+      MAX_BYTES_PAGINA + 10_000,
+    );
     // Holgado: localmente tarda ~1–3 s; el tope de una invocación es de 10 min.
     expect(ms).toBeLessThan(60_000);
     const manifest = await verificarBackupCompleto(fecha);
-    const auditoria = manifest.tablas.find((t) => t.tabla === 'audit_log');
+    const auditoria = completas(manifest).find((t) => t.tabla === 'audit_log');
     expect(auditoria?.filas).toBeGreaterThanOrEqual(1500);
     expect(auditoria?.bytes).toBeGreaterThan(TAMANO_PARTE_BYTES);
     expect(auditoria?.segmentos_gzip).toEqual([0]);
@@ -70,7 +89,7 @@ describe('multipart upload', () => {
     // Hubo al menos una pausa con una subida multipart ya iniciada (reanudada después).
     expect(progresoConPartes).toBe(true);
     const manifest = await verificarBackupCompleto(fecha);
-    const auditoria = manifest.tablas.find((t) => t.tabla === 'audit_log');
+    const auditoria = completas(manifest).find((t) => t.tabla === 'audit_log');
     expect(auditoria?.filas).toBeGreaterThanOrEqual(1500);
     expect(auditoria?.bytes).toBeGreaterThan(TAMANO_PARTE_BYTES);
     expect(auditoria?.segmentos_gzip.length).toBeGreaterThan(1);

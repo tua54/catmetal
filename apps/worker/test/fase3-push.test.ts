@@ -305,7 +305,9 @@ describe('dependencias y lotes con errores', () => {
     expect(JSON.parse(guardada?.payload_json ?? 'null')).toEqual(basura);
   });
 
-  it('una mutación de más de 64 KiB se rechaza y se guarda un marcador en lugar del payload', async () => {
+  // ADR 0020: desde la corrección M3 el marcador es el JSON reducido de las no aplicadas de más de
+  // 16 KiB, que además conserva el id del consumo (antes, `{ omitido: true }` lo perdía).
+  it('una mutación de más de 64 KiB se rechaza y se guarda el JSON reducido en lugar del payload', async () => {
     const { orden, material } = await escenarioOrden(jefe, supervisor);
     const enorme = crearConsumo(orden, material, { lote: 'x'.repeat(MAX_PAYLOAD_MUTACION_BYTES) });
     const [r] = await pushOk(supervisor.token, supervisor.usuario.id, [enorme]);
@@ -314,8 +316,10 @@ describe('dependencias y lotes con errores', () => {
     const fila = await filaSync(enorme.mutation_id);
     expect(fila?.tipo).toBe('consumo.crear');
     expect(JSON.parse(fila?.payload_json ?? 'null')).toMatchObject({
-      omitido: true,
+      recortado: true,
       tamano_bytes: expect.any(Number) as number,
+      tipo: 'consumo.crear',
+      payload: { id: enorme.payload.id },
     });
     expect(await contar('consumptions', 'id = ?', enorme.payload.id)).toBe(0);
   });
