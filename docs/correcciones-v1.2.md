@@ -22,6 +22,8 @@ Este documento es **el alcance de la sesión v1.2**. Cada ítem trae:
 
 ### A1. La auditoría condicionada por coincidencia de hora registra acciones que no ocurrieron
 
+- **Estado**: RESUELTO (`6fbad17`). ADR 0028. Ver también N1.
+
 - **Síntoma**: en el CI del PR #1 falló `apps/worker/test/correcciones-b4-evidencias-concurrencia.test.ts:235`. Con 5 subidas simultáneas de la misma foto aparecieron **3** filas `evidencia.subida` en `audit_log` en lugar de 1. En el push anterior y en dos corridas de la auditoría la misma prueba pasó: el fallo depende del azar.
 - **Causa**: `sentenciaAuditoriaCondicional` (`apps/worker/src/auditoria/auditar.ts:289-299`) inserta la auditoría `WHERE EXISTS(...)` con una condición que compara el estado final del registro, **incluida una hora** (`updated_at`, `subido_at`, `server_received_at`, `revocado_at`…) igual a `ctx.ahora`.
   - En Workers la hora se congela durante cada petición y tiene resolución de milisegundos, así que dos peticiones concurrentes pueden tener el mismo `ctx.ahora`.
@@ -41,6 +43,8 @@ Este documento es **el alcance de la sesión v1.2**. Cada ítem trae:
   - Si falta, en `docs/despliegue.md` se agrega un procedimiento para detectar filas de auditoría duplicadas o espurias en una base existente. Hoy no hay producción, pero deja la consulta.
 
 ### A2. El bloqueo por inactividad de una pestaña en segundo plano bloquea a quien trabaja en otra
+
+- **Estado**: RESUELTO (`8206366`). ADR 0023, enmienda 1.
 
 - **Dónde**: `apps/web/src/auth/inactividad.ts:88` y `:105`, y `apps/web/src/auth/sesion.ts:751-756` (`bloquear()` siempre avisa a las demás pestañas). La E2E `e2e/sesion-multipestana.spec.ts:40` comprueba el comportamiento actual.
 - **Escenario**: el supervisor trabaja 10 min en la pestaña B. El temporizador de la pestaña A, en segundo plano, se dispara y bloquea a B en medio de un registro.
@@ -131,6 +135,8 @@ Este documento es **el alcance de la sesión v1.2**. Cada ítem trae:
 ## Nuevos
 
 ### N1. La concurrencia optimista por `updated_at` o por valor admite actualizaciones perdidas
+
+- **Estado**: RESUELTO (`6fbad17`), junto con A1: comparten los mismos archivos y la misma marca.
 
 - **Prioridad**: P1 (integridad de la auditoría; está en el área de A1).
 - **Dónde**: `apps/worker/src/dominio/materiales.ts` (testigo `updated_at`), `dominio/settings.ts` (testigo `valor IS ?`) y `dominio/asignaciones.ts` (testigo `activo`).
