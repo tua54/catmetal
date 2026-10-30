@@ -78,10 +78,11 @@ describe('auditoriaQuerySchema', () => {
     ).toBe(true);
   });
 
-  it('las entidades incluyen las de sync, devices y refresh_tokens', () => {
+  it('las entidades incluyen las de sync, devices, refresh_tokens y login_cupos', () => {
     expect(ENTIDADES_AUDITORIA).toContain('consumptions');
     expect(ENTIDADES_AUDITORIA).toContain('devices');
     expect(ENTIDADES_AUDITORIA).toContain('refresh_tokens');
+    expect(ENTIDADES_AUDITORIA).toContain('login_cupos');
     expect(TIPOS_EVENTO_LINEA_TIEMPO).toEqual([
       'sistema',
       'registro',

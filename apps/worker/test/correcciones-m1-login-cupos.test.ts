@@ -508,6 +508,26 @@ describe('M1: auditoría de login_cupos', () => {
     ).toBe(true);
   }, 30_000);
 
+  it('N3: el admin filtra /audit por entidad=login_cupos; el jefe recibe 200 sin filas', async () => {
+    const jefe = await sesion('jefe');
+    const admin = await sesion('admin');
+    const victima = await crearUsuarioConClave('jefe');
+    const red = prefijo64();
+    for (let i = 1; i <= MAX_INTENTOS_LOGIN; i += 1) {
+      await intentar(victima.email, 'mala', { ip: ipEn(red, i) });
+    }
+    const delAdmin = await api('/audit?entidad=login_cupos&limite=200', { token: admin.token });
+    expect(delAdmin.status).toBe(200);
+    const lista = await delAdmin.json<ListaAuditoria>();
+    expect(lista.entradas.length).toBeGreaterThan(0);
+    expect(lista.entradas.every((e) => e.entidad === 'login_cupos')).toBe(true);
+    expect(lista.entradas.some((e) => e.entidad_id === victima.id)).toBe(true);
+
+    const delJefe = await api('/audit?entidad=login_cupos&limite=200', { token: jefe.token });
+    expect(delJefe.status).toBe(200);
+    expect((await delJefe.json<ListaAuditoria>()).entradas).toEqual([]);
+  }, 30_000);
+
   it('el desbloqueo del admin reinicia todos los cupos del usuario, con auditoría', async () => {
     const admin = await sesion('admin');
     const u = await crearUsuarioConClave();

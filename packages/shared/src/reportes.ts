@@ -11,7 +11,13 @@ import { isoFechaSchema } from './esquemas';
 // ---------------------------------------------------------------------------------------------
 
 /** Entidades que pueden aparecer en `audit_log.entidad` (nombres de tabla de D1). */
-export const ENTIDADES_AUDITORIA = [...ENTIDADES_SYNC, 'devices', 'refresh_tokens'] as const;
+// `login_cupos` (ADR 0018, N3): solo la ve el admin; para los demás roles el filtro devuelve 0 filas.
+export const ENTIDADES_AUDITORIA = [
+  ...ENTIDADES_SYNC,
+  'devices',
+  'refresh_tokens',
+  'login_cupos',
+] as const;
 export type EntidadAuditoria = (typeof ENTIDADES_AUDITORIA)[number];
 
 /** Tamaño de página por defecto de la auditoría y de la línea de tiempo. */
