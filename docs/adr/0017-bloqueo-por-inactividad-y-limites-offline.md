@@ -34,3 +34,7 @@ La revisión de seguridad de la Fase 4 (`docs/auditoria/seguridad-fase-4.md`) en
 ## Cómo revertir
 
 Constantes en `apps/web/src/auth` (minutos de inactividad, umbrales del contador, días de caducidad) y la condición de rol para crear el verificador.
+
+## Enmienda (2026-10-29, revisión de seguridad final F6-06)
+
+Riesgo aceptado: quien conozca el correo de un usuario puede bloquear su cuenta en el servidor con 5 intentos; si el titular escribe luego su contraseña correcta con conexión, el servidor responde el genérico `CREDENCIALES_INVALIDAS` (no revela el bloqueo) y la tablet borra su verificador (punto 4). Solo afecta a la disponibilidad del login offline hasta el siguiente login correcto con conexión. Se prefiere esto a revelar que la cuenta está bloqueada.

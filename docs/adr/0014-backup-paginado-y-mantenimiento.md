@@ -35,3 +35,7 @@ Opción 2:
 ## Cómo revertir
 
 Quitar la llamada al backup o a la purga en el handler `scheduled`; los archivos existentes en R2 expiran por la regla de ciclo de vida.
+
+## Enmienda (2026-10-29, revisión de seguridad final F6-08)
+
+Los backups (que incluyen `password_hash`, `token_hash`, correos y `payload_json`) se escriben en un **bucket R2 propio** (`mp-backups-local/staging/prod`, binding `BACKUPS`), separado de las evidencias (`EVIDENCE`), para que ninguna credencial de las fotos dé acceso a los backups. El prefijo `backups/AAAA-MM-DD/…` y la regla de ciclo de vida de 90 días se mantienen, ahora sobre el bucket de backups. También se enmienda la ADR 0016 (continuaciones del backup) en el mismo sentido.
