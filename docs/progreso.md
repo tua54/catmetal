@@ -7,10 +7,35 @@
 - Rama de trabajo: `fix/auditoria-v1`, desde `build/v1` (línea base en `main`: `bfa8975`).
 - **Fases 0 a 6 cerradas** (tags `fase-0` a `fase-6`). Sesión v1 terminada: ver `docs/INFORME-FINAL.md`.
 - **Sesión de correcciones v1.1 terminada** en la rama `fix/auditoria-v1`. Ver `docs/INFORME-CORRECCIONES.md`.
+- **Sesión de correcciones v1.2 en curso** en `fix/auditoria-v1` (alcance: `docs/correcciones-v1.2.md`, plan: `docs/plan-correcciones-v1.2.md`).
 
 ## Siguiente paso
 
-Ninguno en esta sesión. El equipo revisa `docs/INFORME-CORRECCIONES.md`, ejecuta `docs/pendientes-humanos.md` y hace el push cuando lo apruebe.
+Sesión v1.2: ADR 0028 (A1) con la segunda opinión de `software-architect`; después implementar A1 (backend) en paralelo con A2 (cliente).
+
+## Sesión de correcciones v1.2
+
+### Mapeo de subagentes
+
+Verificado el 2026-10-30 en la lista de tipos de agente de la sesión. Todos los del mapeo de `CLAUDE.md` están disponibles; no se creó, editó ni copió ninguno.
+
+| Rol | Subagente | Disponible | Notas |
+|---|---|---|---|
+| Backend (Worker, Hono, D1, auth, sync servidor) | `general-purpose` | Sí | Brief con el rol completo y el bloque de stack. A1, A3, A5, A6-servidor, A8. |
+| Revisión de esquema SQL | `database-specialist` | Sí | Solo lectura. Revisión de A1 al cerrar P1. |
+| Frontend y sync del cliente | `react-developer` | Sí | A2, A4, A6-cliente, A7. Brief extra detallado para la sync. |
+| Sistema visual | `ui-ux-designer` | Sí | Solo si el aviso de A7 lo requiere. |
+| QA | `test-engineer` | Sí | Bloque de stack. |
+| Seguridad | `security-reviewer` | Sí | Solo lectura. A1, A3, A5, A6 y A8 al final. |
+| Segunda opinión de arquitectura | `software-architect` | Sí | Solo lectura. ADR 0028 (A1). |
+| Documentación | `documentation-researcher` / `deep-researcher` | Sí | Solo lectura. |
+
+No se usan `mvc-dotnet-developer`, `angular-developer` ni `orchestrator`.
+
+### Registro cronológico
+
+- 2026-10-30. Estado verificado: rama `fix/auditoria-v1`, archivos del equipo sin confirmar (`CLAUDE.md`, `.claude/sesion.json` apuntando a `docs/INFORME-CORRECCIONES-V1.2.md`, `docs/correcciones-v1.2.md`, `docs/ARRANQUE-CORRECCIONES-V1.2.md`). C0 en `a749532`.
+- Plan escrito en `docs/plan-correcciones-v1.2.md`. Borrador del ADR 0028 (A1, opción (b): marca `escritura_id` por plan, que generaliza el `reserva_id` de la ADR 0018) enviado a `software-architect`.
 
 ## Sesión de correcciones v1.1
 
