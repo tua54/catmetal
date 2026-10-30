@@ -4,7 +4,15 @@ import { useSincronizacion } from '../../app/contexto-sincronizacion';
 import { useSubtituloBarra } from '../../app/encabezado';
 import { useConsultaLocal } from '../../app/useConsultaLocal';
 import { useSesion } from '../../auth';
-import { Aviso, EstadoVacio, Tarjeta, useAvisos } from '../../components/ui';
+import {
+  Aviso,
+  EnlaceBoton,
+  ErrorCarga,
+  EstadoVacio,
+  Tarjeta,
+  TextoCargando,
+  useAvisos,
+} from '../../components/ui';
 import {
   ErrorDatosLocales,
   novedadesDeConsumo,
@@ -78,9 +86,9 @@ export function RegistroConsumoPage() {
   const consultaOrden = useCallback(() => datosDeOrden(userId, orderId), [userId, orderId]);
   const consultaHoy = useCallback(() => registrosDeHoyDeOrden(userId, orderId), [userId, orderId]);
   const consultaTraza = useCallback(() => trazabilidadReciente(userId), [userId]);
-  const { datos } = useConsultaLocal(consultaOrden);
-  const { datos: registros } = useConsultaLocal(consultaHoy);
-  const { datos: eventos } = useConsultaLocal(consultaTraza);
+  const { datos, error: errorOrden, reintentar: reintentarOrden } = useConsultaLocal(consultaOrden);
+  const hoy = useConsultaLocal(consultaHoy);
+  const traza = useConsultaLocal(consultaTraza);
 
   const pedido = leerModoPedido(params);
   const idPedido = pedido?.id ?? null;
@@ -183,26 +191,68 @@ export function RegistroConsumoPage() {
     setParams({ [PARAMETRO_DE_ACCION[accion]]: consumo.id });
   }
 
+  // El encabezado es el mismo elemento en todos los estados: el foco que la navegación puso en el
+  // `<h1>` no se pierde cuando llegan los datos de la tablet.
+  const encabezado = (
+    <div className="flex flex-wrap items-end justify-between gap-3">
+      <h1 className="text-2xl font-bold text-ink-950">
+        {orden !== null
+          ? `Registro de consumo · ${orden.codigo}`
+          : datos !== undefined
+            ? 'Orden no disponible'
+            : 'Registro de consumo'}
+      </h1>
+      {orden !== null && (
+        <Link
+          to=".."
+          relative="path"
+          className="inline-flex min-h-11 items-center font-semibold text-brand-600 underline-offset-4 active:underline"
+        >
+          Ver planeado vs consumido
+        </Link>
+      )}
+    </div>
+  );
+
   if (datos === undefined) {
     return (
-      <p role="status" className="text-ink-500">
-        Cargando orden…
-      </p>
+      <div className="flex flex-col gap-6">
+        {encabezado}
+        {errorOrden !== undefined ? (
+          <ErrorCarga
+            titulo="No se pudo leer la orden guardada en esta tablet"
+            alReintentar={reintentarOrden}
+            accion={
+              <EnlaceBoton to="/supervisor" variante="fantasma">
+                Volver a mis órdenes
+              </EnlaceBoton>
+            }
+          >
+            Sus registros no se han borrado. Si el problema sigue, cierre y vuelva a abrir la
+            aplicación.
+          </ErrorCarga>
+        ) : (
+          <TextoCargando texto="Cargando orden…" />
+        )}
+      </div>
     );
   }
   if (orden === null) {
     return (
       <div className="flex flex-col gap-6">
-        <h1 className="text-2xl font-bold text-ink-950">Orden no disponible</h1>
+        {encabezado}
         <Tarjeta>
           <EstadoVacio
             nivelTitulo={2}
             titulo="La orden no está en esta tablet"
-            texto="Puede que no esté asignada a usted o que aún no se haya sincronizado."
+            texto="Puede que no esté asignada a usted o que aún no se haya sincronizado. Si acaba de pasar, sincronice para traer los cambios."
             accion={
-              <Link to="/supervisor" className="font-semibold text-brand-600 underline">
-                Volver a mis órdenes
-              </Link>
+              <div className="flex flex-wrap justify-center gap-3">
+                <EnlaceBoton to="/supervisor" variante="primario">
+                  Volver a mis órdenes
+                </EnlaceBoton>
+                <EnlaceBoton to="/sincronizacion">Ir a sincronización</EnlaceBoton>
+              </div>
             }
           />
         </Tarjeta>
@@ -215,18 +265,14 @@ export function RegistroConsumoPage() {
       ? ''
       : (datos.materiales.get(consumo.material_id)?.nombre ?? 'Material sin catálogo local');
 
+  /** "Ir al formulario" del estado vacío: lleva el foco al primer campo (en vertical está arriba). */
+  function irAlFormulario() {
+    document.getElementById(`formulario-consumo-${modo.tipo}-material`)?.focus();
+  }
+
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <h1 className="text-2xl font-bold text-ink-950">Registro de consumo · {orden.codigo}</h1>
-        <Link
-          to=".."
-          relative="path"
-          className="inline-flex min-h-11 items-center font-semibold text-brand-600 underline-offset-4 active:underline"
-        >
-          Ver planeado vs consumido
-        </Link>
-      </div>
+      {encabezado}
 
       {modoInvalido && (
         <Aviso tono="advertencia" titulo="Esa acción ya no está disponible" alCerrar={volverANuevo}>
@@ -236,9 +282,7 @@ export function RegistroConsumoPage() {
 
       <div className="grid items-start gap-6 lg:grid-cols-2">
         {pedido !== null && cargandoModo ? (
-          <p role="status" className="text-ink-500">
-            Cargando registro…
-          </p>
+          <TextoCargando texto="Cargando registro…" />
         ) : (
           <FormularioConsumo
             key={modo.tipo === 'nuevo' ? 'nuevo' : `${modo.tipo}-${modo.consumo.id}`}
@@ -257,10 +301,17 @@ export function RegistroConsumoPage() {
           <RegistrosDeHoy
             userId={userId}
             codigoOrden={orden.codigo}
-            registros={registros}
+            registros={hoy.datos}
+            error={hoy.error}
+            alReintentar={hoy.reintentar}
             alAbrir={setAbierto}
+            alIrAlFormulario={irAlFormulario}
           />
-          <TrazabilidadDispositivo eventos={eventos} />
+          <TrazabilidadDispositivo
+            eventos={traza.datos}
+            error={traza.error}
+            alReintentar={traza.reintentar}
+          />
         </div>
       </div>
 

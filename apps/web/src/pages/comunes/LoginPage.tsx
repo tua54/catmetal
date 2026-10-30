@@ -3,6 +3,7 @@ import { Navigate, useLocation } from 'react-router';
 import logoCatmetal from '../../assets/brand/logo-catmetal.png';
 import { sesion, useSesion, type PerfilDelDispositivo } from '../../auth';
 import { useArranque } from '../../app/estado-arranque';
+import { useTituloDocumento } from '../../app/navegacion-accesible';
 import { useConsultaLocal } from '../../app/useConsultaLocal';
 import { Aviso, Boton, Campo, IconoSinConexion } from '../../components/ui';
 import { AvisoActualizacion } from '../../pwa/AvisoActualizacion';
@@ -62,6 +63,7 @@ function FormularioLogin() {
   // Perfil de la tablet elegido: el correo completo se usa para entrar pero nunca se muestra sin
   // autenticar (F4-04, Ley 1581); el campo muestra el enmascarado.
   const [elegido, setElegido] = useState<PerfilDelDispositivo | null>(null);
+  useTituloDocumento('Iniciar sesión');
 
   async function enviar(evento: FormEvent) {
     evento.preventDefault();

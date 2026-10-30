@@ -301,7 +301,7 @@ describe('Administración · usuarios', () => {
     expect(servidor.peticionesA('PATCH', `/users/${ana.id}`)[0]?.cuerpo).toEqual({ rol: 'jefe' });
 
     await usuario.click(
-      screen.getByRole('button', { name: 'Restablecer la contraseña de Ana Gómez' }),
+      screen.getByRole('button', { name: 'Restablecer contraseña de Ana Gómez' }),
     );
     editar = dialogo('Restablecer la contraseña de Ana Gómez');
     expect(editar).toHaveTextContent(/Se cerrarán todas las sesiones abiertas de Ana Gómez/);
@@ -449,6 +449,19 @@ describe('Administración · materiales', () => {
     expect(servidor.peticionesA('PATCH', `/materials/${arena.id}`)[0]?.cuerpo).toEqual({
       activo: false,
     });
+  });
+
+  it('filtro sin resultados: "Mostrar todos" vuelve al catálogo completo', async () => {
+    await entrarComoAdmin();
+    servidor.agregarMaterial({ codigo: 'MP-001', nombre: 'Arena sílice', unidad: 'kg' });
+    const usuario = await abrirMateriales(userEvent.setup());
+    await usuario.selectOptions(screen.getByLabelText('Mostrar'), 'Solo inactivos');
+    expect(
+      await screen.findByRole('heading', { name: 'No hay materiales inactivos' }),
+    ).toBeInTheDocument();
+    await usuario.click(screen.getByRole('button', { name: 'Mostrar todos' }));
+    expect(await screen.findByText(/Arena sílice/)).toBeInTheDocument();
+    expect(screen.getByLabelText('Mostrar')).toHaveValue('todos');
   });
 });
 

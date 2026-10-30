@@ -7,10 +7,13 @@ import {
   Aviso,
   Boton,
   Chip,
+  EnlaceBoton,
+  ErrorCarga,
   EstadoVacio,
   FilaRegistro,
   ListaRegistros,
   Tarjeta,
+  TextoCargando,
   useAvisos,
 } from '../../components/ui';
 import {
@@ -28,6 +31,7 @@ import {
   type MutacionOutbox,
 } from '../../datos';
 import { consumosPerdidos } from '../../features/consumos/consultas';
+import { inicioDe } from '../../rutas/acceso';
 import { textoIndicador, useEstadoSync, type ResumenSync } from '../../sync';
 
 const NOMBRE_MUTACION: Readonly<Record<MutacionOutbox['tipo'], string>> = {
@@ -123,6 +127,7 @@ function textoMotivoOmision(resumen: ResumenSync): string {
 export function EstadoSincronizacionPage() {
   const usuario = useSesion((estado) => estado.usuario);
   const requiereContrasena = useSesion((estado) => estado.requiere_contrasena);
+  const permisos = useSesion((estado) => estado.permisos);
   const estadoSync = useEstadoSync();
   const { sincronizarAhora, cambioLocal } = useSincronizacion();
   const { mostrar } = useAvisos();
@@ -134,7 +139,7 @@ export function EstadoSincronizacionPage() {
     () => (userId === null ? Promise.resolve(null) : leerDatos(userId)),
     [userId],
   );
-  const { datos, cargando, error } = useConsultaLocal(consulta);
+  const { datos, cargando, error, reintentar } = useConsultaLocal(consulta);
 
   const sincronizando = estadoSync.sincronizando || pedida;
   const sinConexion = estadoSync.conexion === 'sin_conexion';
@@ -293,15 +298,15 @@ export function EstadoSincronizacionPage() {
 
         <div className="flex flex-col gap-6">
           {error !== undefined && (
-            <Aviso tono="error" titulo="No se pudieron leer los registros de esta tablet">
-              Cierre y vuelva a abrir la aplicación. Sus registros no se han borrado.
-            </Aviso>
+            <ErrorCarga
+              titulo="No se pudieron leer los registros de esta tablet"
+              alReintentar={reintentar}
+            >
+              Sus registros no se han borrado. Si el problema sigue, cierre y vuelva a abrir la
+              aplicación.
+            </ErrorCarga>
           )}
-          {cargando && (
-            <p role="status" className="text-ink-500">
-              Cargando registros…
-            </p>
-          )}
+          {cargando && <TextoCargando texto="Cargando registros…" />}
           {datos && (
             <>
               {datos.perdidos.length > 0 && (
@@ -352,6 +357,9 @@ export function EstadoSincronizacionPage() {
                   <EstadoVacio
                     titulo="No hay registros pendientes"
                     texto="Todos los consumos de esta tablet ya llegaron al servidor."
+                    accion={
+                      <EnlaceBoton to={inicioDe({ usuario, permisos })}>Ir a mi inicio</EnlaceBoton>
+                    }
                   />
                 ) : (
                   <ListaRegistros etiqueta="Pendientes de enviar">
@@ -372,7 +380,10 @@ export function EstadoSincronizacionPage() {
 
               <Tarjeta titulo="Rechazados">
                 {rechazados.length === 0 && datos.rechazadosPorJefe.length === 0 ? (
-                  <EstadoVacio titulo="No hay registros rechazados" />
+                  <EstadoVacio
+                    titulo="No hay registros rechazados"
+                    texto="Si el servidor o el jefe rechazan un registro, aparecerá aquí con su motivo."
+                  />
                 ) : (
                   <ul aria-label="Rechazados" className="flex flex-col gap-3">
                     {rechazados.map((mutacion) => (
@@ -403,7 +414,10 @@ export function EstadoSincronizacionPage() {
 
               <Tarjeta titulo="Conflictos">
                 {conflictos.length === 0 ? (
-                  <EstadoVacio titulo="No hay conflictos" />
+                  <EstadoVacio
+                    titulo="No hay conflictos"
+                    texto="Si un registro cambia en el servidor mientras se trabaja sin conexión, aparecerá aquí."
+                  />
                 ) : (
                   <ul aria-label="Conflictos" className="flex flex-col gap-3">
                     {conflictos.map((mutacion) => (

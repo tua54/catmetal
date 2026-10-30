@@ -10,6 +10,7 @@ import {
   DialogoConfirmacion,
   EstadoVacio,
   Tarjeta,
+  TextoCargando,
   useAvisos,
 } from '../../../components/ui';
 import { BarraProgreso } from '../../../features/consumos/BarraProgreso';
@@ -167,11 +168,15 @@ export function DetalleOrdenJefePage() {
   );
 
   if (orden === undefined) {
+    // Misma estructura que el encabezado con datos: el `<h1>` es el mismo elemento y conserva el
+    // foco que le puso la navegación cuando llega la orden.
     return (
       <div className="flex flex-col gap-6">
-        <div>
-          {volver}
-          <h1 className="mt-2 text-2xl font-bold text-ink-950">Detalle de orden</h1>
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            {volver}
+            <h1 className="mt-2 text-2xl font-bold text-ink-950">Detalle de orden</h1>
+          </div>
         </div>
         {consulta.isError ? (
           <Aviso
@@ -190,9 +195,7 @@ export function DetalleOrdenJefePage() {
             El detalle de la orden se consulta en el servidor. Vuelva a intentarlo con conexión.
           </Aviso>
         ) : (
-          <p role="status" className="text-ink-500">
-            Cargando orden…
-          </p>
+          <TextoCargando texto="Cargando orden…" />
         )}
       </div>
     );

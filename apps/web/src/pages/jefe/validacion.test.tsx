@@ -508,3 +508,21 @@ describe('sin conexión (S5)', () => {
     expect((intento?.cuerpo as { id: string }).id).toBe((mutacion?.payload as { id: string }).id);
   });
 });
+
+describe('estados vacíos (tarea 6.2)', () => {
+  it('sin consumos que cumplan los filtros, "Quitar filtros" vuelve a la cola completa', async () => {
+    servidor.en('GET', '/validations/queue', () => cola([]));
+    perfil = await entrarComoJefeEnLinea(servidor);
+    const usuario = userEvent.setup();
+    const { router } = renderizarApp('/jefe?con_novedad=true');
+    expect(
+      await screen.findByText('Ningún consumo pendiente cumple los filtros elegidos.'),
+    ).toBeInTheDocument();
+    await usuario.click(screen.getByRole('button', { name: 'Quitar filtros' }));
+    await waitFor(() => expect(router.state.location.search).toBe(''));
+    expect(
+      await screen.findByText('Cuando un supervisor registre un consumo, aparecerá aquí.'),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Actualizar la cola' })).toBeInTheDocument();
+  });
+});

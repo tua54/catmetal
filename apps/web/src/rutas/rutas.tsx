@@ -4,7 +4,6 @@ import { AppLayout, type HandleRuta } from '../components/layout/AppLayout';
 import { NotFoundPage } from '../pages/NotFoundPage';
 import { PantallaCarga } from '../pages/comunes/PantallaCarga';
 import { RouteErrorPage } from '../pages/RouteErrorPage';
-import { EstadoSincronizacionPage } from '../pages/comunes/EstadoSincronizacionPage';
 import { LoginPage } from '../pages/comunes/LoginPage';
 import { InicioPorRol, RequiereArea, RequiereSesion } from './guardas';
 import { RaizApp } from './RaizApp';
@@ -64,153 +63,165 @@ export function crearRutas({ diseno }: OpcionesRutas): RouteObject[] {
             {
               element: <AppLayout />,
               children: [
-                { index: true, element: <InicioPorRol /> },
                 {
-                  path: 'supervisor',
-                  element: <RequiereArea area="supervisor" />,
-                  handle: {
-                    titulo: 'Mis órdenes en proceso',
-                    subtitulo: 'Supervisor · Registro de consumo',
-                  } satisfies HandleRuta,
-                  // Pantallas del supervisor en un fragmento aparte (carga diferida por rol): el
-                  // jefe y el admin no descargan el formulario ni el compresor de fotos. Los
-                  // fragmentos igual quedan en el precache del Service Worker (funcionan offline).
+                  // Límite de errores de las pantallas con sesión: el error se muestra dentro del
+                  // layout (conserva la barra superior, la píldora de sync y el menú de la cuenta).
+                  errorElement: <RouteErrorPage variante="seccion" />,
                   children: [
+                    { index: true, element: <InicioPorRol /> },
                     {
-                      index: true,
-                      lazy: async () => ({
-                        Component: (await import('../pages/supervisor')).MisOrdenesPage,
-                      }),
-                    },
-                    {
-                      path: 'ordenes/:id',
-                      handle: { titulo: 'Detalle de orden' } satisfies HandleRuta,
-                      lazy: async () => ({
-                        Component: (await import('../pages/supervisor')).DetalleOrdenPage,
-                      }),
-                    },
-                    {
-                      path: 'ordenes/:id/registrar',
-                      handle: { titulo: 'Registro de Consumo' } satisfies HandleRuta,
-                      lazy: async () => ({
-                        Component: (await import('../pages/supervisor')).RegistroConsumoPage,
-                      }),
-                    },
-                  ],
-                },
-                {
-                  path: 'jefe',
-                  element: <RequiereArea area="jefe" />,
-                  handle: {
-                    titulo: 'Validación de Consumos',
-                    subtitulo: 'Panel del jefe · Rol: Aprobador',
-                  } satisfies HandleRuta,
-                  // Pantallas del jefe en su propio fragmento (carga diferida por rol), como las
-                  // del supervisor: también quedan en el precache del Service Worker.
-                  children: [
-                    {
-                      index: true,
-                      lazy: async () => ({
-                        Component: (await import('../pages/jefe')).ValidacionPage,
-                      }),
-                    },
-                    {
-                      path: 'ordenes',
+                      path: 'supervisor',
+                      element: <RequiereArea area="supervisor" />,
                       handle: {
-                        titulo: 'Órdenes de producción',
-                        subtitulo: 'Panel del jefe · Gestión de órdenes',
+                        titulo: 'Mis órdenes en proceso',
+                        subtitulo: 'Supervisor · Registro de consumo',
                       } satisfies HandleRuta,
+                      // Pantallas del supervisor en un fragmento aparte (carga diferida por rol): el
+                      // jefe y el admin no descargan el formulario ni el compresor de fotos. Los
+                      // fragmentos igual quedan en el precache del Service Worker (funcionan offline).
                       children: [
                         {
                           index: true,
                           lazy: async () => ({
-                            Component: (await import('../pages/jefe')).OrdenesPage,
+                            Component: (await import('../pages/supervisor')).MisOrdenesPage,
                           }),
                         },
                         {
-                          path: 'nueva',
+                          path: 'ordenes/:id',
+                          handle: { titulo: 'Detalle de orden' } satisfies HandleRuta,
                           lazy: async () => ({
-                            Component: (await import('../pages/jefe')).NuevaOrdenPage,
+                            Component: (await import('../pages/supervisor')).DetalleOrdenPage,
                           }),
                         },
                         {
-                          path: ':id',
+                          path: 'ordenes/:id/registrar',
+                          handle: { titulo: 'Registro de Consumo' } satisfies HandleRuta,
                           lazy: async () => ({
-                            Component: (await import('../pages/jefe')).DetalleOrdenJefePage,
+                            Component: (await import('../pages/supervisor')).RegistroConsumoPage,
                           }),
                         },
                       ],
                     },
-                  ],
-                },
-                {
-                  path: 'admin',
-                  element: <RequiereArea area="admin" />,
-                  handle: {
-                    titulo: 'Administración',
-                    subtitulo: 'Usuarios, materiales, asignaciones y tolerancia',
-                  } satisfies HandleRuta,
-                  // Pantallas del admin en su propio fragmento (carga diferida por rol). Trabajan
-                  // contra el servidor: sin conexión explican que la necesitan.
-                  children: [
                     {
-                      lazy: async () => ({
-                        Component: (await import('../pages/admin')).AdminLayout,
-                      }),
+                      path: 'jefe',
+                      element: <RequiereArea area="jefe" />,
+                      handle: {
+                        titulo: 'Validación de Consumos',
+                        subtitulo: 'Panel del jefe · Rol: Aprobador',
+                      } satisfies HandleRuta,
+                      // Pantallas del jefe en su propio fragmento (carga diferida por rol), como las
+                      // del supervisor: también quedan en el precache del Service Worker.
                       children: [
                         {
                           index: true,
-                          handle: {
-                            titulo: 'Administración',
-                            subtitulo: 'Usuarios',
-                          } satisfies HandleRuta,
                           lazy: async () => ({
-                            Component: (await import('../pages/admin')).UsuariosPage,
+                            Component: (await import('../pages/jefe')).ValidacionPage,
                           }),
                         },
                         {
-                          path: 'materiales',
+                          path: 'ordenes',
                           handle: {
-                            titulo: 'Administración',
-                            subtitulo: 'Materiales',
+                            titulo: 'Órdenes de producción',
+                            subtitulo: 'Panel del jefe · Gestión de órdenes',
                           } satisfies HandleRuta,
-                          lazy: async () => ({
-                            Component: (await import('../pages/admin')).MaterialesPage,
-                          }),
-                        },
-                        {
-                          path: 'asignaciones',
-                          handle: {
-                            titulo: 'Administración',
-                            subtitulo: 'Asignación de supervisores',
-                          } satisfies HandleRuta,
-                          lazy: async () => ({
-                            Component: (await import('../pages/admin')).AsignacionesPage,
-                          }),
-                        },
-                        {
-                          path: 'tolerancia',
-                          handle: {
-                            titulo: 'Administración',
-                            subtitulo: 'Tolerancia',
-                          } satisfies HandleRuta,
-                          lazy: async () => ({
-                            Component: (await import('../pages/admin')).ToleranciaPage,
-                          }),
+                          children: [
+                            {
+                              index: true,
+                              lazy: async () => ({
+                                Component: (await import('../pages/jefe')).OrdenesPage,
+                              }),
+                            },
+                            {
+                              path: 'nueva',
+                              lazy: async () => ({
+                                Component: (await import('../pages/jefe')).NuevaOrdenPage,
+                              }),
+                            },
+                            {
+                              path: ':id',
+                              lazy: async () => ({
+                                Component: (await import('../pages/jefe')).DetalleOrdenJefePage,
+                              }),
+                            },
+                          ],
                         },
                       ],
                     },
+                    {
+                      path: 'admin',
+                      element: <RequiereArea area="admin" />,
+                      handle: {
+                        titulo: 'Administración',
+                        subtitulo: 'Usuarios, materiales, asignaciones y tolerancia',
+                      } satisfies HandleRuta,
+                      // Pantallas del admin en su propio fragmento (carga diferida por rol). Trabajan
+                      // contra el servidor: sin conexión explican que la necesitan.
+                      children: [
+                        {
+                          lazy: async () => ({
+                            Component: (await import('../pages/admin')).AdminLayout,
+                          }),
+                          children: [
+                            {
+                              index: true,
+                              handle: {
+                                titulo: 'Administración',
+                                subtitulo: 'Usuarios',
+                              } satisfies HandleRuta,
+                              lazy: async () => ({
+                                Component: (await import('../pages/admin')).UsuariosPage,
+                              }),
+                            },
+                            {
+                              path: 'materiales',
+                              handle: {
+                                titulo: 'Administración',
+                                subtitulo: 'Materiales',
+                              } satisfies HandleRuta,
+                              lazy: async () => ({
+                                Component: (await import('../pages/admin')).MaterialesPage,
+                              }),
+                            },
+                            {
+                              path: 'asignaciones',
+                              handle: {
+                                titulo: 'Administración',
+                                subtitulo: 'Asignación de supervisores',
+                              } satisfies HandleRuta,
+                              lazy: async () => ({
+                                Component: (await import('../pages/admin')).AsignacionesPage,
+                              }),
+                            },
+                            {
+                              path: 'tolerancia',
+                              handle: {
+                                titulo: 'Administración',
+                                subtitulo: 'Tolerancia',
+                              } satisfies HandleRuta,
+                              lazy: async () => ({
+                                Component: (await import('../pages/admin')).ToleranciaPage,
+                              }),
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    {
+                      path: 'sincronizacion',
+                      handle: {
+                        titulo: 'Estado de sincronización',
+                        subtitulo: 'Registros guardados en esta tablet',
+                      } satisfies HandleRuta,
+                      // Fragmento aparte (no hace falta para el login ni para la primera pantalla); queda
+                      // en el precache del Service Worker como los demás.
+                      lazy: async () => ({
+                        Component: (await import('../pages/comunes/EstadoSincronizacionPage'))
+                          .EstadoSincronizacionPage,
+                      }),
+                    },
+                    { path: '*', element: <NotFoundPage /> },
                   ],
                 },
-                {
-                  path: 'sincronizacion',
-                  element: <EstadoSincronizacionPage />,
-                  handle: {
-                    titulo: 'Estado de sincronización',
-                    subtitulo: 'Registros guardados en esta tablet',
-                  } satisfies HandleRuta,
-                },
-                { path: '*', element: <NotFoundPage /> },
               ],
             },
           ],

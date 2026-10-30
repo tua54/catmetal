@@ -190,7 +190,8 @@ describe('BarraSuperior y Avatar', () => {
     const usuario = userEvent.setup();
     const alPresionar = vi.fn();
     render(<Avatar nombre="Roberto Martínez" alPresionar={alPresionar} />);
-    const boton = screen.getByRole('button', { name: 'Cuenta de Roberto Martínez' });
+    // El nombre incluye las iniciales visibles (WCAG 2.5.3, label-content-name-mismatch de axe).
+    const boton = screen.getByRole('button', { name: 'Cuenta de Roberto Martínez, iniciales RM' });
     expect(boton).toHaveTextContent('RM');
     await usuario.click(boton);
     expect(alPresionar).toHaveBeenCalledTimes(1);

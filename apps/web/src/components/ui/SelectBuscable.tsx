@@ -7,6 +7,7 @@ import {
   type ChangeEvent,
   type KeyboardEvent,
   type ReactNode,
+  type Ref,
 } from 'react';
 import { clasesControl, cx, normalizarBusqueda, unirIds } from './clases';
 import { EnvolturaCampo } from './EnvolturaCampo';
@@ -40,6 +41,11 @@ export interface PropsSelectBuscable {
   className?: string;
   /** Se llama al perder el foco (útil para `onBlur` de react-hook-form). */
   alSalir?: () => void;
+  /**
+   * Ref del campo de texto (p. ej. `field.ref` de react-hook-form, para que enfoque el combobox
+   * cuando es el primer campo con error).
+   */
+  ref?: Ref<HTMLInputElement>;
 }
 
 /** Texto que muestra el campo con una opción elegida: "Resina furánica — MP-002". */
@@ -72,6 +78,7 @@ export function SelectBuscable({
   etiquetaOculta,
   className,
   alSalir,
+  ref,
 }: PropsSelectBuscable) {
   const idGenerado = useId();
   const idControl = id ?? `combo-${idGenerado}`;
@@ -227,7 +234,14 @@ export function SelectBuscable({
     >
       <div className="relative">
         <input
-          ref={refCampo}
+          ref={(elemento) => {
+            refCampo.current = elemento;
+            if (typeof ref === 'function') {
+              ref(elemento);
+            } else if (ref) {
+              ref.current = elemento;
+            }
+          }}
           id={idControl}
           type="text"
           role="combobox"

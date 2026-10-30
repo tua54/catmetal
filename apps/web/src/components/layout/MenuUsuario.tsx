@@ -4,6 +4,7 @@ import { useSesion } from '../../auth';
 import { puedeBorrarDatosDeUsuario } from '../../datos';
 import { NOMBRE_ROL, RUTAS } from '../../rutas/acceso';
 import { Avatar, DialogoConfirmacion, IconoChevronDerecha, useAvisos } from '../ui';
+import { nombreBotonCuenta } from '../ui/clases';
 
 interface Pendientes {
   mutaciones: number;
@@ -116,11 +117,11 @@ export function MenuUsuario() {
         type="button"
         aria-expanded={abierto}
         aria-controls={idMenu}
-        aria-label={`Cuenta de ${usuario.nombre}, ${rol}`}
+        aria-label={nombreBotonCuenta(usuario.nombre, rol)}
         onClick={() => setAbierto((valor) => !valor)}
         className="inline-flex rounded-full"
       >
-        <Avatar nombre={usuario.nombre} />
+        <Avatar nombre={usuario.nombre} decorativo />
       </button>
 
       <div

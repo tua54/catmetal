@@ -634,3 +634,95 @@ describe('accesibilidad básica', () => {
     expect(guardar).toHaveAttribute('form', 'formulario-consumo-nuevo');
   });
 });
+
+describe('estados vacíos, errores y foco (tarea 6.2)', () => {
+  it('sin órdenes: el estado vacío ofrece ir a sincronización', async () => {
+    await db.asignaciones.clear();
+    renderizarApp('/supervisor');
+    await screen.findByRole('heading', { name: 'No tiene órdenes en proceso asignadas' });
+    expect(screen.getByRole('link', { name: 'Ir a sincronización' })).toHaveAttribute(
+      'href',
+      '/sincronizacion',
+    );
+  });
+
+  it('una orden que no está en la tablet: h1 "Orden no disponible" y salidas', async () => {
+    renderizarApp(`/supervisor/ordenes/${uuidv7()}`);
+    expect(
+      await screen.findByRole('heading', { level: 1, name: 'Orden no disponible' }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Volver a mis órdenes' })).toHaveAttribute(
+      'href',
+      '/supervisor',
+    );
+    expect(screen.getByRole('link', { name: 'Ir a sincronización' })).toBeInTheDocument();
+  });
+
+  it('al abrir el registro desde "Mis órdenes", el foco va al h1 de la pantalla nueva', async () => {
+    const usuario = userEvent.setup();
+    renderizarApp('/supervisor');
+    await usuario.click(
+      await screen.findByRole('link', { name: 'Registrar consumo en la orden OP-2026-0587' }),
+    );
+    const titulo = await screen.findByRole('heading', {
+      level: 1,
+      name: 'Registro de consumo · OP-2026-0587',
+    });
+    await waitFor(() => expect(titulo).toHaveFocus());
+  });
+
+  it('"Registros de hoy" vacío: "Ir al formulario" lleva el foco a la materia prima', async () => {
+    const usuario = userEvent.setup();
+    await abrirRegistro();
+    await screen.findByRole('heading', { name: 'Todavía no hay registros hoy' });
+    await usuario.click(screen.getByRole('button', { name: 'Ir al formulario' }));
+    expect(screen.getByRole('combobox', { name: /Materia prima/ })).toHaveFocus();
+  });
+
+  it('al guardar con errores, el foco va al primer campo inválido (la materia prima)', async () => {
+    const usuario = userEvent.setup();
+    await abrirRegistro();
+    await usuario.click(screen.getByRole('button', { name: /Guardar registro/ }));
+    const combo = screen.getByRole('combobox', { name: /Materia prima/ });
+    await waitFor(() => expect(combo).toHaveFocus());
+    expect(combo).toHaveAttribute('aria-invalid', 'true');
+    expect(combo).toHaveAccessibleDescription(/Elija la materia prima/);
+  });
+
+  it('con solo la novedad incompleta, el foco va al tipo de novedad', async () => {
+    const usuario = userEvent.setup();
+    await abrirRegistro();
+    await elegirMaterial(usuario, 'Arena sílice');
+    await usuario.type(screen.getByRole('textbox', { name: /Cantidad utilizada/ }), '1');
+    await usuario.type(screen.getByRole('textbox', { name: /Lote/ }), 'L-1');
+    await usuario.click(interruptor());
+    await usuario.click(screen.getByRole('button', { name: /Guardar registro/ }));
+    const tipo = screen.getByRole('combobox', { name: /Tipo de novedad/ });
+    await waitFor(() => expect(tipo).toHaveFocus());
+    expect(tipo).toHaveAccessibleDescription(/Elija el tipo de novedad/);
+    expect(await db.outbox.count()).toBe(0);
+  });
+
+  it('"Justificar novedad" sin datos: el foco va al tipo con su error', async () => {
+    const usuario = userEvent.setup();
+    await sembrarConsumo(
+      { estado_local: 'sincronizado', falta_novedad: true, requiere_novedad: true },
+      { estado: 'pendiente', requiere_novedad: true },
+      'L-FOCO',
+    );
+    await abrirRegistro();
+    await usuario.click(
+      await screen.findByRole('button', { name: /Falta novedad, justificar la novedad/ }),
+    );
+    await usuario.click(
+      within(screen.getByRole('dialog', { name: 'Arena sílice' })).getByRole('button', {
+        name: 'Justificar novedad',
+      }),
+    );
+    const dialogo = screen.getByRole('dialog', { name: 'Justificar novedad' });
+    await usuario.click(within(dialogo).getByRole('button', { name: 'Guardar novedad' }));
+    const tipo = within(dialogo).getByRole('combobox', { name: /Tipo/ });
+    await waitFor(() => expect(tipo).toHaveFocus());
+    expect(tipo).toHaveAccessibleDescription(/Elija el tipo de novedad/);
+  });
+});

@@ -55,7 +55,7 @@ export function EnvolturaCampo({
       </label>
       {children}
       {ayuda && (
-        <p id={idAyuda} className="text-sm text-ink-500">
+        <p id={idAyuda} className="text-sm text-ink-700">
           {ayuda}
         </p>
       )}

@@ -2,7 +2,13 @@ import { formatearCantidad, formatearCOP, type ResumenOrden } from '@catmetal/sh
 import { useQuery } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import { useSesion } from '../../auth';
-import { Aviso, EstadoVacio, Tarjeta } from '../../components/ui';
+import {
+  ErrorCarga,
+  EstadoVacio,
+  IconoSinConexion,
+  Tarjeta,
+  TextoCargando,
+} from '../../components/ui';
 import { cx } from '../../components/ui/clases';
 import { CLAVES_JEFE } from '../validacion/api';
 import { mensajeDeError, reintentarConsulta } from '../validacion/mensajes';
@@ -45,7 +51,14 @@ function TablaMateriales({ resumen }: { resumen: ResumenOrden }) {
     return null;
   }
   return (
-    <div className="mt-4 overflow-x-auto">
+    // Contenedor desplazable en pantallas estrechas: enfocable con teclado para poder desplazarlo
+    // (WCAG 2.1.1; regla scrollable-region-focusable de axe) y con nombre de región.
+    <div
+      tabIndex={0}
+      role="region"
+      aria-label="Tabla planeado vs consumido"
+      className="mt-4 overflow-x-auto rounded-sm"
+    >
       <table className="cifras w-full min-w-[28rem] border-collapse text-left text-[0.9375rem]">
         <caption className="pb-2 text-left font-semibold text-ink-950">
           Planeado vs consumido
@@ -133,16 +146,25 @@ export function ResumenOrdenTarjeta({ orderId, pie }: PropsResumenOrdenTarjeta) 
           texto="Elija un consumo o filtre por orden para ver su resumen."
         />
       ) : resumen === undefined ? (
-        consulta.isError || !enLinea ? (
-          <Aviso tono="advertencia" titulo="No se pudo cargar el resumen">
-            {consulta.isError
-              ? mensajeDeError(consulta.error)
-              : 'El resumen se calcula en el servidor y no hay conexión.'}
-          </Aviso>
+        !enLinea ? (
+          <EstadoVacio
+            icono={<IconoSinConexion className="size-7" />}
+            titulo="Sin conexión"
+            texto="El resumen se calcula en el servidor. Aparecerá cuando vuelva la conexión."
+          />
+        ) : consulta.isError ? (
+          <ErrorCarga
+            titulo="No se pudo cargar el resumen"
+            alReintentar={() => void consulta.refetch()}
+          >
+            {mensajeDeError(consulta.error)}
+          </ErrorCarga>
         ) : (
-          <p role="status" className="text-ink-500">
-            Cargando resumen…
-          </p>
+          // Alto reservado parecido al del resumen cargado: la tarjeta de trazabilidad de abajo no
+          // salta cuando llegan los datos (CLS).
+          <div className="min-h-72">
+            <TextoCargando texto="Cargando resumen…" />
+          </div>
         )
       ) : (
         <>

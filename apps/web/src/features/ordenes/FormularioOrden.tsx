@@ -11,6 +11,7 @@ import {
   SelectBuscable,
   SelectCorto,
   Tarjeta,
+  TextoCargando,
   type OpcionBuscable,
 } from '../../components/ui';
 import { unidadesConvertibles } from '../consumos/reglas';
@@ -73,6 +74,7 @@ function FilaMaterialPlaneado({
                 }
               }}
               alSalir={field.onBlur}
+              ref={field.ref}
               error={fieldState.error?.message}
               requerido
             />
@@ -250,11 +252,7 @@ export function FormularioOrden({ alCrear, alCancelar }: PropsFormularioOrden) {
               {mensajeDeError(materiales.error)}
             </Aviso>
           )}
-          {materiales.isPending && (
-            <p role="status" className="text-ink-500">
-              Cargando materiales…
-            </p>
-          )}
+          {materiales.isPending && <TextoCargando texto="Cargando materiales…" />}
           {formState.errors.materiales?.root?.message !== undefined && (
             <p role="alert" className="font-semibold text-danger-700">
               {formState.errors.materiales.root.message}

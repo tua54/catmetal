@@ -1,4 +1,4 @@
-import { cx, iniciales } from './clases';
+import { cx, iniciales, nombreBotonCuenta } from './clases';
 
 export interface PropsAvatar {
   /** Nombre completo del usuario; se muestran sus iniciales ("Juan Suárez" → "JS"). */
@@ -7,11 +7,16 @@ export interface PropsAvatar {
   rol?: string;
   /** Si se pasa, el avatar es un botón (p. ej. para abrir el menú de la cuenta). */
   alPresionar?: () => void;
+  /**
+   * Solo visual (`aria-hidden`): para cuando el avatar va dentro de un control que ya lleva el nombre
+   * (p. ej. el botón del menú de la cuenta). Evita anidar una imagen con nombre dentro del botón.
+   */
+  decorativo?: boolean;
   className?: string;
 }
 
 /** Avatar con iniciales, 44 px. Pensado para la barra superior oscura (blanco sobre navy-800). */
-export function Avatar({ nombre, rol, alPresionar, className }: PropsAvatar) {
+export function Avatar({ nombre, rol, alPresionar, decorativo = false, className }: PropsAvatar) {
   const nombreAccesible = rol ? `${nombre}, ${rol}` : nombre;
   const clases = cx(
     // white / navy-800 = 11,35:1
@@ -24,11 +29,19 @@ export function Avatar({ nombre, rol, alPresionar, className }: PropsAvatar) {
       <button
         type="button"
         onClick={alPresionar}
-        aria-label={`Cuenta de ${nombreAccesible}`}
+        aria-label={nombreBotonCuenta(nombre, rol)}
         className={cx(clases, 'active:bg-brand-700')}
       >
         <span aria-hidden="true">{iniciales(nombre)}</span>
       </button>
+    );
+  }
+
+  if (decorativo) {
+    return (
+      <span aria-hidden="true" className={clases}>
+        {iniciales(nombre)}
+      </span>
     );
   }
 

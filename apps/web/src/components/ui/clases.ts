@@ -25,6 +25,16 @@ export function iniciales(nombre: string): string {
   return `${primera}${ultima}`.toLocaleUpperCase('es-CO');
 }
 
+/**
+ * Nombre accesible del botón de la cuenta: "Cuenta de Juan Suárez, Supervisor, iniciales JS".
+ * Incluye, como palabra aparte, las iniciales que se ven en el avatar (WCAG 2.5.3: el nombre contiene
+ * el texto visible; axe ignora lo que va entre paréntesis) y empieza por "Cuenta de" para que se
+ * reconozca la acción.
+ */
+export function nombreBotonCuenta(nombre: string, rol?: string): string {
+  return `Cuenta de ${nombre}${rol ? `, ${rol}` : ''}, iniciales ${iniciales(nombre)}`;
+}
+
 /** Clases compartidas por inputs, textareas y selects: borde ink-400 (3,74:1 sobre blanco). */
 export function clasesControl(conError: boolean): string {
   return cx(

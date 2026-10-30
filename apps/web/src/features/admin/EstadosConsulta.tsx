@@ -1,4 +1,11 @@
-import { Aviso, Boton, EstadoVacio, IconoSinConexion, Tarjeta } from '../../components/ui';
+import {
+  Aviso,
+  Boton,
+  EstadoVacio,
+  IconoSinConexion,
+  Tarjeta,
+  TextoCargando,
+} from '../../components/ui';
 import { esSinConexion, mensajeDeError, TEXTO_SIN_CONEXION, TITULO_SIN_CONEXION } from './errores';
 
 /** La administración no funciona sin conexión: lo explica en lugar de fallar. */
@@ -53,9 +60,5 @@ export function ErrorConsulta({
 
 /** Texto de carga accesible. */
 export function Cargando({ texto }: { texto: string }) {
-  return (
-    <p role="status" className="text-ink-500">
-      {texto}
-    </p>
-  );
+  return <TextoCargando texto={texto} />;
 }

@@ -51,10 +51,12 @@ describe('píldora de conexión', () => {
     const pildora = await screen.findByRole('button', { name: /^Sincronizando…/ });
 
     await usuario.click(pildora);
-    expect(router.state.location.pathname).toBe('/sincronizacion');
+    // `/sincronizacion` es una ruta diferida (tarea 6.2): el router cambia la ubicación cuando termina
+    // de cargar el fragmento, así que primero se espera la pantalla y luego se comprueba la ruta.
     expect(
       await screen.findByRole('heading', { level: 1, name: 'Estado de sincronización' }),
     ).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe('/sincronizacion');
   });
 });
 
@@ -65,7 +67,9 @@ describe('menú de la cuenta', () => {
     renderizarApp('/supervisor');
     await abrirSupervisor();
 
-    const boton = screen.getByRole('button', { name: 'Cuenta de Ana Gómez, Supervisor' });
+    const boton = screen.getByRole('button', {
+      name: 'Cuenta de Ana Gómez, Supervisor, iniciales AG',
+    });
     expect(boton).toHaveAttribute('aria-expanded', 'false');
     await usuario.click(boton);
     expect(boton).toHaveAttribute('aria-expanded', 'true');
@@ -138,7 +142,7 @@ describe('menú de la cuenta', () => {
     await screen.findByRole('heading', { level: 1, name: 'Validación de consumos' });
 
     await usuario.click(
-      screen.getByRole('button', { name: 'Cuenta de Beto Ruiz, Jefe de producción' }),
+      screen.getByRole('button', { name: 'Cuenta de Beto Ruiz, Jefe de producción, iniciales BR' }),
     );
     await usuario.click(screen.getByRole('button', { name: 'Cerrar sesión' }));
     const dialogo = await screen.findByRole('alertdialog');

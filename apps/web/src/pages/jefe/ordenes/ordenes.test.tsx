@@ -391,3 +391,21 @@ describe('detalle de la orden', () => {
     expect(crearUrl).not.toHaveBeenCalled();
   });
 });
+
+describe('lista vacía (tarea 6.2)', () => {
+  it('con filtro ofrece ver todos los estados; sin órdenes, crear la primera', async () => {
+    servidor.en('GET', '/orders', () =>
+      json({ ordenes: [], siguiente_cursor: null } satisfies ListaOrdenes),
+    );
+    await entrarComoJefeEnLinea(servidor);
+    const usuario = userEvent.setup();
+    const { router } = renderizarApp('/jefe/ordenes?estado=finalizada');
+    expect(await screen.findByText('No hay órdenes en estado "Finalizada".')).toBeInTheDocument();
+    await usuario.click(screen.getByRole('button', { name: 'Ver todos los estados' }));
+    await waitFor(() => expect(router.state.location.search).toBe(''));
+    expect(await screen.findByRole('link', { name: 'Crear una orden' })).toHaveAttribute(
+      'href',
+      '/jefe/ordenes/nueva',
+    );
+  });
+});

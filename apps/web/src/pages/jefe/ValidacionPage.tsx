@@ -8,11 +8,12 @@ import {
   DialogoConfirmacion,
   EstadoVacio,
   Tarjeta,
+  TextoCargando,
   VisorImagen,
 } from '../../components/ui';
 import { ResumenOrdenTarjeta } from '../../features/ordenes/ResumenOrdenTarjeta';
 import { TrazabilidadOrden } from '../../features/ordenes/TrazabilidadOrden';
-import type { FiltrosCola } from '../../features/validacion/api';
+import { FILTROS_VACIOS, type FiltrosCola } from '../../features/validacion/api';
 import { FiltrosColaValidacion } from '../../features/validacion/FiltrosColaValidacion';
 import { mensajeDeError } from '../../features/validacion/mensajes';
 import { TarjetaConsumo } from '../../features/validacion/TarjetaConsumo';
@@ -77,6 +78,7 @@ export function ValidacionPage() {
       ? null
       : (cola.paraOpciones.find((e) => e.order_id === filtros.orden)?.orden.codigo ?? null);
   const enCurso = decision.isPending ? decision.variables.elemento.id : null;
+  const hayFiltros = filtros.orden !== null || filtros.supervisor !== null || filtros.conNovedad;
 
   function confirmar(motivo?: string) {
     if (dialogo === null) {
@@ -146,18 +148,41 @@ export function ValidacionPage() {
               </Aviso>
             )}
             {elementos === undefined && !cola.consulta.isError && (
-              <p role="status" className="text-ink-500">
-                Cargando consumos por validar…
-              </p>
+              // Alto reservado para la primera tarjeta de consumo (menos salto al cargar, CLS).
+              <div className="min-h-56">
+                <TextoCargando texto="Cargando consumos por validar…" />
+              </div>
             )}
 
             {elementos !== undefined && elementos.length === 0 && (
               <EstadoVacio
                 titulo="No hay consumos por validar"
                 texto={
-                  filtros.orden !== null || filtros.supervisor !== null || filtros.conNovedad
+                  hayFiltros
                     ? 'Ningún consumo pendiente cumple los filtros elegidos.'
                     : 'Cuando un supervisor registre un consumo, aparecerá aquí.'
+                }
+                accion={
+                  hayFiltros ? (
+                    <Boton
+                      variante="secundario"
+                      onClick={() => {
+                        setSeleccionId(null);
+                        cambiarFiltros(FILTROS_VACIOS);
+                      }}
+                    >
+                      Quitar filtros
+                    </Boton>
+                  ) : cola.fuente === 'servidor' && !cola.sinServidor ? (
+                    <Boton
+                      variante="secundario"
+                      cargando={cola.consulta.isFetching}
+                      textoCargando="Actualizando la cola…"
+                      onClick={() => void cola.consulta.refetch()}
+                    >
+                      Actualizar la cola
+                    </Boton>
+                  ) : undefined
                 }
               />
             )}

@@ -1,5 +1,7 @@
+import { useRef } from 'react';
 import { Outlet, useMatches, useNavigate } from 'react-router';
 import { useEncabezado } from '../../app/encabezado';
+import { useFocoAlNavegar, useTituloDocumento } from '../../app/navegacion-accesible';
 import { useSesion } from '../../auth';
 import { AvisoActualizacion } from '../../pwa/AvisoActualizacion';
 import { RUTAS } from '../../rutas/acceso';
@@ -44,6 +46,9 @@ function PildoraSync() {
  * Estructura común: barra superior (ADR 0011) con título y subtítulo del `handle` de la ruta más
  * profunda que los declare, píldora de conexión y menú de la cuenta; avisos permanentes; contenido
  * sobre surface-50. Sin usuario (solo `/diseno` en desarrollo) no muestra píldora ni cuenta.
+ *
+ * Al cambiar de pantalla, el título de la pestaña sigue al de la barra y el foco va al `<h1>` de la
+ * pantalla nueva (`useFocoAlNavegar`, WCAG 2.4.3).
  */
 export function AppLayout() {
   const matches = useMatches();
@@ -53,6 +58,11 @@ export function AppLayout() {
     .reverse()
     .map((match) => match.handle)
     .find(esHandleRuta);
+  const titulo = handle?.titulo ?? TITULO_POR_DEFECTO;
+  const subtitulo = subtituloDinamico ?? handle?.subtitulo ?? SUBTITULO_POR_DEFECTO;
+  const refPrincipal = useRef<HTMLElement>(null);
+  useTituloDocumento(handle?.titulo ? `${titulo} — ${subtitulo}` : null);
+  useFocoAlNavegar(refPrincipal);
 
   return (
     <div className="flex min-h-dvh flex-col">
@@ -64,13 +74,14 @@ export function AppLayout() {
       </a>
 
       <BarraSuperior
-        titulo={handle?.titulo ?? TITULO_POR_DEFECTO}
-        subtitulo={subtituloDinamico ?? handle?.subtitulo ?? SUBTITULO_POR_DEFECTO}
+        titulo={titulo}
+        subtitulo={subtitulo}
         conexion={hayUsuario ? <PildoraSync /> : undefined}
         usuario={hayUsuario ? <MenuUsuario /> : undefined}
       />
 
       <main
+        ref={refPrincipal}
         id="contenido"
         tabIndex={-1}
         className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-6 px-4 py-6 focus:outline-none sm:px-6"

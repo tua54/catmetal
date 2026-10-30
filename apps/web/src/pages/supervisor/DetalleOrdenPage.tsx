@@ -4,7 +4,14 @@ import { Link, useParams } from 'react-router';
 import { useSubtituloBarra } from '../../app/encabezado';
 import { useConsultaLocal } from '../../app/useConsultaLocal';
 import { useSesion } from '../../auth';
-import { Aviso, EstadoVacio, Tarjeta } from '../../components/ui';
+import {
+  Aviso,
+  EnlaceBoton,
+  ErrorCarga,
+  EstadoVacio,
+  Tarjeta,
+  TextoCargando,
+} from '../../components/ui';
 import { BarraProgreso } from '../../features/consumos/BarraProgreso';
 import { datosDeOrden } from '../../features/consumos/consultas';
 
@@ -26,30 +33,70 @@ export function DetalleOrdenPage() {
     () => (userId === null ? Promise.resolve(null) : datosDeOrden(userId, id)),
     [userId, id],
   );
-  const { datos } = useConsultaLocal(consulta);
+  const { datos, error, reintentar } = useConsultaLocal(consulta);
   const orden = datos?.orden ?? null;
   useSubtituloBarra(orden ? `Orden ${orden.codigo} · Línea ${orden.linea}` : null);
 
-  if (datos === undefined || datos === null) {
+  const hayDatos = datos !== undefined && datos !== null;
+  // El encabezado es el mismo elemento en todos los estados: el foco que la navegación puso en el
+  // `<h1>` no se pierde cuando llegan los datos.
+  const encabezado = (
+    <div>
+      <Link
+        to="/supervisor"
+        className="inline-flex min-h-11 items-center font-semibold text-brand-600 underline-offset-4 active:underline"
+      >
+        ← Mis órdenes
+      </Link>
+      <h1 className="mt-2 text-2xl font-bold text-ink-950">
+        {orden !== null
+          ? `Orden ${orden.codigo}`
+          : hayDatos
+            ? 'Orden no disponible'
+            : 'Detalle de orden'}
+      </h1>
+      {orden !== null && (
+        <p className="text-ink-700">
+          Línea {orden.linea} · {NOMBRE_ESTADO_ORDEN[orden.estado] ?? orden.estado}
+        </p>
+      )}
+    </div>
+  );
+
+  if (!hayDatos) {
     return (
-      <p role="status" className="text-ink-500">
-        Cargando orden…
-      </p>
+      <div className="flex flex-col gap-6">
+        {encabezado}
+        {error !== undefined ? (
+          <ErrorCarga
+            titulo="No se pudo leer la orden guardada en esta tablet"
+            alReintentar={reintentar}
+          >
+            Sus registros no se han borrado. Si el problema sigue, cierre y vuelva a abrir la
+            aplicación.
+          </ErrorCarga>
+        ) : (
+          <TextoCargando texto="Cargando orden…" />
+        )}
+      </div>
     );
   }
   if (orden === null) {
     return (
       <div className="flex flex-col gap-6">
-        <h1 className="text-2xl font-bold text-ink-950">Orden no disponible</h1>
+        {encabezado}
         <Tarjeta>
           <EstadoVacio
             nivelTitulo={2}
             titulo="La orden no está en esta tablet"
-            texto="Puede que no esté asignada a usted o que aún no se haya sincronizado."
+            texto="Puede que no esté asignada a usted o que aún no se haya sincronizado. Si acaba de pasar, sincronice para traer los cambios."
             accion={
-              <Link to="/supervisor" className="font-semibold text-brand-600 underline">
-                Volver a mis órdenes
-              </Link>
+              <div className="flex flex-wrap justify-center gap-3">
+                <EnlaceBoton to="/supervisor" variante="primario">
+                  Volver a mis órdenes
+                </EnlaceBoton>
+                <EnlaceBoton to="/sincronizacion">Ir a sincronización</EnlaceBoton>
+              </div>
             }
           />
         </Tarjeta>
@@ -60,18 +107,7 @@ export function DetalleOrdenPage() {
   const { avance, materiales } = datos;
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <Link
-          to="/supervisor"
-          className="inline-flex min-h-11 items-center font-semibold text-brand-600 underline-offset-4 active:underline"
-        >
-          ← Mis órdenes
-        </Link>
-        <h1 className="mt-2 text-2xl font-bold text-ink-950">Orden {orden.codigo}</h1>
-        <p className="text-ink-700">
-          Línea {orden.linea} · {NOMBRE_ESTADO_ORDEN[orden.estado] ?? orden.estado}
-        </p>
-      </div>
+      {encabezado}
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
         <Tarjeta titulo="Planeado vs consumido" acento>
@@ -79,7 +115,11 @@ export function DetalleOrdenPage() {
             El servidor confirma la tolerancia con los registros de todos los supervisores.
           </Aviso>
           {avance.materiales.length === 0 ? (
-            <EstadoVacio titulo="La orden no tiene materiales planeados en esta tablet" />
+            <EstadoVacio
+              titulo="La orden no tiene materiales planeados en esta tablet"
+              texto="Si el jefe acaba de cambiar el plan, sincronice para traerlo."
+              accion={<EnlaceBoton to="/sincronizacion">Ir a sincronización</EnlaceBoton>}
+            />
           ) : (
             <ul aria-label="Materiales planeados" className="flex flex-col gap-5">
               {avance.materiales.map((m) => {

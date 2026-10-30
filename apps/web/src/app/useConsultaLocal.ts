@@ -1,15 +1,21 @@
 import { liveQuery } from 'dexie';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 export interface ResultadoConsultaLocal<T> {
   /** `undefined` mientras carga (o si la consulta es `null`). */
   datos: T | undefined;
   error: unknown;
   cargando: boolean;
+  /**
+   * Vuelve a suscribirse a la consulta (botón "Reintentar" tras un error de IndexedDB). Mientras
+   * llega la respuesta, `cargando` vuelve a ser `true`.
+   */
+  reintentar: () => void;
 }
 
 interface Estado<T> {
   fuente: (() => Promise<T>) | null;
+  intento: number;
   datos?: T;
   error?: unknown;
 }
@@ -22,24 +28,29 @@ interface Estado<T> {
 export function useConsultaLocal<T>(
   consulta: (() => Promise<T>) | null,
 ): ResultadoConsultaLocal<T> {
-  const [estado, setEstado] = useState<Estado<T>>({ fuente: null });
+  const [estado, setEstado] = useState<Estado<T>>({ fuente: null, intento: 0 });
+  const [intento, setIntento] = useState(0);
 
   useEffect(() => {
     if (consulta === null) {
       return;
     }
     const suscripcion = liveQuery(consulta).subscribe({
-      next: (datos) => setEstado({ fuente: consulta, datos }),
-      error: (error: unknown) => setEstado({ fuente: consulta, error }),
+      next: (datos) => setEstado({ fuente: consulta, intento, datos }),
+      error: (error: unknown) => setEstado({ fuente: consulta, intento, error }),
     });
     return () => suscripcion.unsubscribe();
-  }, [consulta]);
+  }, [consulta, intento]);
 
-  // Si la consulta cambió, lo guardado es de la anterior: se ignora hasta que llegue lo nuevo.
-  const vigente = consulta !== null && estado.fuente === consulta;
+  const reintentar = useCallback(() => setIntento((actual) => actual + 1), []);
+
+  // Si la consulta cambió (o se pidió reintentar), lo guardado es de la anterior: se ignora hasta
+  // que llegue lo nuevo.
+  const vigente = consulta !== null && estado.fuente === consulta && estado.intento === intento;
   return {
     datos: vigente ? estado.datos : undefined,
     error: vigente ? estado.error : undefined,
     cargando: consulta !== null && !vigente,
+    reintentar,
   };
 }

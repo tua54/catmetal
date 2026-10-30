@@ -5,6 +5,7 @@ import {
   Aviso,
   Boton,
   DialogoConfirmacion,
+  EnlaceBoton,
   EstadoVacio,
   SelectCorto,
   Tarjeta,
@@ -127,6 +128,16 @@ export function AsignacionesPage() {
       <EstadoVacio
         titulo="No hay órdenes planeadas ni en proceso"
         texto="Cuando el jefe cree una orden, podrá asignarle supervisores aquí."
+        accion={
+          <Boton
+            variante="secundario"
+            cargando={ordenes.isFetching}
+            textoCargando="Actualizando…"
+            onClick={() => void ordenes.refetch()}
+          >
+            Actualizar la lista
+          </Boton>
+        }
       />
     );
   } else {
@@ -279,6 +290,7 @@ function EditorAsignaciones({ orden, supervisores, alGuardado, alError }: PropsE
         <EstadoVacio
           titulo="No hay supervisores activos"
           texto="Cree un usuario con rol Supervisor en la sección Usuarios para poder asignarlo."
+          accion={<EnlaceBoton to="/admin">Ir a Usuarios</EnlaceBoton>}
         />
       ) : (
         <fieldset className="flex flex-col gap-1">

@@ -7,7 +7,15 @@ import {
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router';
 import { useSesion } from '../../../auth';
-import { Aviso, Boton, EstadoVacio, SelectCorto, Tarjeta } from '../../../components/ui';
+import {
+  Aviso,
+  Boton,
+  EnlaceBoton,
+  EstadoVacio,
+  SelectCorto,
+  Tarjeta,
+  TextoCargando,
+} from '../../../components/ui';
 import { listarOrdenes } from '../../../features/ordenes/api';
 import { EstadoOrden } from '../../../features/ordenes/EstadoOrden';
 import { NOMBRE_ESTADO_ORDEN } from '../../../features/ordenes/estado-orden';
@@ -87,18 +95,25 @@ export function OrdenesPage() {
               {mensajeDeError(consulta.error)}
             </Aviso>
           )}
-          {enLinea && consulta.isPending && (
-            <p role="status" className="text-ink-500">
-              Cargando órdenes…
-            </p>
-          )}
+          {enLinea && consulta.isPending && <TextoCargando texto="Cargando órdenes…" />}
           {ordenes !== undefined && ordenes.length === 0 && (
             <EstadoVacio
               titulo="No hay órdenes"
               texto={
                 estado === null
-                  ? 'Cree la primera orden de producción con "Nueva orden".'
+                  ? 'Todavía no hay órdenes de producción. Cree la primera para planear sus materiales.'
                   : `No hay órdenes en estado "${NOMBRE_ESTADO_ORDEN[estado]}".`
+              }
+              accion={
+                estado === null ? (
+                  <EnlaceBoton to="nueva" variante="primario">
+                    Crear una orden
+                  </EnlaceBoton>
+                ) : (
+                  <Boton variante="secundario" onClick={() => setParametros({}, { replace: true })}>
+                    Ver todos los estados
+                  </Boton>
+                )
               }
             />
           )}

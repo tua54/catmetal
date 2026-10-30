@@ -163,7 +163,7 @@ export function AreaTexto({
         {...props}
       />
       {conContador && (
-        <p id={idContador} className="cifras self-end text-sm text-ink-500">
+        <p id={idContador} className="cifras self-end text-sm text-ink-700">
           {longitud}/{props.maxLength} caracteres
         </p>
       )}

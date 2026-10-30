@@ -220,11 +220,26 @@ export function FormularioConsumo({
     handleSubmit,
     reset,
     setValue,
-    formState: { errors },
+    formState: { errors, submitCount },
   } = useForm<ValoresFormulario>({
     defaultValues: valoresIniciales(modo),
     resolver,
+    // RHF solo enfoca los campos registrados con `ref`; el material (combobox), el tipo y la
+    // justificación usan `useController` y quedarían sin foco. Lo hace el efecto de abajo.
+    shouldFocusError: false,
   });
+
+  // Tras un envío con errores, el foco va al PRIMER campo inválido en el orden visual: el lector de
+  // pantalla lee su etiqueta y el error enlazado con `aria-describedby` (WCAG 3.3.1).
+  useEffect(() => {
+    if (submitCount === 0) {
+      return;
+    }
+    document
+      .getElementById(idFormulario)
+      ?.querySelector<HTMLElement>('[aria-invalid="true"]')
+      ?.focus();
+  }, [submitCount, idFormulario]);
   const campoMaterial = useController({ control, name: 'material_id' });
   const campoTipo = useController({ control, name: 'tipo' });
   const campoDescripcion = useController({ control, name: 'descripcion' });

@@ -179,7 +179,17 @@ export function UsuariosPage() {
       <Cargando texto="Cargando usuarios…" />
     );
   } else if (usuarios.length === 0) {
-    contenido = <EstadoVacio titulo="No hay usuarios" />;
+    contenido = (
+      <EstadoVacio
+        titulo="No hay usuarios"
+        texto="Cree los usuarios de supervisores, jefes y administradores."
+        accion={
+          <Boton onClick={() => setAccion({ tipo: 'crear' })} disabled={!enLinea}>
+            Crear el primer usuario
+          </Boton>
+        }
+      />
+    );
   } else {
     contenido = (
       <>
@@ -361,7 +371,7 @@ function FilaUsuario({
         </Boton>
         <Boton
           variante="secundario"
-          aria-label={`Restablecer la contraseña de ${usuario.nombre}`}
+          aria-label={`Restablecer contraseña de ${usuario.nombre}`}
           onClick={() => alAccion('contrasena')}
         >
           Restablecer contraseña

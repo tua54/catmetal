@@ -1,5 +1,5 @@
 import { crearNovedadSchema, TIPOS_NOVEDAD, type TipoNovedad } from '@catmetal/shared';
-import { useId, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { z } from 'zod';
 import { Boton, CapaModal } from '../../components/ui';
 import { ErrorDatosLocales, registrarNovedadLocal, type ConsumoLocal } from '../../datos';
@@ -44,6 +44,15 @@ function Contenido({
   const [descripcion, setDescripcion] = useState('');
   const [errores, setErrores] = useState<{ tipo?: string; descripcion?: string }>({});
   const [guardando, setGuardando] = useState(false);
+  const refFormulario = useRef<HTMLFormElement>(null);
+  /** Envíos rechazados por validación: cada uno lleva el foco al primer campo con error. */
+  const [intentosFallidos, setIntentosFallidos] = useState(0);
+
+  useEffect(() => {
+    if (intentosFallidos > 0) {
+      refFormulario.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
+    }
+  }, [intentosFallidos]);
 
   async function guardar(evento: FormEvent) {
     evento.preventDefault();
@@ -57,6 +66,7 @@ function Contenido({
         }
       }
       setErrores(nuevos);
+      setIntentosFallidos((n) => n + 1);
       return;
     }
     setErrores({});
@@ -96,6 +106,7 @@ function Contenido({
         validarlo hasta que tenga una novedad.
       </p>
       <form
+        ref={refFormulario}
         noValidate
         onSubmit={(evento) => void guardar(evento)}
         className="mt-6 flex flex-col gap-5"

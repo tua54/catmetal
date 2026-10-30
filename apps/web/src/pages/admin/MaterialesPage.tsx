@@ -133,7 +133,22 @@ export function MaterialesPage() {
               ? 'No hay materiales activos'
               : 'No hay materiales'
         }
-        texto={filtro === 'todos' ? 'Cree el primer material del catálogo.' : undefined}
+        texto={
+          filtro === 'todos'
+            ? 'Cree el primer material del catálogo.'
+            : 'Cambie el filtro para ver el resto del catálogo.'
+        }
+        accion={
+          filtro === 'todos' ? (
+            <Boton onClick={() => setAccion({ tipo: 'crear' })} disabled={!enLinea}>
+              Crear el primer material
+            </Boton>
+          ) : (
+            <Boton variante="secundario" onClick={() => setFiltro('todos')}>
+              Mostrar todos
+            </Boton>
+          )
+        }
       />
     );
   } else {

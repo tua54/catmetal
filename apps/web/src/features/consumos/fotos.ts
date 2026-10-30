@@ -9,8 +9,13 @@
 // `useWebWorker: false` es obligatorio: con el Web Worker la librería descarga su código desde
 // cdn.jsdelivr.net, lo que rompe la CSP `'self'` y no funciona sin conexión.
 
+//
+// La librería (~50 kB) se descarga con `import()` la primera vez que se adjunta una foto: no pesa en
+// la carga de la pantalla de registro. Su fragmento queda igual en el precache del Service Worker,
+// así que también funciona sin conexión.
+
 import { MAX_EVIDENCIA_BYTES, MAX_EVIDENCIAS_POR_NOVEDAD } from '@catmetal/shared';
-import imageCompression, { type Options } from 'browser-image-compression';
+import type { Options } from 'browser-image-compression';
 
 export const MAX_FOTOS = MAX_EVIDENCIAS_POR_NOVEDAD;
 
@@ -24,6 +29,12 @@ export const OPCIONES_COMPRESION = {
 } as const satisfies Options;
 
 export type Compresor = (archivo: File, opciones: Options) => Promise<Blob>;
+
+/** Compresor real: carga `browser-image-compression` bajo demanda (ver la cabecera del archivo). */
+export const comprimirConLibreria: Compresor = async (archivo, opciones) => {
+  const { default: imageCompression } = await import('browser-image-compression');
+  return imageCompression(archivo, opciones);
+};
 
 export class ErrorFoto extends Error {
   override readonly name = 'ErrorFoto';
@@ -120,7 +131,7 @@ async function leerBytes(blob: Blob): Promise<Uint8Array> {
  */
 export async function prepararFotoEvidencia(
   archivo: File,
-  comprimir: Compresor = imageCompression,
+  comprimir: Compresor = comprimirConLibreria,
 ): Promise<Blob> {
   let comprimida: Blob;
   try {

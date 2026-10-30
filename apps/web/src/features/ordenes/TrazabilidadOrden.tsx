@@ -1,7 +1,15 @@
 import type { LineaTiempoOrden } from '@catmetal/shared';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { useSesion } from '../../auth';
-import { Aviso, Boton, EstadoVacio, LineaTiempo, Tarjeta } from '../../components/ui';
+import {
+  Boton,
+  ErrorCarga,
+  EstadoVacio,
+  IconoSinConexion,
+  LineaTiempo,
+  Tarjeta,
+  TextoCargando,
+} from '../../components/ui';
 import { CLAVES_JEFE } from '../validacion/api';
 import { mensajeDeError, reintentarConsulta } from '../validacion/mensajes';
 import { obtenerLineaTiempo } from './api';
@@ -29,19 +37,39 @@ export function TrazabilidadOrden({ orderId }: { orderId: string | null }) {
           texto="Elija un consumo o filtre por orden para ver su trazabilidad."
         />
       ) : consulta.data === undefined ? (
-        consulta.isError || !enLinea ? (
-          <Aviso tono="advertencia" titulo="No se pudo cargar la trazabilidad">
-            {consulta.isError
-              ? mensajeDeError(consulta.error)
-              : 'La auditoría está en el servidor y no hay conexión.'}
-          </Aviso>
+        !enLinea ? (
+          <EstadoVacio
+            icono={<IconoSinConexion className="size-7" />}
+            titulo="Sin conexión"
+            texto="La auditoría está en el servidor. La trazabilidad aparecerá cuando vuelva la conexión."
+          />
+        ) : consulta.isError ? (
+          <ErrorCarga
+            titulo="No se pudo cargar la trazabilidad"
+            alReintentar={() => void consulta.refetch()}
+          >
+            {mensajeDeError(consulta.error)}
+          </ErrorCarga>
         ) : (
-          <p role="status" className="text-ink-500">
-            Cargando trazabilidad…
-          </p>
+          <TextoCargando texto="Cargando trazabilidad…" />
         )
       ) : eventos.length === 0 ? (
-        <EstadoVacio titulo="Sin eventos registrados" />
+        <EstadoVacio
+          titulo="Sin eventos registrados"
+          texto="Los cambios de la orden y de sus consumos aparecerán aquí."
+          accion={
+            enLinea ? (
+              <Boton
+                variante="secundario"
+                cargando={consulta.isFetching}
+                textoCargando="Actualizando…"
+                onClick={() => void consulta.refetch()}
+              >
+                Actualizar
+              </Boton>
+            ) : undefined
+          }
+        />
       ) : (
         <div className="flex flex-col gap-4">
           {codigo !== undefined && (

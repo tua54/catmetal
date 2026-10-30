@@ -1,10 +1,16 @@
 import { useId, type ButtonHTMLAttributes, type MouseEvent, type ReactNode, type Ref } from 'react';
 import { cx, unirIds } from './clases';
+import {
+  BASE,
+  INACTIVO,
+  TAMANOS,
+  VARIANTES,
+  type TamanoBoton,
+  type VarianteBoton,
+} from './estilos-boton';
 import { IconoGiro } from './iconos';
 
-export type VarianteBoton =
-  'primario' | 'exito' | 'peligro' | 'peligroRelleno' | 'secundario' | 'fantasma';
-export type TamanoBoton = 'normal' | 'grande';
+export type { TamanoBoton, VarianteBoton } from './estilos-boton';
 
 export interface PropsBoton extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'children'> {
   children: ReactNode;
@@ -28,30 +34,6 @@ export interface PropsBoton extends Omit<ButtonHTMLAttributes<HTMLButtonElement>
   motivoDeshabilitado?: string;
   ref?: Ref<HTMLButtonElement>;
 }
-
-const BASE =
-  'relative inline-flex select-none items-center justify-center gap-2 rounded-lg px-5 text-base font-semibold leading-tight transition-colors touch-manipulation';
-
-const VARIANTES: Record<VarianteBoton, string> = {
-  primario: 'bg-brand-600 text-white active:bg-brand-700 hover:bg-brand-500',
-  exito: 'bg-success-700 text-white active:bg-success-800 hover:bg-success-800',
-  peligro:
-    'border-2 border-danger-700 bg-white text-danger-700 active:bg-danger-100 hover:bg-danger-50',
-  // Confirmación final de una acción destructiva (dentro del diálogo). white / danger-700 = 6,47:1
-  peligroRelleno: 'bg-danger-700 text-white active:bg-danger-800 hover:bg-danger-800',
-  secundario:
-    'border border-ink-400 bg-white text-ink-700 active:bg-surface-200 hover:bg-surface-50',
-  fantasma:
-    'bg-transparent text-brand-600 underline-offset-4 active:bg-brand-100 hover:bg-brand-50',
-};
-
-const INACTIVO =
-  'cursor-not-allowed border border-line-200 bg-surface-200 text-ink-500 shadow-none';
-
-const TAMANOS: Record<TamanoBoton, string> = {
-  normal: 'min-h-11 min-w-11 py-2',
-  grande: 'min-h-14 min-w-14 py-3 text-lg',
-};
 
 /**
  * Botón base. Objetivos táctiles ≥ 44 px; el hover solo se aplica en dispositivos con puntero

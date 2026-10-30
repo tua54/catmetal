@@ -3,7 +3,7 @@ import { useCallback } from 'react';
 import { Link } from 'react-router';
 import { useConsultaLocal } from '../../app/useConsultaLocal';
 import { useSesion } from '../../auth';
-import { EstadoVacio, Tarjeta } from '../../components/ui';
+import { ErrorCarga, EstadoVacio, Tarjeta, TextoCargando } from '../../components/ui';
 import { BarraProgreso } from '../../features/consumos/BarraProgreso';
 import { misOrdenes } from '../../features/consumos/consultas';
 
@@ -19,22 +19,22 @@ export function MisOrdenesPage() {
     () => (userId === null ? Promise.resolve([]) : misOrdenes(userId)),
     [userId],
   );
-  const { datos: ordenes, error } = useConsultaLocal(consulta);
+  const { datos: ordenes, error, reintentar } = useConsultaLocal(consulta);
 
   return (
     <div className="flex flex-col gap-6">
       <h1 className="text-2xl font-bold text-ink-950">Mis órdenes en proceso</h1>
 
       {error !== undefined && (
-        <p role="alert" className="text-danger-700">
-          No se pudieron leer las órdenes guardadas en esta tablet.
-        </p>
+        <ErrorCarga
+          titulo="No se pudieron leer las órdenes guardadas en esta tablet"
+          alReintentar={reintentar}
+        >
+          Sus registros no se han borrado. Si el problema sigue, cierre y vuelva a abrir la
+          aplicación.
+        </ErrorCarga>
       )}
-      {ordenes === undefined && error === undefined && (
-        <p role="status" className="text-ink-500">
-          Cargando órdenes…
-        </p>
-      )}
+      {ordenes === undefined && error === undefined && <TextoCargando texto="Cargando órdenes…" />}
       {ordenes !== undefined && ordenes.length === 0 && (
         <Tarjeta>
           <EstadoVacio
