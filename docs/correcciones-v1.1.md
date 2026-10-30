@@ -30,6 +30,8 @@ Los cambios de la spec de esta ronda están en `docs/spec.md` §14 (v2.1).
 
 ### C2. Versión de Node coherente
 
+- **Estado**: RESUELTO (e06919d).
+
 - **Situación**: `package.json` declara `engines.node >=22`, pero con Node 22 falla `apps/web/src/features/consumos/fotos-diferido.test.ts`. El Blob de jsdom no tiene `stream()` y la prueba usa `new Response(blob)`. `.nvmrc` y el CI usan 24.
 - **Aceptación**:
   - `engines.node` pasa a `>=24` (en la raíz y en los paquetes que lo declaren).
@@ -202,4 +204,4 @@ Los cambios de la spec de esta ronda están en `docs/spec.md` §14 (v2.1).
 - **Dónde**: `apps/web/src/features/consumos/fotos-diferido.test.ts`; la rama alternativa de `leerBytes` en `apps/web/src/features/consumos/fotos.ts` y `apps/web/src/datos/outbox.ts`.
 - **Hallazgo**: en jsdom, `new Response(blob)` no lee el Blob. Lo convierte al texto `"[object Blob]"`. Así, `tieneExif(...) === false` pasaba siempre, también con Node 24. La alternativa con `Response` del código tenía el mismo defecto en entornos sin `Blob.arrayBuffer`.
 - **Corrección**: el helper `apps/web/src/lib/blob.ts` (`leerBlob`) usa `arrayBuffer()` o, si no existe, `FileReader`. La prueba ahora exige el tamaño y el SOI del JPEG.
-- **Estado**: RESUELTO (en el commit de C2).
+- **Estado**: RESUELTO (e06919d).
