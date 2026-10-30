@@ -3,8 +3,9 @@
 // - Ver: supervisor solo las asignadas activas (lo demás → 404); jefe y admin todas.
 // - Crear / iniciar / finalizar: jefe y admin (`ordenes.gestionar`). Transiciones:
 //   planeada → en_proceso (`start`); en_proceso → finalizada (`finish`). No se expone cancelar (P16).
-// - Toda escritura es un plan con sentencia principal guardada y auditoría condicionada (`plan.ts`),
-//   y toda fila de auditoría lleva `order_id` (ADR 0010).
+// - Toda escritura es un plan con sentencia principal guardada y auditoría condicionada a la marca
+//   de escritura que fija esa principal (`plan.ts`, ADR 0028), y toda fila de auditoría lleva
+//   `order_id` (ADR 0010).
 
 import {
   type AvanceMaterial,
@@ -26,7 +27,14 @@ import {
   type Unidad,
   uuidv7,
 } from '@catmetal/shared';
-import { type CondicionSql, sentenciaAuditoriaCondicional } from '../auditoria/auditar';
+import {
+  type CondicionDeEscritura,
+  MARCADOR_CONDICION,
+  nuevaMarca,
+  porMarca,
+  sentenciaAuditoriaCondicional,
+  sentenciaDependiente,
+} from '../auditoria/auditar';
 import { ErrorApi } from '../errores';
 import type { Contexto } from './contexto';
 import type { PlanDeEscritura } from './plan';
@@ -194,7 +202,7 @@ function auditarOrden(
   accion: string,
   antes: FilaOrden | null,
   despues: FilaOrden & { force?: boolean; pendientes?: number },
-  aplicada: CondicionSql,
+  aplicada: CondicionDeEscritura,
 ): D1PreparedStatement {
   return sentenciaAuditoriaCondicional(
     ctx.db,
@@ -287,17 +295,16 @@ export async function crearOrden(
     cantidad_planeada: m.cantidad_planeada,
     unidad: m.unidad,
   }));
-  // La orden "es nuestra" si existe con este id, código y hora (un id repetido falla por PK antes).
-  const aplicada: CondicionSql = {
-    sql: 'EXISTS (SELECT 1 FROM production_orders WHERE id = ? AND codigo = ? AND created_at = ?)',
-    parametros: [orden.id, orden.codigo, ctx.ahora],
-  };
+  // La orden es la de este batch si lleva su marca (el id puede venir del cliente: no es marca).
+  // Los materiales planeados son hijas con el mismo WHERE: se encadenan a esa marca (ADR 0028, 5).
+  const marca = nuevaMarca();
+  const aplicada = porMarca('production_orders', { id: orden.id }, marca);
 
   const sentencias: D1PreparedStatement[] = [
     ctx.db
       .prepare(
-        `INSERT INTO production_orders (${COLUMNAS_ORDEN})
-         SELECT ?, ?, ?, 'planeada', NULL, NULL, ?, ?, ?
+        `INSERT INTO production_orders (${COLUMNAS_ORDEN}, escritura_id)
+         SELECT ?, ?, ?, 'planeada', NULL, NULL, ?, ?, ?, ?
          WHERE (SELECT count(*) FROM materials
                 WHERE activo = 1 AND id IN (SELECT value FROM json_each(?))) = ?`,
       )
@@ -308,6 +315,7 @@ export async function crearOrden(
         orden.creada_por,
         ctx.ahora,
         ctx.ahora,
+        marca,
         listaIds,
         idsMateriales.length,
       ),
@@ -315,21 +323,21 @@ export async function crearOrden(
   ];
   for (const planeado of planeados) {
     sentencias.push(
-      ctx.db
-        .prepare(
-          `INSERT INTO order_planned_materials
-             (order_id, material_id, cantidad_planeada, unidad, created_at, updated_at)
-           SELECT ?, ?, ?, ?, ?, ? WHERE ${aplicada.sql}`,
-        )
-        .bind(
+      sentenciaDependiente(
+        ctx.db,
+        `INSERT INTO order_planned_materials
+           (order_id, material_id, cantidad_planeada, unidad, created_at, updated_at)
+         SELECT ?, ?, ?, ?, ?, ? WHERE ${MARCADOR_CONDICION}`,
+        [
           planeado.order_id,
           planeado.material_id,
           planeado.cantidad_planeada,
           planeado.unidad,
           ctx.ahora,
           ctx.ahora,
-          ...aplicada.parametros,
-        ),
+        ],
+        aplicada,
+      ),
       sentenciaAuditoriaCondicional(
         ctx.db,
         {
@@ -350,6 +358,7 @@ export async function crearOrden(
   return {
     sentencias,
     principal: { indice: 0, cambiosEsperados: 1 },
+    aplicada,
     respuesta: { ...orden, materiales: planeados },
   };
 }
@@ -370,20 +379,21 @@ export async function iniciarOrden(ctx: Contexto, id: string): Promise<PlanDeEsc
     fecha_inicio: ctx.ahora,
     updated_at: ctx.ahora,
   };
+  const marca = nuevaMarca();
+  const aplicada = porMarca('production_orders', { id }, marca);
   return {
     sentencias: [
       ctx.db
         .prepare(
-          `UPDATE production_orders SET estado = 'en_proceso', fecha_inicio = ?, updated_at = ?
+          `UPDATE production_orders SET estado = 'en_proceso', fecha_inicio = ?, updated_at = ?,
+             escritura_id = ?
            WHERE id = ? AND estado = 'planeada'`,
         )
-        .bind(ctx.ahora, ctx.ahora, id),
-      auditarOrden(ctx, 'orden.iniciar', actual, nueva, {
-        sql: `EXISTS (SELECT 1 FROM production_orders WHERE id = ? AND estado = 'en_proceso' AND fecha_inicio = ?)`,
-        parametros: [id, ctx.ahora],
-      }),
+        .bind(ctx.ahora, ctx.ahora, marca, id),
+      auditarOrden(ctx, 'orden.iniciar', actual, nueva, aplicada),
     ],
     principal: { indice: 0, cambiosEsperados: 1 },
+    aplicada,
     respuesta: nueva,
   };
 }
@@ -418,28 +428,23 @@ export async function finalizarOrden(
     fecha_fin: ctx.ahora,
     updated_at: ctx.ahora,
   };
+  const marca = nuevaMarca();
+  const aplicada = porMarca('production_orders', { id }, marca);
   return {
     sentencias: [
       ctx.db
         .prepare(
-          `UPDATE production_orders SET estado = 'finalizada', fecha_fin = ?, updated_at = ?
+          `UPDATE production_orders SET estado = 'finalizada', fecha_fin = ?, updated_at = ?,
+             escritura_id = ?
            WHERE id = ? AND estado = 'en_proceso'
              AND (SELECT count(*) FROM consumptions
                   WHERE order_id = ? AND estado = 'pendiente') = ?`,
         )
-        .bind(ctx.ahora, ctx.ahora, id, id, pendientes),
-      auditarOrden(
-        ctx,
-        'orden.finalizar',
-        actual,
-        { ...nueva, force, pendientes },
-        {
-          sql: `EXISTS (SELECT 1 FROM production_orders WHERE id = ? AND estado = 'finalizada' AND fecha_fin = ?)`,
-          parametros: [id, ctx.ahora],
-        },
-      ),
+        .bind(ctx.ahora, ctx.ahora, marca, id, id, pendientes),
+      auditarOrden(ctx, 'orden.finalizar', actual, { ...nueva, force, pendientes }, aplicada),
     ],
     principal: { indice: 0, cambiosEsperados: 1 },
+    aplicada,
     respuesta: nueva,
   };
 }

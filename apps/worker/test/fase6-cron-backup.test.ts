@@ -94,14 +94,33 @@ describe('tablas del backup', () => {
   });
 
   // ADR 0020: `columnas` estima el tamaño de cada fila en SQL; si falta una, la cota por bytes no
-  // la contaría.
-  it('declara exactamente las columnas de cada tabla', async () => {
+  // la contaría. ADR 0028 (enmienda de la 0021): `columnasTecnicas` son las del esquema que el
+  // backup omite a propósito (`escritura_id`); entre las dos cubren exactamente el esquema.
+  it('declara exactamente las columnas de cada tabla (exportadas más técnicas)', async () => {
     for (const tabla of TABLAS_BACKUP) {
       const { results } = await env.DB.prepare('SELECT name FROM pragma_table_info(?)')
         .bind(tabla.nombre)
         .all<{ name: string }>();
-      expect([...tabla.columnas].sort(), tabla.nombre).toEqual(results.map((r) => r.name).sort());
+      const tecnicas = tabla.columnasTecnicas ?? [];
+      expect([...tabla.columnas, ...tecnicas].sort(), tabla.nombre).toEqual(
+        results.map((r) => r.name).sort(),
+      );
+      expect(
+        tabla.columnas.filter((c) => tecnicas.includes(c)),
+        tabla.nombre,
+      ).toEqual([]);
       expect(tabla.columnas.some((c) => c.startsWith('__bk_'))).toBe(false);
+    }
+  });
+
+  it('la marca de escritura es técnica en toda tabla que la tiene, y nunca se exporta', async () => {
+    for (const tabla of TABLAS_BACKUP) {
+      const { results } = await env.DB.prepare('SELECT name FROM pragma_table_info(?)')
+        .bind(tabla.nombre)
+        .all<{ name: string }>();
+      const tiene = results.some((r) => r.name === 'escritura_id');
+      expect(tabla.columnasTecnicas?.includes('escritura_id') ?? false, tabla.nombre).toBe(tiene);
+      expect(tabla.columnas, tabla.nombre).not.toContain('escritura_id');
     }
   });
 

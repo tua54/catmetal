@@ -278,6 +278,41 @@ SELECT id, storage_key, sha256 FROM evidences WHERE subido = 0;
 
 Fuera de una restauración pasa lo mismo cuando una subida no llega a confirmarse en D1: el Worker nunca borra el objeto (ADR 0024) y registra el aviso `evidencia_no_confirmada` con el `evidencia_id` en Workers Logs. Queda como máximo un objeto por evidencia, que se reconcilia con este mismo procedimiento.
 
+### 9.5 Detectar filas de auditoría duplicadas o espurias (ADR 0028)
+
+Hasta la v1.1, una petición concurrente que **perdía** (su escritura no cambiaba filas) podía dejar igual su fila de auditoría si calculaba el mismo `ahora` que la ganadora, o si la condición no usaba la hora (validaciones). Desde la v1.2 la auditoría se condiciona a una marca de escritura y eso ya no ocurre. En una base creada antes de la v1.2 (staging, o producción si se desplegó la v1.0 o la v1.1), estas consultas listan los candidatos. Deben devolver 0 filas. Son de solo lectura. Guárdelas en `deteccion-auditoria.sql` y ejecútelas con `wrangler d1 execute <base> --env <entorno> --file=deteccion-auditoria.sql` contra la base remota del entorno.
+
+```sql
+-- 1. Acciones que ocurren una sola vez por entidad, con más de una fila (sea cual sea server_at).
+SELECT entidad, entidad_id, accion, COUNT(*) AS filas, MIN(seq) AS primera, MAX(seq) AS ultima
+FROM audit_log
+WHERE accion IN ('consumo.crear', 'novedad.crear', 'evidencia.crear', 'evidencia.subida',
+                 'validacion.crear', 'consumo.aprobar', 'consumo.rechazar', 'orden.crear',
+                 'orden.iniciar', 'orden.finalizar', 'material.crear', 'usuario.crear',
+                 'asignacion.crear')
+GROUP BY entidad, entidad_id, accion
+HAVING COUNT(*) > 1;
+
+-- 2. Dos ediciones del mismo consumo que dicen haber dejado la misma version.
+SELECT entidad_id, json_extract(datos_despues, '$.version') AS version, COUNT(*) AS filas
+FROM audit_log
+WHERE accion = 'consumo.editar'
+GROUP BY entidad_id, version
+HAVING COUNT(*) > 1;
+
+-- 3. Resto de acciones: filas idénticas en entidad, acción, hora y datos (la del perdedor).
+SELECT entidad, entidad_id, accion, server_at, COUNT(*) AS filas
+FROM audit_log
+GROUP BY entidad, entidad_id, accion, server_at, datos_despues
+HAVING COUNT(*) > 1;
+```
+
+Si aparece algún candidato:
+
+- **No lo borre ni lo edite**: `audit_log` es inmutable (triggers) y la regla 5 lo prohíbe. La fila de negocio (`consumptions`, `evidences`…) es la verdad del estado.
+- En cada grupo, la fila con el `seq` menor es la de la escritura que aplicó; las siguientes con los mismos datos son del perdedor. Compárelas con el estado actual de la fila de negocio.
+- Registre el hallazgo (fecha, consultas, `seq` afectados y conclusión) en el registro de incidentes del equipo, para que quien lea esa auditoría sepa qué filas no corresponden a una acción.
+
 ## 10. Datos personales (Ley 1581 de 2012)
 
 | Dato | Dónde | Para qué | Retención |

@@ -125,3 +125,14 @@ Este documento es **el alcance de la sesión v1.2**. Cada ítem trae:
 
 - Tablet real, WebKit en un dispositivo y staging siguen como pendientes humanos.
 - Las preguntas de negocio de `docs/preguntas-abiertas.md` no se tocan, salvo que un ítem las afecte.
+
+---
+
+## Nuevos
+
+### N1. La concurrencia optimista por `updated_at` o por valor admite actualizaciones perdidas
+
+- **Prioridad**: P1 (integridad de la auditoría; está en el área de A1).
+- **Dónde**: `apps/worker/src/dominio/materiales.ts` (testigo `updated_at`), `dominio/settings.ts` (testigo `valor IS ?`) y `dominio/asignaciones.ts` (testigo `activo`).
+- **Escenario**: con escrituras en el mismo milisegundo, una edición basada en una lectura vieja pisa a otra (materiales). Con un valor que vuelve al anterior (ABA), el cambio se aplica con un `datos_antes` que ya no es el estado previo (tolerancia, asignaciones). La restauración usa `datos_antes` (R-04).
+- **Aceptación**: la principal exige también la marca de escritura leída (`escritura_id IS ?`, ADR 0028). Prueba determinista en `apps/worker/test/correcciones-n1-concurrencia-optimista.test.ts`.

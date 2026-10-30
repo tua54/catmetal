@@ -2,7 +2,7 @@
 // Solo se expone `tolerancia_pct`: `sync_epoca` viaja en `/sync/pull` (ADR 0009).
 
 import { type Configuracion, TOLERANCIA_PCT_DEFECTO, type Tolerancia } from '@catmetal/shared';
-import { sentenciaAuditoriaCondicional } from '../auditoria/auditar';
+import { nuevaMarca, porMarca, sentenciaAuditoriaCondicional } from '../auditoria/auditar';
 import type { Contexto } from './contexto';
 import type { PlanDeEscritura } from './plan';
 
@@ -57,14 +57,34 @@ function datosAuditoria(fila: FilaSetting) {
 }
 
 /**
- * `PATCH /settings/tolerancia`. Guarda en el `WHERE` el valor leído: si otro admin la cambió
- * entretanto, no aplica (409). Auditoría con antes y después.
+ * `PATCH /settings/tolerancia`. Guarda en el `WHERE` el valor y la marca de escritura leídos (N1:
+ * un ABA del valor no la deja pasar con un `antes` falso): si otro admin la cambió entretanto, no
+ * aplica (409). Auditoría con antes y después, condicionada a la marca de ESTE plan (ADR 0028).
  */
 export async function cambiarTolerancia(
   ctx: Contexto,
   entrada: Tolerancia,
 ): Promise<PlanDeEscritura<Configuracion>> {
-  const actual = await sentenciaLeerTolerancia(ctx.db).first<FilaSetting>();
+  const leida = await ctx.db
+    .prepare(
+      'SELECT clave, valor, actualizado_por, created_at, updated_at, escritura_id FROM settings WHERE clave = ?',
+    )
+    .bind(CLAVE_TOLERANCIA)
+    .first<FilaSetting & { escritura_id: string | null }>();
+  // La marca es interna: no entra en `actual` (ni, por tanto, en la auditoría).
+  const marcaLeida = leida?.escritura_id ?? null;
+  const actual: FilaSetting | null =
+    leida === null
+      ? null
+      : {
+          clave: leida.clave,
+          valor: leida.valor,
+          actualizado_por: leida.actualizado_por,
+          created_at: leida.created_at,
+          updated_at: leida.updated_at,
+        };
+  const marca = nuevaMarca();
+  const aplicada = porMarca('settings', { clave: CLAVE_TOLERANCIA }, marca);
   const valor = JSON.stringify(entrada.tolerancia_pct);
   const nueva: FilaSetting = {
     clave: CLAVE_TOLERANCIA,
@@ -77,9 +97,18 @@ export async function cambiarTolerancia(
     sentencias: [
       ctx.db
         .prepare(
-          'UPDATE settings SET valor = ?, actualizado_por = ?, updated_at = ? WHERE clave = ? AND valor IS ?',
+          `UPDATE settings SET valor = ?, actualizado_por = ?, updated_at = ?, escritura_id = ?
+           WHERE clave = ? AND valor IS ? AND escritura_id IS ?`,
         )
-        .bind(valor, ctx.actor.id, ctx.ahora, CLAVE_TOLERANCIA, actual?.valor ?? null),
+        .bind(
+          valor,
+          ctx.actor.id,
+          ctx.ahora,
+          marca,
+          CLAVE_TOLERANCIA,
+          actual?.valor ?? null,
+          marcaLeida,
+        ),
       sentenciaAuditoriaCondicional(
         ctx.db,
         {
@@ -93,13 +122,11 @@ export async function cambiarTolerancia(
           server_at: ctx.ahora,
           alerta_reloj: ctx.alertaReloj,
         },
-        {
-          sql: 'EXISTS (SELECT 1 FROM settings WHERE clave = ? AND valor = ? AND actualizado_por = ? AND updated_at = ?)',
-          parametros: [CLAVE_TOLERANCIA, valor, ctx.actor.id, ctx.ahora],
-        },
+        aplicada,
       ),
     ],
     principal: { indice: 0, cambiosEsperados: 1 },
+    aplicada,
     respuesta: { tolerancia_pct: entrada.tolerancia_pct },
   };
 }

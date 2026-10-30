@@ -574,6 +574,8 @@ export function sentenciaPagina(
   funcionTamano = 'octet_length',
 ): D1PreparedStatement {
   const orden = tabla.pk.join(', ');
+  // Lista explícita (nunca `t.*`): las `columnasTecnicas` no se exportan (ADR 0028).
+  const columnasExportadas = tabla.columnas.map((columna) => `t.${columna}`).join(', ');
   const descendente = tabla.pk.map((columna) => `${columna} DESC`).join(', ');
   const condiciones: string[] = [];
   const parametros: ValorPk[] = [];
@@ -614,7 +616,7 @@ export function sentenciaPagina(
   ), __bk_corte AS (
     SELECT ${orden} FROM __bk_acum WHERE __bk_antes < ? ORDER BY ${descendente} LIMIT 1
   )
-  SELECT t.*, (SELECT __bk_tot FROM __bk_acum LIMIT 1) AS __bk_total,
+  SELECT ${columnasExportadas}, (SELECT __bk_tot FROM __bk_acum LIMIT 1) AS __bk_total,
     (SELECT COUNT(*) FROM __bk_acum WHERE __bk_antes < ?) AS __bk_n
   FROM ${tabla.nombre} AS t
   WHERE ${[...condiciones, corte].join(' AND ')}

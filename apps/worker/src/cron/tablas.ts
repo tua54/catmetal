@@ -11,21 +11,29 @@
 //   (sin Sessions API ni réplicas de lectura de D1; ADR 0021, P5).
 //
 // `columnas` (ADR 0020) se usa para estimar en SQL el tamaño de cada fila (`octet_length`) y acotar
-// la página por bytes. La prueba `fase6-cron-backup.test.ts` verifica que esta lista, junto con
-// `TABLAS_EXCLUIDAS_BACKUP`, cubre todas las tablas del esquema y que `pk` y `columnas` son
-// exactamente los de cada una.
+// la página por bytes, y es la lista EXACTA de columnas que se exportan (la consulta no usa `*`).
+// `columnasTecnicas` son las columnas del esquema que el backup omite a propósito: la marca de
+// escritura `escritura_id` (ADR 0028, enmienda de la ADR 0021), interna y sin valor fuera de su
+// batch; la restauración la deja en NULL. La prueba `fase6-cron-backup.test.ts` verifica que esta
+// lista, junto con `TABLAS_EXCLUIDAS_BACKUP`, cubre todas las tablas del esquema, que `pk` es la de
+// cada una y que `columnas ∪ columnasTecnicas` son exactamente sus columnas.
 
 export interface TablaBackup {
   readonly nombre: string;
   /** Columnas de la clave primaria, en el orden de paginación. */
   readonly pk: readonly string[];
-  /** Todas las columnas de la tabla (en el orden del esquema). */
+  /** Columnas que se exportan (todas las del esquema salvo `columnasTecnicas`, en su orden). */
   readonly columnas: readonly string[];
+  /** Columnas del esquema que el backup NO exporta a propósito (ADR 0028). */
+  readonly columnasTecnicas?: readonly string[];
   /** Solo `audit_log`: sus páginas se acotan a `seq <= seq_final` (ADR 0021). */
   readonly acotadaPorSeqFinal?: true;
 }
 
 const MARCAS = ['created_at', 'updated_at'] as const;
+
+/** Marca de escritura (ADR 0028): interna, no se exporta. */
+const TECNICAS = ['escritura_id'] as const;
 
 export const TABLAS_BACKUP: readonly TablaBackup[] = [
   {
@@ -45,6 +53,7 @@ export const TABLAS_BACKUP: readonly TablaBackup[] = [
   },
   {
     nombre: 'validations',
+    columnasTecnicas: TECNICAS,
     pk: ['id'],
     columnas: [
       'id',
@@ -59,6 +68,7 @@ export const TABLAS_BACKUP: readonly TablaBackup[] = [
   },
   {
     nombre: 'evidences',
+    columnasTecnicas: TECNICAS,
     pk: ['id'],
     columnas: [
       'id',
@@ -74,6 +84,7 @@ export const TABLAS_BACKUP: readonly TablaBackup[] = [
   },
   {
     nombre: 'incidents',
+    columnasTecnicas: TECNICAS,
     pk: ['id'],
     columnas: [
       'id',
@@ -88,6 +99,7 @@ export const TABLAS_BACKUP: readonly TablaBackup[] = [
   },
   {
     nombre: 'consumptions',
+    columnasTecnicas: TECNICAS,
     pk: ['id'],
     columnas: [
       'id',
@@ -112,16 +124,19 @@ export const TABLAS_BACKUP: readonly TablaBackup[] = [
   },
   {
     nombre: 'order_planned_materials',
+    columnasTecnicas: TECNICAS,
     pk: ['order_id', 'material_id'],
     columnas: ['order_id', 'material_id', 'cantidad_planeada', 'unidad', ...MARCAS],
   },
   {
     nombre: 'order_supervisors',
+    columnasTecnicas: TECNICAS,
     pk: ['order_id', 'user_id'],
     columnas: ['order_id', 'user_id', 'asignado_por', 'activo', ...MARCAS],
   },
   {
     nombre: 'refresh_tokens',
+    columnasTecnicas: TECNICAS,
     pk: ['id'],
     columnas: [
       'id',
@@ -150,11 +165,13 @@ export const TABLAS_BACKUP: readonly TablaBackup[] = [
   },
   {
     nombre: 'settings',
+    columnasTecnicas: TECNICAS,
     pk: ['clave'],
     columnas: ['clave', 'valor', 'actualizado_por', ...MARCAS],
   },
   {
     nombre: 'production_orders',
+    columnasTecnicas: TECNICAS,
     pk: ['id'],
     columnas: [
       'id',
@@ -169,11 +186,13 @@ export const TABLAS_BACKUP: readonly TablaBackup[] = [
   },
   {
     nombre: 'materials',
+    columnasTecnicas: TECNICAS,
     pk: ['id'],
     columnas: ['id', 'codigo', 'nombre', 'unidad', 'costo_unitario_cop', 'activo', ...MARCAS],
   },
   {
     nombre: 'users',
+    columnasTecnicas: TECNICAS,
     pk: ['id'],
     columnas: [
       'id',

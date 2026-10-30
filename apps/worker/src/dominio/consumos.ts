@@ -30,7 +30,12 @@ import {
   type Unidad,
   type Validacion,
 } from '@catmetal/shared';
-import { type CondicionSql, sentenciaAuditoriaCondicional } from '../auditoria/auditar';
+import {
+  type CondicionSql,
+  nuevaMarca,
+  porMarca,
+  sentenciaAuditoriaCondicional,
+} from '../auditoria/auditar';
 import { ErrorApi } from '../errores';
 import type { Contexto } from './contexto';
 import { buscarMaterial, type FilaMaterial } from './materiales';
@@ -344,15 +349,18 @@ export async function registrarConsumo(
     guardaAcumulado(orden.id, material.id, null, calculo.acumulado),
   );
   const valores = COLUMNAS_CONSUMO.split(', ').map((columna) => fila[columna as keyof FilaConsumo]);
+  // A1 (ADR 0028): el id lo manda el cliente, así que no sirve de marca: la principal fija la suya.
+  const marca = nuevaMarca();
+  const aplicada = porMarca('consumptions', { id: fila.id }, marca);
 
   return {
     sentencias: [
       ctx.db
         .prepare(
-          `INSERT INTO consumptions (${COLUMNAS_CONSUMO})
-           SELECT ${valores.map(() => '?').join(', ')} FROM production_orders AS o WHERE ${guarda.sql}`,
+          `INSERT INTO consumptions (${COLUMNAS_CONSUMO}, escritura_id)
+           SELECT ${valores.map(() => '?').join(', ')}, ? FROM production_orders AS o WHERE ${guarda.sql}`,
         )
-        .bind(...valores, ...guarda.parametros),
+        .bind(...valores, marca, ...guarda.parametros),
       sentenciaAuditoriaCondicional(
         ctx.db,
         {
@@ -367,13 +375,11 @@ export async function registrarConsumo(
           server_at: ctx.ahora,
           alerta_reloj: ctx.alertaReloj,
         },
-        {
-          sql: 'EXISTS (SELECT 1 FROM consumptions WHERE id = ? AND registrado_por = ? AND server_received_at = ?)',
-          parametros: [fila.id, ctx.actor.id, ctx.ahora],
-        },
+        aplicada,
       ),
     ],
     principal: { indice: 0, cambiosEsperados: 1 },
+    aplicada,
     respuesta: consumoDe(fila),
     siNoAplica: new ErrorApi('CONFLICTO'),
   };
@@ -455,13 +461,15 @@ export async function editarConsumo(
     cambiaMaterial ? guardaMaterial(material) : { sql: '1 = 1', parametros: [] },
     guardaAcumulado(actual.order_id, material.id, actual.id, calculo.acumulado),
   );
+  const marca = nuevaMarca();
+  const aplicada = porMarca('consumptions', { id: actual.id }, marca);
   return {
     sentencias: [
       ctx.db
         .prepare(
           `UPDATE consumptions SET material_id = ?, cantidad = ?, unidad = ?, cantidad_en_unidad_plan = ?,
              lote = ?, costo_unitario_cop_snapshot = ?, requiere_novedad = ?, version = version + 1,
-             updated_at = ?
+             updated_at = ?, escritura_id = ?
            WHERE id = ? AND version = ? AND estado = 'pendiente' AND registrado_por = ? AND ${guarda.sql}`,
         )
         .bind(
@@ -473,6 +481,7 @@ export async function editarConsumo(
           nuevo.costo_unitario_cop_snapshot,
           nuevo.requiere_novedad,
           ctx.ahora,
+          marca,
           actual.id,
           actual.version,
           ctx.actor.id,
@@ -493,13 +502,11 @@ export async function editarConsumo(
           server_at: ctx.ahora,
           alerta_reloj: ctx.alertaReloj,
         },
-        {
-          sql: 'EXISTS (SELECT 1 FROM consumptions WHERE id = ? AND version = ? AND updated_at = ?)',
-          parametros: [actual.id, nuevo.version, ctx.ahora],
-        },
+        aplicada,
       ),
     ],
     principal: { indice: 0, cambiosEsperados: 1 },
+    aplicada,
     respuesta: consumoDe(nuevo),
     siNoAplica: new ErrorApi('CONFLICTO'),
   };

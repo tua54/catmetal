@@ -12,9 +12,10 @@
 //    `rechazada DEPENDENCIA_RECHAZADA`, guardada.
 // 5. El MISMO comando de dominio de la Fase 2 (revalida permisos y reglas con el rol actual y el
 //    `did` de la sesión) devuelve su plan; al final del batch va el INSERT de `sync_mutations` como
-//    `aplicada`, condicionado a que la sentencia principal aplicó. La base garantiza la
-//    idempotencia: si un reintento concurrente ya escribió la mutación, el batch entero falla (PK)
-//    y se devuelve la respuesta guardada.
+//    `aplicada`, condicionado a la marca de escritura de la sentencia principal (`plan.aplicada`,
+//    ADR 0028): el perdedor de una carrera nunca la escribe, aunque comparta la hora. La base
+//    garantiza la idempotencia: si un reintento concurrente ya escribió la mutación, el batch entero
+//    falla (PK) y se devuelve la respuesta guardada.
 // 6. Clasificador de errores:
 //    - `ErrorApi` de negocio (incluidos los errores de restricción o de trigger de D1, que
 //      `ejecutarPlan` ya traduce) → `conflicto` (CONFLICTO sobre un consumo existente, con su
@@ -33,7 +34,6 @@
 
 import {
   type CodigoError,
-  type Consumo,
   detallesValidacion,
   esUuidV7,
   leerMutationId,
@@ -45,7 +45,7 @@ import {
   type TipoResultadoMutacion,
   ahoraIso,
 } from '@catmetal/shared';
-import type { CondicionSql } from '../auditoria/auditar';
+import { MARCADOR_CONDICION, sentenciaDependiente } from '../auditoria/auditar';
 import {
   buscarConsumo,
   COLUMNAS_CONSUMO,
@@ -82,6 +82,11 @@ export interface SesionPush {
    * una sola vez. La llevan todas las filas de auditoría de todas las mutaciones del lote.
    */
   alertaReloj: boolean;
+  /**
+   * Hora de cada intento (por defecto `ahoraIso()`). Solo las pruebas la fijan, para construir dos
+   * planes con el MISMO `ahora` sobre el mismo estado (A1).
+   */
+  reloj?: () => string;
 }
 
 /** Error que detiene el lote: la mutación y las siguientes quedan pendientes en el cliente. */
@@ -265,33 +270,6 @@ async function guardarRespuesta(
   return guardada === null ? respuesta : respuestaDeGuardada(sesion, guardada);
 }
 
-/** Condición "la sentencia principal del plan aplicó", para el INSERT de `sync_mutations`. */
-function condicionAplicada(m: Mutacion, ctx: Contexto, respuesta: unknown): CondicionSql {
-  switch (m.tipo) {
-    case 'consumo.crear':
-      return {
-        sql: 'EXISTS (SELECT 1 FROM consumptions WHERE id = ? AND registrado_por = ? AND server_received_at = ?)',
-        parametros: [m.payload.id, ctx.actor.id, ctx.ahora],
-      };
-    case 'consumo.editar':
-      return {
-        sql: 'EXISTS (SELECT 1 FROM consumptions WHERE id = ? AND version = ? AND updated_at = ?)',
-        parametros: [m.payload.id, (respuesta as Consumo).version, ctx.ahora],
-      };
-    case 'novedad.crear':
-      return {
-        sql: 'EXISTS (SELECT 1 FROM incidents WHERE id = ? AND registrado_por = ? AND server_received_at = ?)',
-        parametros: [m.payload.id, ctx.actor.id, ctx.ahora],
-      };
-    case 'consumo.aprobar':
-    case 'consumo.rechazar':
-      return {
-        sql: 'EXISTS (SELECT 1 FROM validations WHERE id = ? AND validado_por = ? AND server_received_at = ?)',
-        parametros: [m.payload.id, ctx.actor.id, ctx.ahora],
-      };
-  }
-}
-
 function planDe(ctx: Contexto, m: Mutacion): Promise<PlanDeEscritura<unknown>> {
   switch (m.tipo) {
     case 'consumo.crear':
@@ -323,7 +301,7 @@ async function aplicar(
       db: sesion.db,
       actor: sesion.actor,
       deviceId: sesion.deviceId,
-      ahora: ahoraIso(),
+      ahora: (sesion.reloj ?? ahoraIso)(),
       alertaReloj: sesion.alertaReloj,
     };
     const plan = await planDe(ctx, m);
@@ -331,13 +309,14 @@ async function aplicar(
       resultado: 'aplicada',
       servidor: JSON.parse(JSON.stringify(plan.respuesta)) as Record<string, unknown>,
     };
-    const condicion = condicionAplicada(m, ctx, plan.respuesta);
-    const fila = sesion.db
-      .prepare(
-        `INSERT INTO sync_mutations (${COLUMNAS_SYNC})
-         SELECT ?, ?, ?, ?, 'aplicada', ?, NULL, ?, ?, ? WHERE ${condicion.sql}`,
-      )
-      .bind(
+    if (plan.aplicada === undefined) {
+      throw new Error(`El plan de ${m.tipo} no expone la marca de su sentencia principal`);
+    }
+    const fila = sentenciaDependiente(
+      sesion.db,
+      `INSERT INTO sync_mutations (${COLUMNAS_SYNC})
+       SELECT ?, ?, ?, ?, 'aplicada', ?, NULL, ?, ?, ? WHERE ${MARCADOR_CONDICION}`,
+      [
         m.mutation_id,
         sesion.actor.id,
         sesion.deviceId,
@@ -346,8 +325,9 @@ async function aplicar(
         ctx.ahora,
         ctx.ahora,
         ctx.ahora,
-        ...condicion.parametros,
-      );
+      ],
+      plan.aplicada,
+    );
     try {
       const { resultados } = await ejecutarPlanConResultados(sesion.db, plan, [fila]);
       // B2: la fila `aplicada` va condicionada a la principal; si la principal aplicó y esta no,

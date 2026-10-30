@@ -27,6 +27,11 @@ import { validar } from '../validacion';
 export interface OpcionesRutasEvidencias {
   /** Solo pruebas: confirma la subida en D1 (por defecto, `ejecutarPlan`). */
   confirmarSubida?: (db: D1Database, plan: PlanDeEscritura<Evidencia>) => Promise<Evidencia>;
+  /**
+   * Solo pruebas: hora de la subida (por defecto, la de la petición). Permite forzar dos subidas
+   * concurrentes con el MISMO `ahora` (A1).
+   */
+  reloj?: () => string;
 }
 
 export function crearRutasEvidencias(opciones: OpcionesRutasEvidencias = {}): Hono<AppEnv> {
@@ -44,7 +49,9 @@ export function crearRutasEvidencias(opciones: OpcionesRutasEvidencias = {}): Ho
       if (anunciado > MAX_EVIDENCIA_BYTES) {
         throw new ErrorApi('EVIDENCIA_DEMASIADO_GRANDE');
       }
-      const ctx = contextoDesdeHono(c);
+      const peticion = contextoDesdeHono(c);
+      const ctx =
+        opciones.reloj === undefined ? peticion : { ...peticion, ahora: opciones.reloj() };
       const evidencia = await buscarEvidencia(ctx.db, c.req.valid('param').id);
       if (evidencia === null) {
         throw new ErrorApi('EVIDENCIA_DESCONOCIDA');

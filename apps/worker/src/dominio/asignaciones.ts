@@ -7,9 +7,10 @@
 //
 // Concurrencia: la PRIMERA sentencia de cambio (la principal) lleva una guarda que exige que las
 // asignaciones de la orden sigan exactamente como se leyeron y que todos los usuarios pedidos sigan
-// siendo supervisores activos. Las demás sentencias de cambio están condicionadas a que la
-// principal aplicó, y cada auditoría a que su asignación quedó con el estado y la hora de esta
-// petición. Si otro admin cambió algo entretanto, nada se escribe y responde 409 `CONFLICTO`.
+// siendo supervisores activos (con la misma marca de escritura leída: N1, un ABA no pasa). Cada
+// sentencia de cambio fija su PROPIA marca (ADR 0028, punto 5: tiene un predicado propio); las demás
+// se condicionan a la marca de la principal, y cada auditoría a la marca de su asignación. Si otro
+// admin cambió algo entretanto, nada se escribe y responde 409 `CONFLICTO`.
 // Las listas viajan como un único parámetro JSON (`json_each(?)`): nunca más de 100 parámetros
 // por sentencia.
 
@@ -19,7 +20,15 @@ import type {
   SupervisorAsignado,
   SupervisoresDeOrden,
 } from '@catmetal/shared';
-import { type CondicionSql, sentenciaAuditoriaCondicional } from '../auditoria/auditar';
+import {
+  type CondicionDeEscritura,
+  type CondicionSql,
+  MARCADOR_CONDICION,
+  nuevaMarca,
+  porMarca,
+  sentenciaAuditoriaCondicional,
+  sentenciaDependiente,
+} from '../auditoria/auditar';
 import { ErrorApi } from '../errores';
 import type { Contexto } from './contexto';
 import { buscarOrden } from './ordenes';
@@ -33,6 +42,8 @@ interface FilaAsignacion {
   created_at: string;
   updated_at: string;
   nombre: string;
+  /** Marca de la última escritura (interna, ADR 0028): nunca sale en la respuesta ni la auditoría. */
+  marca: string | null;
 }
 
 interface FilaUsuarioPedido {
@@ -48,6 +59,8 @@ interface Cambio {
   tipo: TipoCambio;
   antes: FilaAsignacion | null;
   despues: FilaAsignacion;
+  /** Marca que fija la sentencia de este cambio. */
+  marca: string;
 }
 
 const ACCION: Readonly<Record<TipoCambio, string>> = {
@@ -84,56 +97,64 @@ function porNombre(a: FilaAsignacion, b: FilaAsignacion): number {
   return a.user_id < b.user_id ? -1 : a.user_id > b.user_id ? 1 : 0;
 }
 
-/** La asignación quedó con el estado y la hora de esta petición. */
-function condicionAplicada(fila: FilaAsignacion): CondicionSql {
-  return {
-    sql: 'EXISTS (SELECT 1 FROM order_supervisors WHERE order_id = ? AND user_id = ? AND activo = ? AND updated_at = ?)',
-    parametros: [fila.order_id, fila.user_id, fila.activo, fila.updated_at],
-  };
+/** La asignación quedó con la marca que fijó la sentencia de este cambio (ADR 0028). */
+function condicionAplicada(cambio: Cambio): CondicionDeEscritura {
+  return porMarca(
+    'order_supervisors',
+    { order_id: cambio.despues.order_id, user_id: cambio.despues.user_id },
+    cambio.marca,
+  );
 }
 
-function sentenciaCambio(
-  db: D1Database,
-  cambio: Cambio,
-  condicion: CondicionSql,
-): D1PreparedStatement {
+/** SQL de un cambio (termina en `MARCADOR_CONDICION`) y sus parámetros, sin la condición. */
+function sqlCambio(cambio: Cambio): { sql: string; parametros: (string | number)[] } {
   const { despues } = cambio;
   switch (cambio.tipo) {
     case 'desactivar':
-      return db
-        .prepare(
-          `UPDATE order_supervisors SET activo = 0, updated_at = ?
-           WHERE order_id = ? AND user_id = ? AND activo = 1 AND ${condicion.sql}`,
-        )
-        .bind(despues.updated_at, despues.order_id, despues.user_id, ...condicion.parametros);
+      return {
+        sql: `UPDATE order_supervisors SET activo = 0, updated_at = ?, escritura_id = ?
+          WHERE order_id = ? AND user_id = ? AND activo = 1 AND ${MARCADOR_CONDICION}`,
+        parametros: [despues.updated_at, cambio.marca, despues.order_id, despues.user_id],
+      };
     case 'reactivar':
-      return db
-        .prepare(
-          `UPDATE order_supervisors SET activo = 1, asignado_por = ?, updated_at = ?
-           WHERE order_id = ? AND user_id = ? AND activo = 0 AND ${condicion.sql}`,
-        )
-        .bind(
+      return {
+        sql: `UPDATE order_supervisors SET activo = 1, asignado_por = ?, updated_at = ?, escritura_id = ?
+          WHERE order_id = ? AND user_id = ? AND activo = 0 AND ${MARCADOR_CONDICION}`,
+        parametros: [
           despues.asignado_por,
           despues.updated_at,
+          cambio.marca,
           despues.order_id,
           despues.user_id,
-          ...condicion.parametros,
-        );
+        ],
+      };
     case 'crear':
-      return db
-        .prepare(
-          `INSERT INTO order_supervisors (order_id, user_id, asignado_por, activo, created_at, updated_at)
-           SELECT ?, ?, ?, 1, ?, ? WHERE ${condicion.sql}`,
-        )
-        .bind(
+      return {
+        sql: `INSERT INTO order_supervisors
+            (order_id, user_id, asignado_por, activo, created_at, updated_at, escritura_id)
+          SELECT ?, ?, ?, 1, ?, ?, ? WHERE ${MARCADOR_CONDICION}`,
+        parametros: [
           despues.order_id,
           despues.user_id,
           despues.asignado_por,
           despues.created_at,
           despues.updated_at,
-          ...condicion.parametros,
-        );
+          cambio.marca,
+        ],
+      };
   }
+}
+
+/** Sentencia principal: el cambio guardado con lo que se leyó (su propio `WHERE`). */
+function sentenciaPrincipal(
+  db: D1Database,
+  cambio: Cambio,
+  guarda: CondicionSql,
+): D1PreparedStatement {
+  const { sql, parametros } = sqlCambio(cambio);
+  return db
+    .prepare(sql.replace(MARCADOR_CONDICION, () => guarda.sql))
+    .bind(...parametros, ...guarda.parametros);
 }
 
 /**
@@ -146,12 +167,15 @@ function guardaEstadoLeido(
   listaJson: string,
   pedidos: number,
 ): CondicionSql {
-  const estadoLeido = JSON.stringify(actuales.map((a) => ({ u: a.user_id, a: a.activo })));
+  const estadoLeido = JSON.stringify(
+    actuales.map((a) => ({ u: a.user_id, a: a.activo, m: a.marca })),
+  );
   return {
     sql: `(SELECT count(*) FROM order_supervisors WHERE order_id = ?) = ?
       AND (SELECT count(*) FROM order_supervisors AS s
            JOIN json_each(?) AS j
              ON s.user_id = json_extract(j.value, '$.u') AND s.activo = json_extract(j.value, '$.a')
+               AND s.escritura_id IS json_extract(j.value, '$.m')
            WHERE s.order_id = ?) = ?
       AND (SELECT count(*) FROM users
            WHERE rol = 'supervisor' AND activo = 1 AND id IN (SELECT value FROM json_each(?))) = ?`,
@@ -184,7 +208,8 @@ export async function reemplazarSupervisores(
       .bind(listaJson),
     ctx.db
       .prepare(
-        `SELECT s.order_id, s.user_id, s.asignado_por, s.activo, s.created_at, s.updated_at, u.nombre
+        `SELECT s.order_id, s.user_id, s.asignado_por, s.activo, s.created_at, s.updated_at, u.nombre,
+           s.escritura_id AS marca
          FROM order_supervisors AS s JOIN users AS u ON u.id = s.user_id
          WHERE s.order_id = ?
          ORDER BY s.user_id`,
@@ -221,6 +246,7 @@ export async function reemplazarSupervisores(
         tipo: 'desactivar',
         antes: actual,
         despues: { ...actual, activo: 0, updated_at: ctx.ahora },
+        marca: nuevaMarca(),
       });
     }
   }
@@ -238,13 +264,16 @@ export async function reemplazarSupervisores(
           created_at: ctx.ahora,
           updated_at: ctx.ahora,
           nombre: usuarioPorId.get(userId)?.nombre ?? '',
+          marca: null,
         },
+        marca: nuevaMarca(),
       });
     } else if (actual.activo === 0) {
       cambios.push({
         tipo: 'reactivar',
         antes: actual,
         despues: { ...actual, activo: 1, asignado_por: ctx.actor.id, updated_at: ctx.ahora },
+        marca: nuevaMarca(),
       });
     }
   }
@@ -270,10 +299,11 @@ export async function reemplazarSupervisores(
     return planSinCambios(respuesta);
   }
   const guarda = guardaEstadoLeido(orderId, actuales, listaJson, entrada.supervisores.length);
-  const principalAplicada = condicionAplicada(principal.despues);
-  const sentencias: D1PreparedStatement[] = [sentenciaCambio(ctx.db, principal, guarda)];
+  const principalAplicada = condicionAplicada(principal);
+  const sentencias: D1PreparedStatement[] = [sentenciaPrincipal(ctx.db, principal, guarda)];
   for (const cambio of resto) {
-    sentencias.push(sentenciaCambio(ctx.db, cambio, principalAplicada));
+    const { sql, parametros } = sqlCambio(cambio);
+    sentencias.push(sentenciaDependiente(ctx.db, sql, parametros, principalAplicada));
   }
   for (const cambio of cambios) {
     sentencias.push(
@@ -291,9 +321,14 @@ export async function reemplazarSupervisores(
           server_at: ctx.ahora,
           alerta_reloj: ctx.alertaReloj,
         },
-        condicionAplicada(cambio.despues),
+        condicionAplicada(cambio),
       ),
     );
   }
-  return { sentencias, principal: { indice: 0, cambiosEsperados: 1 }, respuesta };
+  return {
+    sentencias,
+    principal: { indice: 0, cambiosEsperados: 1 },
+    aplicada: principalAplicada,
+    respuesta,
+  };
 }

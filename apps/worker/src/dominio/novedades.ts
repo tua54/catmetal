@@ -6,7 +6,10 @@
 // - Se acepta sobre un consumo en cualquier estado (no se pierden datos de planta) y puede haber
 //   varias por consumo.
 // - En el mismo batch: la novedad, las evidencias declaradas (`subido = 0`, la foto se sube después
-//   con `PUT /evidences/:id`) y una fila de auditoría por cada entidad, todas con `order_id`.
+//   con `PUT /evidences/:id`) y una fila de auditoría por cada entidad, todas con `order_id`. Todo
+//   lo que sigue al INSERT de la novedad se condiciona a la marca de escritura que ese INSERT fija
+//   (ADR 0028; el id lo manda el cliente y no sirve de marca). Las evidencias son hijas con el mismo
+//   WHERE que la novedad: se encadenan a su marca (punto 5).
 
 import {
   type CrearNovedad,
@@ -15,7 +18,13 @@ import {
   type NovedadConEvidencias,
   tienePermiso,
 } from '@catmetal/shared';
-import { type CondicionSql, sentenciaAuditoriaCondicional } from '../auditoria/auditar';
+import {
+  MARCADOR_CONDICION,
+  nuevaMarca,
+  porMarca,
+  sentenciaAuditoriaCondicional,
+  sentenciaDependiente,
+} from '../auditoria/auditar';
 import { ErrorApi } from '../errores';
 import type { Contexto } from './contexto';
 import { buscarConsumo } from './consumos';
@@ -80,11 +89,9 @@ export async function registrarNovedad(
     created_at: ctx.ahora,
     updated_at: ctx.ahora,
   }));
-  // La novedad es "nuestra" si existe con este id, autor y hora de recepción.
-  const aplicada: CondicionSql = {
-    sql: 'EXISTS (SELECT 1 FROM incidents WHERE id = ? AND registrado_por = ? AND server_received_at = ?)',
-    parametros: [novedad.id, ctx.actor.id, ctx.ahora],
-  };
+  // La novedad es la de este batch si lleva su marca de escritura.
+  const marca = nuevaMarca();
+  const aplicada = porMarca('incidents', { id: novedad.id }, marca);
   const auditar = (
     entidad: 'incidents' | 'evidences',
     entidadId: string,
@@ -112,8 +119,8 @@ export async function registrarNovedad(
     ctx.db
       .prepare(
         `INSERT INTO incidents (id, consumption_id, tipo, descripcion, registrado_por,
-           client_created_at, server_received_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           client_created_at, server_received_at, created_at, updated_at, escritura_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         novedad.id,
@@ -125,18 +132,18 @@ export async function registrarNovedad(
         novedad.server_received_at,
         ctx.ahora,
         ctx.ahora,
+        marca,
       ),
     auditar('incidents', novedad.id, 'novedad.crear', { ...novedad }),
   ];
   for (const evidencia of evidencias) {
     sentencias.push(
-      ctx.db
-        .prepare(
-          `INSERT INTO evidences (id, incident_id, storage_key, mime, tamano_bytes, sha256, subido,
-             subido_at, created_at, updated_at)
-           SELECT ?, ?, ?, ?, ?, ?, 0, NULL, ?, ? WHERE ${aplicada.sql}`,
-        )
-        .bind(
+      sentenciaDependiente(
+        ctx.db,
+        `INSERT INTO evidences (id, incident_id, storage_key, mime, tamano_bytes, sha256, subido,
+           subido_at, created_at, updated_at)
+         SELECT ?, ?, ?, ?, ?, ?, 0, NULL, ?, ? WHERE ${MARCADOR_CONDICION}`,
+        [
           evidencia.id,
           evidencia.incident_id,
           claveEvidencia(consumo.order_id, evidencia.id),
@@ -145,14 +152,16 @@ export async function registrarNovedad(
           evidencia.sha256,
           ctx.ahora,
           ctx.ahora,
-          ...aplicada.parametros,
-        ),
+        ],
+        aplicada,
+      ),
       auditar('evidences', evidencia.id, 'evidencia.crear', { ...evidencia }),
     );
   }
   return {
     sentencias,
     principal: { indice: 0, cambiosEsperados: 1 },
+    aplicada,
     respuesta: { ...novedad, evidencias },
   };
 }

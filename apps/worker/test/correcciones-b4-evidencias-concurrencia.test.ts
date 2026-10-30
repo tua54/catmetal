@@ -53,11 +53,14 @@ function compuerta(): { abrir: () => void; abierta: Promise<void> } {
 }
 
 /** Sub-app de evidencias con los middlewares reales y la confirmación en D1 inyectada. */
-function appCon(confirmarSubida: OpcionesRutasEvidencias['confirmarSubida']): Hono<AppEnv> {
+function appCon(
+  confirmarSubida: OpcionesRutasEvidencias['confirmarSubida'],
+  reloj?: OpcionesRutasEvidencias['reloj'],
+): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
   app.onError(manejarError);
   app.notFound(manejarNoEncontrado);
-  app.route('/api/v1', crearRutasEvidencias({ confirmarSubida }));
+  app.route('/api/v1', crearRutasEvidencias({ confirmarSubida, reloj }));
   return app;
 }
 
@@ -227,6 +230,41 @@ describe('B4: subidas concurrentes de la misma evidencia', () => {
     const { code } = await distinta.json<{ code: string }>();
     expect(['VALIDACION', 'EVIDENCIA_YA_SUBIDA']).toContain(code);
 
+    expect(await estadoFinal(foto.id)).toEqual({
+      subido: 1,
+      sha256: foto.sha256,
+      sha256EnR2: foto.sha256,
+    });
+    expect(await accionesSubida(antes, foto.id)).toBe(1);
+  });
+  // A1 (docs/correcciones-v1.2.md): la prueba anterior depende del azar (que dos subidas calculen
+  // el mismo milisegundo). Esta lo fuerza: dos subidas por la ruta real, con el MISMO `ahora`,
+  // ambas detenidas después de escribir en R2 y antes de confirmar (las dos leyeron `subido = 0`).
+  // Se sueltan juntas y D1 las serializa: una confirma y la otra no aplica.
+  it('dos confirmaciones con el mismo ahora (determinista): una sola evidencia.subida', async () => {
+    const foto = await archivo('image/jpeg', jpeg(4096));
+    await declarar(foto);
+    const antes = await ultimoSeq();
+    const ahora = new Date(Date.now() + 120_000).toISOString();
+
+    const todas = compuerta();
+    let llegadas = 0;
+    const confirmar = async (db: D1Database, plan: PlanDeEscritura<Evidencia>) => {
+      llegadas += 1;
+      if (llegadas === 2) {
+        todas.abrir();
+      }
+      await todas.abierta;
+      return ejecutarPlan(db, plan);
+    };
+    const app = appCon(confirmar, () => ahora);
+    const respuestas = await Promise.all([subirCon(app, foto), subirCon(app, foto)]);
+
+    expect(llegadas).toBe(2);
+    expect(respuestas.map((r) => r.status)).toEqual([200, 200]);
+    for (const r of respuestas) {
+      expect(await r.json()).toMatchObject({ id: foto.id, subido: true, subido_at: ahora });
+    }
     expect(await estadoFinal(foto.id)).toEqual({
       subido: 1,
       sha256: foto.sha256,

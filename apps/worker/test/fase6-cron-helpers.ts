@@ -79,13 +79,17 @@ export async function leerTabla(fecha: string, entrada: ArchivoBackup): Promise<
     .map((linea) => JSON.parse(linea) as Fila);
 }
 
+/**
+ * Filas de la tabla en la base, con las columnas que exporta el backup (`columnas`): las
+ * `columnasTecnicas` (la marca de escritura, ADR 0028) no se exportan a propósito.
+ */
 export async function filasDeTabla(tabla: string): Promise<Fila[]> {
   const definicion = TABLAS_BACKUP.find((t) => t.nombre === tabla);
   if (definicion === undefined) {
     throw new Error(`Tabla desconocida: ${tabla}`);
   }
   const { results } = await env.DB.prepare(
-    `SELECT * FROM ${tabla} ORDER BY ${definicion.pk.join(', ')}`,
+    `SELECT ${definicion.columnas.join(', ')} FROM ${tabla} ORDER BY ${definicion.pk.join(', ')}`,
   ).all<Fila>();
   return results;
 }

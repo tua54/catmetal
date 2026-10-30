@@ -64,6 +64,13 @@
       "when": 1793373398430,
       "tag": "0008_settings_insert_validos",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1793396009474,
+      "tag": "0009_marca_de_escritura",
+      "breakpoints": true
     }
   ]
 }

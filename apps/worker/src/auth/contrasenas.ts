@@ -8,7 +8,7 @@
 // correcto (B6, ADR 0007): ver `necesitaRehash` y `sentenciasRehash`.
 
 import { PBKDF2_ITERACIONES_SERVIDOR } from '@catmetal/shared';
-import { sentenciaAuditoriaCondicional } from '../auditoria/auditar';
+import { nuevaMarca, porMarca, sentenciaAuditoriaCondicional } from '../auditoria/auditar';
 import { aBase64, bytesAleatorios, deBase64 } from './codificacion';
 
 const PREFIJO = 'pbkdf2-sha256';
@@ -125,22 +125,23 @@ export interface DatosRehash {
  * 1. UPDATE condicional (`password_hash = anterior`): si entre la verificación y el batch otro
  *    proceso cambió la contraseña (un admin la restableció u otro login ya la recalculó), no se
  *    pisa ese cambio;
- * 2. auditoría condicionada a que el hash guardado sea el NUEVO, es decir, a que el UPDATE de este
- *    batch lo escribió (la sal es aleatoria: ningún otro proceso produce el mismo valor). La fila
- *    lleva solo `id` y `updated_at`: la lista blanca de `users` no incluye `password_hash` y
- *    aquí no se le pasa; los hashes solo viajan como parámetros de la condición.
+ * 2. auditoría condicionada a la marca de escritura que fija ese UPDATE (ADR 0028; antes era el
+ *    hash nuevo: un VALOR). La fila lleva solo `id` y `updated_at`: la lista blanca de `users`
+ *    no incluye `password_hash` y aquí no se le pasa.
+ * Debe ir ANTES del desbloqueo heredado del mismo login, que reescribe la marca (regla de orden).
  */
 export function sentenciasRehash(
   db: D1Database,
   datos: DatosRehash,
   ahora: string,
 ): D1PreparedStatement[] {
+  const marca = nuevaMarca();
   return [
     db
       .prepare(
-        'UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ? AND password_hash = ?',
+        'UPDATE users SET password_hash = ?, updated_at = ?, escritura_id = ? WHERE id = ? AND password_hash = ?',
       )
-      .bind(datos.nuevo, ahora, datos.userId, datos.anterior),
+      .bind(datos.nuevo, ahora, marca, datos.userId, datos.anterior),
     sentenciaAuditoriaCondicional(
       db,
       {
@@ -153,10 +154,7 @@ export function sentenciasRehash(
         server_at: ahora,
         alerta_reloj: datos.alertaReloj,
       },
-      {
-        sql: 'EXISTS (SELECT 1 FROM users WHERE id = ? AND password_hash = ?)',
-        parametros: [datos.userId, datos.nuevo],
-      },
+      porMarca('users', { id: datos.userId }, marca),
     ),
   ];
 }

@@ -52,6 +52,14 @@ Los comandos exactos, en orden, están en `docs/despliegue.md` (secciones 2 a 6)
 - **D1 remota (M3/M4)**: en un ensayo de restauración en staging, verificar que exista `octet_length`, el límite de 100 KB por sentencia, el tope de 5 términos por `UNION ALL`, si `wrangler d1 execute --file` es atómico y que `PRAGMA foreign_key_check` funcione. Los resultados van a `docs/notas-plataforma.md`.
 - **Rate limit de `/sync/push` (ADR 0020, D.4)**: evaluar un binding de Rate Limiting por usuario para el push.
 
+## Verificaciones en staging (correcciones v1.2)
+
+- **Marca de escritura (A1, ADR 0028)**:
+  1. Aplicar `migrations/0009_marca_de_escritura.sql` en la D1 de staging (`pnpm` / `wrangler d1 migrations apply` del entorno, sección 4 de `docs/despliegue.md`) y comprobar con `PRAGMA table_info(<tabla>)` que las 11 tablas tienen `escritura_id` y que `sqlite_master` conserva todos los triggers.
+  2. Repetir contra staging la prueba de B4: 5 subidas simultáneas de la misma foto deben dejar **una** fila `evidencia.subida`. Y dos ediciones concurrentes del mismo consumo con la misma `version`: una responde 200, otra 409, y queda **una** fila `consumo.editar`.
+  3. Ejecutar las consultas de detección de `docs/despliegue.md` §9.5 sobre la base de staging (creada con la v1.0/v1.1) y registrar el resultado.
+  4. Confirmar que los batches de D1 remota son atómicos y serializables (premisa de las ADR 0010 y 0028), con el punto 2.
+
 ## Seguridad (revisión de las correcciones v1.1)
 
 - **S-08 (anterior a la v1.1)**: `mp_refresh` se lee con `getCookie` (una sola aparición) y solo se borra la del host. Un subdominio hermano de `catmetal.com` podría plantar otra con `Domain=` para forzar un cierre de sesión o fijar una sesión. Mitigación recomendada: no delegar subdominios de `catmetal.com` a terceros, o servir la app desde un dominio propio. Si no, aplicar la misma lectura robusta de `mp_dispositivo` (ADR 0018) a `mp_refresh` en una versión futura.

@@ -5,7 +5,16 @@
 // refresh concurrentes con el mismo token nunca dejan dos sucesores vigentes.
 
 import { ahoraIso, REFRESH_TOKEN_TTL_S, uuidv7, VENTANA_GRACIA_REFRESH_MS } from '@catmetal/shared';
-import { sentenciaAuditoria, sentenciaAuditoriaCondicional } from '../auditoria/auditar';
+import {
+  type CondicionDeEscritura,
+  MARCADOR_CONDICION,
+  nuevaMarca,
+  porMarca,
+  porPkNueva,
+  sentenciaAuditoria,
+  sentenciaAuditoriaCondicional,
+  sentenciaDependiente,
+} from '../auditoria/auditar';
 import {
   generarRefreshToken,
   hashRefreshToken,
@@ -93,7 +102,7 @@ export const ACCION_REVOCADA_POR_OTRO_INICIO = 'sesion.revocada_por_otro_inicio'
  */
 export const MAX_FAMILIAS_AJENAS_POR_INICIO = 50;
 
-interface FamiliaAjena {
+export interface FamiliaAjena {
   familia_id: string;
   user_id: string;
   device_id: string;
@@ -128,49 +137,99 @@ async function familiasAjenasEnInstalacion(
 }
 
 /**
- * Por cada familia ajena: su auditoría y su revocación, para el MISMO batch del login. La auditoría
- * va ANTES del UPDATE y está condicionada a que la familia siga teniendo tokens vigentes de ese
- * usuario: si entre la lectura y el batch la familia ya se cerró (logout, rotación por reutilización),
- * no se audita una revocación que no ocurrió. La auditoría solo lleva ids (sin datos personales).
+ * Por cada familia ajena: su revocación y su auditoría, para el MISMO batch del login. El UPDATE
+ * fija una marca de escritura propia de esa familia y la auditoría va DESPUÉS, condicionada a ella
+ * (ADR 0028): si entre la lectura y el batch la familia ya se cerró (logout, rotación por
+ * reutilización), el UPDATE no cambia filas y no se audita una revocación que no ocurrió. La
+ * auditoría solo lleva ids (sin datos personales).
  */
-function sentenciasRevocarAjenas(
+export function sentenciasRevocarAjenas(
   db: D1Database,
   familias: readonly FamiliaAjena[],
   actor: { userId: string; deviceId: string; alertaReloj: boolean },
   ahora: string,
 ): D1PreparedStatement[] {
-  return familias.flatMap((familia) => [
+  return familias.flatMap((familia) => {
+    const marca = nuevaMarca();
+    return [
+      db
+        .prepare(
+          `UPDATE refresh_tokens SET revocado_at = ?, updated_at = ?, escritura_id = ?
+           WHERE familia_id = ? AND user_id = ? AND revocado_at IS NULL`,
+        )
+        .bind(ahora, ahora, marca, familia.familia_id, familia.user_id),
+      sentenciaAuditoriaCondicional(
+        db,
+        {
+          entidad: 'refresh_tokens',
+          entidad_id: familia.token_id,
+          accion: ACCION_REVOCADA_POR_OTRO_INICIO,
+          actor_id: actor.userId,
+          device_id: actor.deviceId,
+          despues: {
+            id: familia.token_id,
+            user_id: familia.user_id,
+            device_id: familia.device_id,
+            familia_id: familia.familia_id,
+            revocado_at: ahora,
+          },
+          server_at: ahora,
+          alerta_reloj: actor.alertaReloj,
+        },
+        porMarca(
+          'refresh_tokens',
+          { familia_id: familia.familia_id, user_id: familia.user_id },
+          marca,
+        ),
+      ),
+    ];
+  });
+}
+
+/**
+ * Desbloqueo de las columnas heredadas de la v1 en el login correcto (ADR 0028, punto 4):
+ * 1. si había un bloqueo, un UPDATE propio lo quita y fija la marca de escritura;
+ * 2. la auditoría `usuario.desbloqueado`, condicionada a esa marca;
+ * 3. `intentos_fallidos` sin bloqueo vuelve a 0 en otro UPDATE, sin auditar (como antes).
+ * Debe ir DESPUÉS de cualquier otra escritura auditada de `users` del mismo batch (rehash, B6):
+ * reescribe la marca de la fila (regla de orden).
+ */
+export function sentenciasDesbloqueoHeredado(
+  db: D1Database,
+  userId: string,
+  deviceId: string,
+  alertaReloj: boolean,
+  ahora: string,
+): D1PreparedStatement[] {
+  const marca = nuevaMarca();
+  return [
+    db
+      .prepare(
+        `UPDATE users SET intentos_fallidos = 0, bloqueado_hasta = NULL, updated_at = ?,
+           escritura_id = ?
+         WHERE id = ? AND bloqueado_hasta IS NOT NULL`,
+      )
+      .bind(ahora, marca, userId),
     sentenciaAuditoriaCondicional(
       db,
       {
-        entidad: 'refresh_tokens',
-        entidad_id: familia.token_id,
-        accion: ACCION_REVOCADA_POR_OTRO_INICIO,
-        actor_id: actor.userId,
-        device_id: actor.deviceId,
-        despues: {
-          id: familia.token_id,
-          user_id: familia.user_id,
-          device_id: familia.device_id,
-          familia_id: familia.familia_id,
-          revocado_at: ahora,
-        },
+        entidad: 'users',
+        entidad_id: userId,
+        accion: 'usuario.desbloqueado',
+        actor_id: userId,
+        device_id: deviceId,
+        despues: { id: userId, intentos_fallidos: 0, bloqueado_hasta: null },
         server_at: ahora,
-        alerta_reloj: actor.alertaReloj,
+        alerta_reloj: alertaReloj,
       },
-      {
-        sql: `EXISTS (SELECT 1 FROM refresh_tokens
-          WHERE familia_id = ? AND user_id = ? AND revocado_at IS NULL)`,
-        parametros: [familia.familia_id, familia.user_id],
-      },
+      porMarca('users', { id: userId }, marca),
     ),
     db
       .prepare(
-        `UPDATE refresh_tokens SET revocado_at = ?, updated_at = ?
-         WHERE familia_id = ? AND user_id = ? AND revocado_at IS NULL`,
+        'UPDATE users SET intentos_fallidos = 0, updated_at = ? WHERE id = ? AND intentos_fallidos <> 0',
       )
-      .bind(ahora, ahora, familia.familia_id, familia.user_id),
-  ]);
+      .bind(ahora, userId),
+  ];
 }
 
 /**
@@ -262,31 +321,9 @@ export async function iniciarSesion(
 
   // Columnas de la v1 (`users.intentos_fallidos`/`bloqueado_hasta`, ADR 0018 punto 6): ya no
   // bloquean el login, pero el login correcto las deja en 0/NULL para que no quede ningún bloqueo
-  // heredado. Si había un bloqueo se audita el desbloqueo ANTES del UPDATE (condición previa).
+  // heredado.
   sentencias.push(
-    sentenciaAuditoriaCondicional(
-      db,
-      {
-        entidad: 'users',
-        entidad_id: datos.userId,
-        accion: 'usuario.desbloqueado',
-        actor_id: datos.userId,
-        device_id: datos.deviceId,
-        despues: { id: datos.userId, intentos_fallidos: 0, bloqueado_hasta: null },
-        server_at: ahora,
-        alerta_reloj: alertaReloj,
-      },
-      {
-        sql: 'EXISTS (SELECT 1 FROM users WHERE id = ? AND bloqueado_hasta IS NOT NULL)',
-        parametros: [datos.userId],
-      },
-    ),
-    db
-      .prepare(
-        `UPDATE users SET intentos_fallidos = 0, bloqueado_hasta = NULL, updated_at = ?
-         WHERE id = ? AND (intentos_fallidos <> 0 OR bloqueado_hasta IS NOT NULL)`,
-      )
-      .bind(ahora, datos.userId),
+    ...sentenciasDesbloqueoHeredado(db, datos.userId, datos.deviceId, alertaReloj, ahora),
   );
 
   // F4-06: en el mismo batch, después de registrar el dispositivo (la auditoría lo referencia).
@@ -373,10 +410,8 @@ async function emitirSucesor(
   if (expira <= ahora) {
     return null;
   }
-  const existeNuevo = {
-    sql: 'EXISTS (SELECT 1 FROM refresh_tokens WHERE id = ?)',
-    parametros: [nuevoId],
-  };
+  // El id nuevo lo genera el servidor en esta misma sentencia: es la marca (ADR 0028).
+  const existeNuevo = porPkNueva('refresh_tokens', nuevoId);
 
   const [insercion] = await db.batch([
     db
@@ -397,12 +432,13 @@ async function emitirSucesor(
         ahora,
         ...condicionOrigen.parametros,
       ),
-    db
-      .prepare(
-        `UPDATE refresh_tokens SET revocado_at = ?, reemplazado_por = ?, updated_at = ?
-         WHERE id = ? AND revocado_at IS NULL AND ${existeNuevo.sql}`,
-      )
-      .bind(ahora, nuevoId, ahora, origen.id, ...existeNuevo.parametros),
+    sentenciaDependiente(
+      db,
+      `UPDATE refresh_tokens SET revocado_at = ?, reemplazado_por = ?, updated_at = ?
+       WHERE id = ? AND revocado_at IS NULL AND ${MARCADOR_CONDICION}`,
+      [ahora, nuevoId, ahora, origen.id],
+      existeNuevo,
+    ),
     sentenciaAuditoriaCondicional(
       db,
       {
@@ -497,23 +533,25 @@ export async function reintentarDentroDeGracia(
 }
 
 /**
- * Revoca todos los tokens vigentes de una familia y audita la acción, solo si revocó alguno
- * (condición: hay tokens de la familia revocados en este mismo instante).
+ * Revoca todos los tokens vigentes de una familia y audita la acción, solo si ESTE batch revocó
+ * alguno (condición: la marca de escritura que fija el UPDATE, ADR 0028; nunca la hora, que otra
+ * revocación concurrente puede compartir).
  */
 export async function revocarFamilia(
   db: D1Database,
   familia: { familiaId: string; userId: string; deviceId: string | null; tokenId: string },
   accion: 'sesion.cierre' | 'sesion.reutilizacion',
   alertaReloj = false,
+  ahora: string = ahoraIso(),
 ): Promise<void> {
-  const ahora = ahoraIso();
+  const marca = nuevaMarca();
   await db.batch([
     db
       .prepare(
-        `UPDATE refresh_tokens SET revocado_at = ?, updated_at = ?
+        `UPDATE refresh_tokens SET revocado_at = ?, updated_at = ?, escritura_id = ?
          WHERE familia_id = ? AND user_id = ? AND revocado_at IS NULL`,
       )
-      .bind(ahora, ahora, familia.familiaId, familia.userId),
+      .bind(ahora, ahora, marca, familia.familiaId, familia.userId),
     sentenciaAuditoriaCondicional(
       db,
       {
@@ -526,25 +564,26 @@ export async function revocarFamilia(
         server_at: ahora,
         alerta_reloj: alertaReloj,
       },
-      {
-        sql: 'EXISTS (SELECT 1 FROM refresh_tokens WHERE familia_id = ? AND revocado_at = ?)',
-        parametros: [familia.familiaId, ahora],
-      },
+      porMarca('refresh_tokens', { familia_id: familia.familiaId, user_id: familia.userId }, marca),
     ),
   ]);
 }
 
-/** Sentencia que revoca todas las familias de un usuario (cambio de rol, desactivación, contraseña). */
+/**
+ * Sentencia DEPENDIENTE que revoca todas las familias de un usuario (cambio de rol, desactivación,
+ * contraseña), solo si la escritura de la que depende aplicó en este batch (`condicion`).
+ */
 export function sentenciaRevocarTodas(
   db: D1Database,
   userId: string,
   ahora: string,
-  condicion: { sql: string; parametros: (string | number)[] },
+  condicion: CondicionDeEscritura,
 ): D1PreparedStatement {
-  return db
-    .prepare(
-      `UPDATE refresh_tokens SET revocado_at = ?, updated_at = ?
-       WHERE user_id = ? AND revocado_at IS NULL AND ${condicion.sql}`,
-    )
-    .bind(ahora, ahora, userId, ...condicion.parametros);
+  return sentenciaDependiente(
+    db,
+    `UPDATE refresh_tokens SET revocado_at = ?, updated_at = ?
+     WHERE user_id = ? AND revocado_at IS NULL AND ${MARCADOR_CONDICION}`,
+    [ahora, ahora, userId],
+    condicion,
+  );
 }

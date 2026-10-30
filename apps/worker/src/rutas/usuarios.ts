@@ -4,6 +4,7 @@
 import {
   ahoraIso,
   crearUsuarioSchema,
+  type EditarUsuario,
   editarUsuarioSchema,
   type ListaUsuarios,
   type Rol,
@@ -12,7 +13,13 @@ import {
 } from '@catmetal/shared';
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { sentenciaAuditoria, sentenciaAuditoriaCondicional } from '../auditoria/auditar';
+import {
+  nuevaMarca,
+  porAuditoria,
+  porMarca,
+  sentenciaAuditoria,
+  sentenciaAuditoriaCondicional,
+} from '../auditoria/auditar';
 import { hashearContrasena } from '../auth/contrasenas';
 import { sentenciasReinicioAdmin } from '../auth/cupos';
 import { sentenciaRevocarTodas } from '../auth/sesiones';
@@ -28,7 +35,7 @@ const LIMITE_MAXIMO = 100;
 const COLUMNAS_USUARIO =
   'id, nombre, email, rol, activo, intentos_fallidos, bloqueado_hasta, created_at, updated_at';
 
-interface FilaUsuario {
+export interface FilaUsuario {
   id: string;
   nombre: string;
   email: string;
@@ -57,11 +64,27 @@ const listarQuerySchema = z.object({
 
 const idParamSchema = z.object({ id: z.string().min(1).max(64) });
 
-async function buscarUsuario(db: D1Database, id: string): Promise<FilaUsuario | null> {
-  return db
-    .prepare(`SELECT ${COLUMNAS_USUARIO} FROM users WHERE id = ?`)
+export async function buscarUsuario(db: D1Database, id: string): Promise<FilaUsuario | null> {
+  return (await buscarUsuarioConMarca(db, id))?.fila ?? null;
+}
+
+/**
+ * El usuario y la marca de su última escritura auditada (ADR 0028). La marca es interna: va aparte,
+ * nunca en `FilaUsuario` (así no puede salir por la API ni por la auditoría).
+ */
+export async function buscarUsuarioConMarca(
+  db: D1Database,
+  id: string,
+): Promise<{ fila: FilaUsuario; marca: string | null } | null> {
+  const leida = await db
+    .prepare(`SELECT ${COLUMNAS_USUARIO}, escritura_id FROM users WHERE id = ?`)
     .bind(id)
-    .first<FilaUsuario>();
+    .first<FilaUsuario & { escritura_id: string | null }>();
+  if (leida === null) {
+    return null;
+  }
+  const { escritura_id: marca, ...fila } = leida;
+  return { fila, marca };
 }
 
 function esConflictoDeEmail(error: unknown): boolean {
@@ -140,139 +163,173 @@ export function crearRutasUsuarios(): Hono<AppEnv> {
       const datos = c.req.valid('json');
       const sesion = c.get('sesion');
       const db = c.env.DB;
-      const actual = await buscarUsuario(db, id);
-      if (actual === null) {
+      const leido = await buscarUsuarioConMarca(db, id);
+      if (leido === null) {
         throw new ErrorApi('NO_ENCONTRADO');
       }
+      const actual = leido.fila;
 
-      // Marca estrictamente posterior a la leída: así `updated_at = ahora` distingue esta escritura.
+      // Hora estrictamente posterior a la leída: `updated_at` crece con cada edición del admin.
       const ahora = marcaPosterior(actual.updated_at);
-      // ADR 0019: una sola alerta de reloj para todas las filas de auditoría de la edición.
-      const alertaReloj = alertaRelojDePeticion(c, ahora);
-      const auditoriaId = uuidv7();
-      const desbloquear = datos.desbloquear === true;
-      const activoNuevo = datos.activo === undefined ? null : datos.activo ? 1 : 0;
-      const nuevo: FilaUsuario = {
-        ...actual,
-        nombre: datos.nombre ?? actual.nombre,
-        rol: datos.rol ?? actual.rol,
-        activo: activoNuevo ?? actual.activo,
-        intentos_fallidos: desbloquear ? 0 : actual.intentos_fallidos,
-        bloqueado_hasta: desbloquear ? null : actual.bloqueado_hasta,
-        updated_at: ahora,
-      };
-      const quitaAdmin =
-        actual.rol === 'admin' &&
-        actual.activo === 1 &&
-        (nuevo.rol !== 'admin' || nuevo.activo !== 1);
-      const revocaSesiones =
-        nuevo.rol !== actual.rol ||
-        (actual.activo === 1 && nuevo.activo === 0) ||
-        datos.password !== undefined;
       const passwordHash =
         datos.password === undefined ? null : await hashearContrasena(datos.password);
+      const plan = planEditarUsuario(db, {
+        actual,
+        marcaLeida: leido.marca,
+        datos,
+        actor: { userId: sesion.userId, deviceId: sesion.deviceId },
+        ahora,
+        // ADR 0019: una sola alerta de reloj para todas las filas de auditoría de la edición.
+        alertaReloj: alertaRelojDePeticion(c, ahora),
+        passwordHash,
+      });
 
-      // H-03: solo se escriben los campos enviados (COALESCE/CASE sobre la fila actual) y el
-      // UPDATE exige que `rol`, `activo` y `updated_at` sigan como se leyeron. Así una edición
-      // concurrente nunca reescribe con valores viejos lo que otro admin cambió (reactivar a un
-      // desactivado, borrar un bloqueo), y las decisiones derivadas de lo leído (revocar sesiones,
-      // último admin, `antes` de la auditoría) siguen siendo ciertas al escribir.
-      // `intentos_fallidos`/`bloqueado_hasta` solo cambian con `desbloquear`.
-      // Guardia atómica del último admin (ADR 0008 punto 9): si quita un admin activo, debe quedar
-      // otro admin activo. Las demás sentencias dependen de que el UPDATE haya aplicado.
-      const guardia = quitaAdmin
-        ? `EXISTS (SELECT 1 FROM users AS otro WHERE otro.rol = 'admin' AND otro.activo = 1 AND otro.id <> ?)`
-        : '1 = 1';
-      const parametrosGuardia = quitaAdmin ? [id] : [];
-      // Este UPDATE aplicó: la fila lleva `updated_at = ahora` y ninguna otra edición del mismo
-      // milisegundo auditó antes (si dos PATCH concurrentes calculan el mismo `ahora`, solo el que
-      // escribió encuentra la fila sin auditoría). La revocación depende de ESTA fila de auditoría.
-      const aplicado = {
-        sql: `EXISTS (SELECT 1 FROM users WHERE id = ? AND updated_at = ?)
-          AND NOT EXISTS (SELECT 1 FROM audit_log WHERE entidad = 'users' AND entidad_id = ?
-            AND accion = 'usuario.editar' AND server_at = ?)`,
-        parametros: [id, ahora, id, ahora],
-      };
-      const auditado = {
-        sql: 'EXISTS (SELECT 1 FROM audit_log WHERE id = ?)',
-        parametros: [auditoriaId],
-      };
-
-      const sentencias: D1PreparedStatement[] = [
-        db
-          .prepare(
-            `UPDATE users SET
-               nombre = COALESCE(?, nombre),
-               rol = COALESCE(?, rol),
-               activo = COALESCE(?, activo),
-               intentos_fallidos = CASE WHEN ? = 1 THEN 0 ELSE intentos_fallidos END,
-               bloqueado_hasta = CASE WHEN ? = 1 THEN NULL ELSE bloqueado_hasta END,
-               password_hash = COALESCE(?, password_hash),
-               updated_at = ?
-             WHERE id = ? AND rol = ? AND activo = ? AND updated_at = ? AND ${guardia}`,
-          )
-          .bind(
-            datos.nombre ?? null,
-            datos.rol ?? null,
-            activoNuevo,
-            desbloquear ? 1 : 0,
-            desbloquear ? 1 : 0,
-            passwordHash,
-            ahora,
-            id,
-            actual.rol,
-            actual.activo,
-            actual.updated_at,
-            ...parametrosGuardia,
-          ),
-      ];
-      sentencias.push(
-        sentenciaAuditoriaCondicional(
-          db,
-          {
-            id: auditoriaId,
-            entidad: 'users',
-            entidad_id: id,
-            accion: 'usuario.editar',
-            actor_id: sesion.userId,
-            device_id: sesion.deviceId,
-            antes: { ...actual },
-            despues: {
-              ...nuevo,
-              ...(datos.password === undefined ? {} : { password_restablecida: true }),
-            },
-            server_at: ahora,
-            alerta_reloj: alertaReloj,
-          },
-          aplicado,
-        ),
-      );
-      if (revocaSesiones) {
-        sentencias.push(sentenciaRevocarTodas(db, id, ahora, auditado));
-      }
-      if (desbloquear) {
-        // ADR 0018 punto 6: el desbloqueo del admin reinicia además TODOS los cupos de login del
-        // usuario (dispositivos, orígenes y el global), con su auditoría, si la edición se aplicó.
-        sentencias.push(
-          ...sentenciasReinicioAdmin(
-            db,
-            id,
-            { userId: sesion.userId, deviceId: sesion.deviceId, alertaReloj },
-            ahora,
-            auditado,
-          ),
-        );
-      }
-
-      const [actualizacion] = await db.batch(sentencias);
+      const [actualizacion] = await db.batch(plan.sentencias);
       if (actualizacion?.meta.changes !== 1) {
-        throw new ErrorApi(await motivoNoAplicado(db, actual, quitaAdmin));
+        throw new ErrorApi(await motivoNoAplicado(db, leido, plan.quitaAdmin));
       }
-      return c.json(usuarioDe(nuevo));
+      return c.json(usuarioDe(plan.nuevo));
     },
   );
 
   return rutas;
+}
+
+/** Datos de una edición de usuario por el admin (`PATCH /users/:id`). */
+export interface EdicionUsuario {
+  /** Fila leída antes de editar. */
+  actual: FilaUsuario;
+  /** Marca de escritura leída con `actual` (testigo de concurrencia, N1). */
+  marcaLeida: string | null;
+  datos: EditarUsuario;
+  actor: { userId: string; deviceId: string };
+  /** Hora de la escritura (estrictamente posterior a `actual.updated_at`, ver `marcaPosterior`). */
+  ahora: string;
+  alertaReloj: boolean;
+  /** Hash de la contraseña nueva, o `null` si no cambia. */
+  passwordHash: string | null;
+}
+
+export interface PlanEdicionUsuario {
+  /** El UPDATE de `users` es la sentencia 0: aplicó si su `meta.changes` es 1. */
+  sentencias: D1PreparedStatement[];
+  nuevo: FilaUsuario;
+  quitaAdmin: boolean;
+}
+
+/**
+ * Sentencias de la edición de un usuario, para un solo `db.batch()` (sin ejecutarlas). Se separa de
+ * la ruta para poder construir dos planes sobre el mismo estado con la misma hora (A1).
+ */
+export function planEditarUsuario(db: D1Database, e: EdicionUsuario): PlanEdicionUsuario {
+  const { actual, datos, ahora, alertaReloj } = e;
+  const id = actual.id;
+  const auditoriaId = uuidv7();
+  // A1 (ADR 0028): la auditoría se condiciona a la marca que fija ESTE UPDATE, y las dependientes
+  // (revocar sesiones, reiniciar cupos) a que ESTA auditoría se insertó.
+  const marca = nuevaMarca();
+  const desbloquear = datos.desbloquear === true;
+  const activoNuevo = datos.activo === undefined ? null : datos.activo ? 1 : 0;
+  const nuevo: FilaUsuario = {
+    ...actual,
+    nombre: datos.nombre ?? actual.nombre,
+    rol: datos.rol ?? actual.rol,
+    activo: activoNuevo ?? actual.activo,
+    intentos_fallidos: desbloquear ? 0 : actual.intentos_fallidos,
+    bloqueado_hasta: desbloquear ? null : actual.bloqueado_hasta,
+    updated_at: ahora,
+  };
+  const quitaAdmin =
+    actual.rol === 'admin' && actual.activo === 1 && (nuevo.rol !== 'admin' || nuevo.activo !== 1);
+  const revocaSesiones =
+    nuevo.rol !== actual.rol ||
+    (actual.activo === 1 && nuevo.activo === 0) ||
+    datos.password !== undefined;
+
+  // H-03: solo se escriben los campos enviados (COALESCE/CASE sobre la fila actual) y el
+  // UPDATE exige que `rol`, `activo`, `updated_at` y la marca de escritura (N1) sigan como se
+  // leyeron. Así una edición
+  // concurrente nunca reescribe con valores viejos lo que otro admin cambió (reactivar a un
+  // desactivado, borrar un bloqueo), y las decisiones derivadas de lo leído (revocar sesiones,
+  // último admin, `antes` de la auditoría) siguen siendo ciertas al escribir.
+  // `intentos_fallidos`/`bloqueado_hasta` solo cambian con `desbloquear`.
+  // Guardia atómica del último admin (ADR 0008 punto 9): si quita un admin activo, debe quedar
+  // otro admin activo. Las demás sentencias dependen de que el UPDATE haya aplicado.
+  const guardia = quitaAdmin
+    ? `EXISTS (SELECT 1 FROM users AS otro WHERE otro.rol = 'admin' AND otro.activo = 1 AND otro.id <> ?)`
+    : '1 = 1';
+  const parametrosGuardia = quitaAdmin ? [id] : [];
+  const aplicado = porMarca('users', { id }, marca);
+  const auditado = porAuditoria(auditoriaId);
+
+  const sentencias: D1PreparedStatement[] = [
+    db
+      .prepare(
+        `UPDATE users SET
+           nombre = COALESCE(?, nombre),
+           rol = COALESCE(?, rol),
+           activo = COALESCE(?, activo),
+           intentos_fallidos = CASE WHEN ? = 1 THEN 0 ELSE intentos_fallidos END,
+           bloqueado_hasta = CASE WHEN ? = 1 THEN NULL ELSE bloqueado_hasta END,
+           password_hash = COALESCE(?, password_hash),
+           updated_at = ?,
+           escritura_id = ?
+         WHERE id = ? AND rol = ? AND activo = ? AND updated_at = ? AND escritura_id IS ?
+           AND ${guardia}`,
+      )
+      .bind(
+        datos.nombre ?? null,
+        datos.rol ?? null,
+        activoNuevo,
+        desbloquear ? 1 : 0,
+        desbloquear ? 1 : 0,
+        e.passwordHash,
+        ahora,
+        marca,
+        id,
+        actual.rol,
+        actual.activo,
+        actual.updated_at,
+        e.marcaLeida,
+        ...parametrosGuardia,
+      ),
+    sentenciaAuditoriaCondicional(
+      db,
+      {
+        id: auditoriaId,
+        entidad: 'users',
+        entidad_id: id,
+        accion: 'usuario.editar',
+        actor_id: e.actor.userId,
+        device_id: e.actor.deviceId,
+        antes: { ...actual },
+        despues: {
+          ...nuevo,
+          ...(datos.password === undefined ? {} : { password_restablecida: true }),
+        },
+        server_at: ahora,
+        alerta_reloj: alertaReloj,
+      },
+      aplicado,
+    ),
+  ];
+  if (revocaSesiones) {
+    sentencias.push(sentenciaRevocarTodas(db, id, ahora, auditado));
+  }
+  if (desbloquear) {
+    // ADR 0018 punto 6: el desbloqueo del admin reinicia además TODOS los cupos de login del
+    // usuario (dispositivos, orígenes y el global), con su auditoría, si la edición se aplicó.
+    sentencias.push(
+      ...sentenciasReinicioAdmin(
+        db,
+        id,
+        { userId: e.actor.userId, deviceId: e.actor.deviceId, alertaReloj },
+        ahora,
+        auditado,
+      ),
+    );
+  }
+  return { sentencias, nuevo, quitaAdmin };
 }
 
 /** Hora actual en ISO, o 1 ms después de `anterior` si el reloj no avanzó desde entonces. */
@@ -285,20 +342,21 @@ function marcaPosterior(anterior: string): string {
 }
 
 /**
- * El UPDATE del PATCH no aplicó. Se relee la fila: si nadie la cambió desde la lectura, lo que
- * falló fue la guardia del último admin (422 `ULTIMO_ADMIN`); si cambió, otra edición ganó la
- * carrera (409 `CONFLICTO`: el cliente relee y reintenta).
+ * El UPDATE del PATCH no aplicó. Se relee la fila: si nadie la cambió desde la lectura (ni su marca
+ * de escritura), lo que falló fue la guardia del último admin (422 `ULTIMO_ADMIN`); si cambió, otra
+ * edición ganó la carrera (409 `CONFLICTO`: el cliente relee y reintenta).
  */
 async function motivoNoAplicado(
   db: D1Database,
-  leido: FilaUsuario,
+  leido: { fila: FilaUsuario; marca: string | null },
   quitaAdmin: boolean,
 ): Promise<'ULTIMO_ADMIN' | 'CONFLICTO'> {
-  const ahora = await buscarUsuario(db, leido.id);
+  const ahora = await buscarUsuarioConMarca(db, leido.fila.id);
   const sinCambios =
     ahora !== null &&
-    ahora.rol === leido.rol &&
-    ahora.activo === leido.activo &&
-    ahora.updated_at === leido.updated_at;
+    ahora.marca === leido.marca &&
+    ahora.fila.rol === leido.fila.rol &&
+    ahora.fila.activo === leido.fila.activo &&
+    ahora.fila.updated_at === leido.fila.updated_at;
   return quitaAdmin && sinCambios ? 'ULTIMO_ADMIN' : 'CONFLICTO';
 }

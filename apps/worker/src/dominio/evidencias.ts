@@ -4,8 +4,9 @@
 // **magic bytes** (nunca solo por la cabecera) y debe coincidir con el `mime` declarado en la
 // novedad; el sha256 calculado debe coincidir con el declarado. Orden de escritura:
 //   1. `EVIDENCE.put(storage_key, …)` en R2 (con el sha256 para que R2 también lo verifique);
-//   2. un batch con `UPDATE evidences SET subido = 1 …` (guarda `subido = 0`) + auditoría
-//      condicionada (`evidencia.subida`, con `order_id`).
+//   2. un batch con `UPDATE evidences SET subido = 1 …` (guarda `subido = 0`; fija la marca de
+//      escritura) + auditoría condicionada a esa marca (`evidencia.subida`, con `order_id`;
+//      ADR 0028).
 // R2 y D1 no comparten transacción: si el paso 2 falla después del 1, el objeto queda en R2 sin
 // que la evidencia figure como subida. No hay pérdida ni inconsistencia visible: la evidencia sigue
 // `subido = 0`, el cliente reintenta y el `put` sobrescribe el mismo objeto (misma clave, mismo
@@ -18,7 +19,7 @@
 // puede quedar es, como máximo, un objeto por evidencia `subido = 0` (docs/despliegue.md §9.4).
 
 import { type Evidencia, MAX_EVIDENCIA_BYTES, type MimeEvidencia } from '@catmetal/shared';
-import { sentenciaAuditoriaCondicional } from '../auditoria/auditar';
+import { nuevaMarca, porMarca, sentenciaAuditoriaCondicional } from '../auditoria/auditar';
 import { ErrorApi } from '../errores';
 import type { Contexto } from './contexto';
 import { evidenciaDe } from './consumos';
@@ -180,11 +181,16 @@ export async function validarArchivo(
   return sha256;
 }
 
-/** Plan que marca la evidencia como subida (guarda `subido = 0`) con su auditoría condicionada. */
+/**
+ * Plan que marca la evidencia como subida (guarda `subido = 0`) con su auditoría condicionada a la
+ * marca de escritura de ESTE plan (A1: dos subidas con el mismo `ahora` dejan una sola auditoría).
+ */
 export function planMarcarSubida(
   ctx: Contexto,
   evidencia: FilaEvidenciaCompleta,
 ): PlanDeEscritura<Evidencia> {
+  const marca = nuevaMarca();
+  const aplicada = porMarca('evidences', { id: evidencia.id }, marca);
   const antes = evidenciaPublica(evidencia);
   const despues: Evidencia = {
     ...antes,
@@ -196,9 +202,9 @@ export function planMarcarSubida(
     sentencias: [
       ctx.db
         .prepare(
-          'UPDATE evidences SET subido = 1, subido_at = ?, updated_at = ? WHERE id = ? AND subido = 0',
+          'UPDATE evidences SET subido = 1, subido_at = ?, updated_at = ?, escritura_id = ? WHERE id = ? AND subido = 0',
         )
-        .bind(ctx.ahora, ctx.ahora, evidencia.id),
+        .bind(ctx.ahora, ctx.ahora, marca, evidencia.id),
       sentenciaAuditoriaCondicional(
         ctx.db,
         {
@@ -213,13 +219,11 @@ export function planMarcarSubida(
           server_at: ctx.ahora,
           alerta_reloj: ctx.alertaReloj,
         },
-        {
-          sql: 'EXISTS (SELECT 1 FROM evidences WHERE id = ? AND subido = 1 AND subido_at = ?)',
-          parametros: [evidencia.id, ctx.ahora],
-        },
+        aplicada,
       ),
     ],
     principal: { indice: 0, cambiosEsperados: 1 },
+    aplicada,
     respuesta: despues,
     siNoAplica: new ErrorApi('EVIDENCIA_YA_SUBIDA'),
   };

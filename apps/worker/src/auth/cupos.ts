@@ -20,7 +20,13 @@ import {
   uuidv7,
   VENTANA_INTENTOS_LOGIN_MINUTOS,
 } from '@catmetal/shared';
-import { type CondicionSql, sentenciaAuditoriaCondicional } from '../auditoria/auditar';
+import {
+  type CondicionDeEscritura,
+  MARCADOR_CONDICION,
+  porReserva,
+  sentenciaAuditoriaCondicional,
+  sentenciaDependiente,
+} from '../auditoria/auditar';
 import { aBase64Url } from './codificacion';
 import { hmacTruncado } from './dispositivo';
 
@@ -179,13 +185,13 @@ const COLUMNAS_CUPO =
   'user_id, origen, fallos, ventana_inicio, bloqueado_hasta, reserva_id, created_at, updated_at';
 const FILA_NUEVA = `?1, ?2, 1, ?3, CASE WHEN 1 >= ?5 THEN ?6 ELSE NULL END, ?7, ?3, ?3`;
 
-/** Condición: la fila (user, origen) quedó con ESTA reserva y bloqueada por ella. */
-function bloqueadaPorReserva(userId: string, origen: string, reservaId: string): CondicionSql {
-  return {
-    sql: `EXISTS (SELECT 1 FROM login_cupos WHERE user_id = ? AND origen = ? AND reserva_id = ?
-      AND bloqueado_hasta IS NOT NULL)`,
-    parametros: [userId, origen, reservaId],
-  };
+/** Condición: la fila (user, origen) quedó con ESTA reserva y bloqueada por ella (ADR 0028). */
+function bloqueadaPorReserva(
+  userId: string,
+  origen: string,
+  reservaId: string,
+): CondicionDeEscritura {
+  return porReserva(userId, origen, reservaId, { bloqueada: true });
 }
 
 /**
@@ -198,7 +204,7 @@ function auditoriaBloqueo(
   userId: string,
   maximo: number,
   t: Tiempos,
-  condicion: CondicionSql,
+  condicion: CondicionDeEscritura,
 ): D1PreparedStatement {
   return sentenciaAuditoriaCondicional(
     db,
@@ -378,7 +384,7 @@ function auditoriaDesbloqueo(
   userId: string,
   actor: Actor,
   ahora: string,
-  condicion: CondicionSql,
+  condicion: CondicionDeEscritura,
 ): D1PreparedStatement {
   return sentenciaAuditoriaCondicional(
     db,
@@ -399,8 +405,10 @@ function auditoriaDesbloqueo(
 /**
  * Sentencias para el MISMO batch del login correcto (después de registrar el dispositivo, que la
  * auditoría referencia):
- * - reinicia SOLO el cupo del origen usado (`d:` o `ip:`) y, si estaba bloqueado (la reserva de
- *   este mismo login lo bloqueó al ser el 5.º intento), audita el desbloqueo antes del UPDATE;
+ * - reinicia SOLO el cupo del origen usado (`d:` o `ip:`). Si estaba bloqueado (la reserva de
+ *   este mismo login lo bloqueó al ser el 5.º intento), un UPDATE propio lo desbloquea y fija una
+ *   `reserva_id` nueva, y la auditoría se condiciona a ella (ADR 0028, punto 4); los fallos sin
+ *   bloqueo vuelven a 0 en otro UPDATE, sin auditar;
  * - el global `g` (al que suman las reservas de ambos tipos, S-02) NO se reinicia (si no, cada login legítimo le regalaría al atacante otros 20
  *   intentos). Solo se descuenta el +1 de ESTA reserva, que no fue un fallo, si `g` no está
  *   bloqueado; un `g` bloqueado se deja tal cual (vence con su ventana). No se compara la
@@ -414,12 +422,22 @@ export function sentenciasReinicioTrasLogin(
   actor: Actor,
   ahora: string,
 ): D1PreparedStatement[] {
+  const desbloqueo = uuidv7();
   const sentencias = [
-    auditoriaDesbloqueo(db, reserva.tipo, reserva.userId, actor, ahora, {
-      sql: `EXISTS (SELECT 1 FROM login_cupos WHERE user_id = ? AND origen = ?
-        AND bloqueado_hasta > ?)`,
-      parametros: [reserva.userId, reserva.origen, ahora],
-    }),
+    db
+      .prepare(
+        `UPDATE login_cupos SET fallos = 0, bloqueado_hasta = NULL, reserva_id = ?, updated_at = ?
+         WHERE user_id = ? AND origen = ? AND bloqueado_hasta > ?`,
+      )
+      .bind(desbloqueo, ahora, reserva.userId, reserva.origen, ahora),
+    auditoriaDesbloqueo(
+      db,
+      reserva.tipo,
+      reserva.userId,
+      actor,
+      ahora,
+      porReserva(reserva.userId, reserva.origen, desbloqueo),
+    ),
     db
       .prepare(
         `UPDATE login_cupos SET fallos = 0, bloqueado_hasta = NULL, updated_at = ?
@@ -441,30 +459,39 @@ export function sentenciasReinicioTrasLogin(
 
 /**
  * Desbloqueo del admin (`PATCH /users/:id` con `desbloquear`): reinicia TODOS los cupos del
- * usuario, incluido `g`. Audita un `login_cupos.desbloqueado` por cada tipo de cupo que tenía un
- * bloqueo vigente. Todo condicionado a `condicion` (que la edición del usuario se aplicó).
+ * usuario, incluido `g`. Todo es DEPENDIENTE de `condicion` (que la edición del usuario aplicó en
+ * este batch). Por cada tipo de cupo con un bloqueo vigente, un UPDATE lo desbloquea y fija una
+ * `reserva_id` nueva, y su `login_cupos.desbloqueado` se condiciona a ella (ADR 0028, punto 4);
+ * al final, los fallos sin bloqueo vuelven a 0, sin auditar.
  */
 export function sentenciasReinicioAdmin(
   db: D1Database,
   userId: string,
   actor: Actor,
   ahora: string,
-  condicion: CondicionSql,
+  condicion: CondicionDeEscritura,
 ): D1PreparedStatement[] {
   const tipos: TipoCupo[] = ['dispositivo', 'origen', 'global'];
   return [
-    ...tipos.map((tipo) =>
-      auditoriaDesbloqueo(db, tipo, userId, actor, ahora, {
-        sql: `${condicion.sql} AND EXISTS (SELECT 1 FROM login_cupos WHERE user_id = ?
-          AND ${FILTRO_TIPO[tipo]} AND bloqueado_hasta > ?)`,
-        parametros: [...condicion.parametros, userId, ahora],
-      }),
+    ...tipos.flatMap((tipo) => {
+      const desbloqueo = uuidv7();
+      return [
+        sentenciaDependiente(
+          db,
+          `UPDATE login_cupos SET fallos = 0, bloqueado_hasta = NULL, reserva_id = ?, updated_at = ?
+           WHERE user_id = ? AND ${FILTRO_TIPO[tipo]} AND bloqueado_hasta > ? AND ${MARCADOR_CONDICION}`,
+          [desbloqueo, ahora, userId, ahora],
+          condicion,
+        ),
+        auditoriaDesbloqueo(db, tipo, userId, actor, ahora, porReserva(userId, null, desbloqueo)),
+      ];
+    }),
+    sentenciaDependiente(
+      db,
+      `UPDATE login_cupos SET fallos = 0, bloqueado_hasta = NULL, updated_at = ?
+       WHERE user_id = ? AND (fallos <> 0 OR bloqueado_hasta IS NOT NULL) AND ${MARCADOR_CONDICION}`,
+      [ahora, userId],
+      condicion,
     ),
-    db
-      .prepare(
-        `UPDATE login_cupos SET fallos = 0, bloqueado_hasta = NULL, updated_at = ?
-         WHERE user_id = ? AND (fallos <> 0 OR bloqueado_hasta IS NOT NULL) AND ${condicion.sql}`,
-      )
-      .bind(ahora, userId, ...condicion.parametros),
   ];
 }

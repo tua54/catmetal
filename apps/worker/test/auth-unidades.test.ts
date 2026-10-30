@@ -7,6 +7,7 @@ import {
   calcularAlertaReloj,
   type EntidadAuditada,
   filtrarDatos,
+  porAuditoria,
   sentenciaAuditoria,
   sentenciaAuditoriaCondicional,
 } from '../src/auditoria/auditar';
@@ -223,8 +224,10 @@ describe('auditoría', () => {
     const entidadId = uuidv7();
     const cliente = '2026-10-29T19:00:00.000Z';
     const servidor = '2026-10-29T20:00:00.000Z';
+    const idSimple = uuidv7();
     await env.DB.batch([
       sentenciaAuditoria(env.DB, {
+        id: idSimple,
         entidad: 'devices',
         entidad_id: entidadId,
         accion: 'prueba.simple',
@@ -245,7 +248,8 @@ describe('auditoría', () => {
           actor_id: null,
           device_id: null,
         },
-        { sql: '1 = 0', parametros: [] },
+        // A1 (ADR 0028): solo se admite una CondicionDeEscritura; esta no se cumple.
+        porAuditoria(uuidv7()),
       ),
       sentenciaAuditoriaCondicional(
         env.DB,
@@ -256,7 +260,8 @@ describe('auditoría', () => {
           actor_id: null,
           device_id: null,
         },
-        { sql: '? = ?', parametros: [1, 1] },
+        // Se cumple: la fila simple de este mismo batch ya está insertada.
+        porAuditoria(idSimple),
       ),
       // client_at a 1 h de server_at sin alerta de la petición → 0 (antes daba 1).
       sentenciaAuditoria(env.DB, {

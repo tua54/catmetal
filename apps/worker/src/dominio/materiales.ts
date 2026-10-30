@@ -12,7 +12,12 @@ import {
   type Unidad,
   uuidv7,
 } from '@catmetal/shared';
-import { sentenciaAuditoria, sentenciaAuditoriaCondicional } from '../auditoria/auditar';
+import {
+  nuevaMarca,
+  porMarca,
+  sentenciaAuditoria,
+  sentenciaAuditoriaCondicional,
+} from '../auditoria/auditar';
 import { ErrorApi } from '../errores';
 import type { Contexto } from './contexto';
 import type { PlanDeEscritura } from './plan';
@@ -40,6 +45,25 @@ export async function buscarMaterial(db: D1Database, id: string): Promise<FilaMa
     .prepare(`SELECT ${COLUMNAS_MATERIAL} FROM materials WHERE id = ?`)
     .bind(id)
     .first<FilaMaterial>();
+}
+
+/**
+ * El material y la marca de su última escritura (ADR 0028), que es interna: va aparte, nunca en
+ * `FilaMaterial` (así no puede salir por la API).
+ */
+async function buscarMaterialConMarca(
+  db: D1Database,
+  id: string,
+): Promise<{ fila: FilaMaterial; marca: string | null } | null> {
+  const leida = await db
+    .prepare(`SELECT ${COLUMNAS_MATERIAL}, escritura_id FROM materials WHERE id = ?`)
+    .bind(id)
+    .first<FilaMaterial & { escritura_id: string | null }>();
+  if (leida === null) {
+    return null;
+  }
+  const { escritura_id: marca, ...fila } = leida;
+  return { fila, marca };
 }
 
 /** `GET /materials`: paginación por cursor sobre el id (nunca OFFSET), filtro opcional `activo`. */
@@ -107,18 +131,23 @@ export function crearMaterial(ctx: Contexto, entrada: CrearMaterial): PlanDeEscr
 }
 
 /**
- * `PATCH /materials/:id`. El UPDATE se guarda con el `updated_at` leído: si otro admin lo editó
- * entretanto, no aplica (409) y la auditoría (condicionada) tampoco se escribe.
+ * `PATCH /materials/:id`. El UPDATE se guarda con el `updated_at` y la marca de escritura leídos
+ * (N1: dos ediciones en el mismo milisegundo dejan el mismo `updated_at`, la marca no): si otro
+ * admin lo editó entretanto, no aplica (409) y la auditoría, condicionada a la marca de ESTE plan
+ * (ADR 0028), tampoco se escribe.
  */
 export async function editarMaterial(
   ctx: Contexto,
   id: string,
   entrada: EditarMaterial,
 ): Promise<PlanDeEscritura<Material>> {
-  const actual = await buscarMaterial(ctx.db, id);
-  if (actual === null) {
+  const leido = await buscarMaterialConMarca(ctx.db, id);
+  if (leido === null) {
     throw new ErrorApi('NO_ENCONTRADO');
   }
+  const actual = leido.fila;
+  const marca = nuevaMarca();
+  const aplicada = porMarca('materials', { id }, marca);
   const nuevo: FilaMaterial = {
     ...actual,
     nombre: entrada.nombre ?? actual.nombre,
@@ -130,16 +159,19 @@ export async function editarMaterial(
     sentencias: [
       ctx.db
         .prepare(
-          `UPDATE materials SET nombre = ?, costo_unitario_cop = ?, activo = ?, updated_at = ?
-           WHERE id = ? AND updated_at = ?`,
+          `UPDATE materials SET nombre = ?, costo_unitario_cop = ?, activo = ?, updated_at = ?,
+             escritura_id = ?
+           WHERE id = ? AND updated_at = ? AND escritura_id IS ?`,
         )
         .bind(
           nuevo.nombre,
           nuevo.costo_unitario_cop,
           nuevo.activo,
           ctx.ahora,
+          marca,
           id,
           actual.updated_at,
+          leido.marca,
         ),
       sentenciaAuditoriaCondicional(
         ctx.db,
@@ -154,13 +186,11 @@ export async function editarMaterial(
           server_at: ctx.ahora,
           alerta_reloj: ctx.alertaReloj,
         },
-        {
-          sql: 'EXISTS (SELECT 1 FROM materials WHERE id = ? AND updated_at = ? AND nombre = ? AND costo_unitario_cop = ? AND activo = ?)',
-          parametros: [id, ctx.ahora, nuevo.nombre, nuevo.costo_unitario_cop, nuevo.activo],
-        },
+        aplicada,
       ),
     ],
     principal: { indice: 0, cambiosEsperados: 1 },
+    aplicada,
     respuesta: materialDe(nuevo),
   };
 }

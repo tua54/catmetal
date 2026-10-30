@@ -27,7 +27,7 @@ import {
   tienePermiso,
   type Validacion,
 } from '@catmetal/shared';
-import { type CondicionSql, sentenciaAuditoriaCondicional } from '../auditoria/auditar';
+import { nuevaMarca, porMarca, sentenciaAuditoriaCondicional } from '../auditoria/auditar';
 import { ErrorApi } from '../errores';
 import {
   agruparNovedades,
@@ -110,26 +110,19 @@ async function decidir(
     version: actual.version + 1,
     updated_at: ctx.ahora,
   };
-  const aplicada: CondicionSql = {
-    sql: 'EXISTS (SELECT 1 FROM validations WHERE id = ? AND validado_por = ?)',
-    parametros: [validacion.id, ctx.actor.id],
-  };
-  // B11: la validación es la de esta petición (hora de recepción) y el trigger dejó el consumo como
-  // `decidido` (lo que se responde).
+  // A1 (ADR 0028): el id de la validación lo manda el cliente, así que no sirve de marca. El INSERT
+  // fija la suya y TODO lo demás se condiciona a ella. El trigger `validations_aplica_decision` no
+  // fija la marca del consumo: las auditorías de aprobar/rechazar también usan la de la validación.
+  const marca = nuevaMarca();
+  const aplicada = porMarca('validations', { id: validacion.id }, marca);
+  // B11: la validación es la de ESTE batch (su marca) y el trigger dejó el consumo como `decidido`
+  // (lo que se responde).
   const verificacion = ctx.db
     .prepare(
       `SELECT 1 AS aplicada FROM validations AS v JOIN consumptions AS c ON c.id = v.consumption_id
-       WHERE v.id = ? AND v.validado_por = ? AND v.server_received_at = ?
-         AND c.estado = ? AND c.version = ? AND c.updated_at = ?`,
+       WHERE v.id = ? AND v.escritura_id = ? AND c.estado = ? AND c.version = ?`,
     )
-    .bind(
-      validacion.id,
-      ctx.actor.id,
-      validacion.server_received_at,
-      decidido.estado,
-      decidido.version,
-      decidido.updated_at,
-    );
+    .bind(validacion.id, marca, decidido.estado, decidido.version);
   const auditar = (
     entidad: 'validations' | 'consumptions',
     entidadId: string,
@@ -160,8 +153,8 @@ async function decidir(
       ctx.db
         .prepare(
           `INSERT INTO validations (id, consumption_id, decision, motivo, validado_por,
-             client_created_at, server_received_at, created_at, updated_at)
-           SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?
+             client_created_at, server_received_at, created_at, updated_at, escritura_id)
+           SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
            WHERE EXISTS (
              SELECT 1 FROM consumptions AS c
              WHERE c.id = ? AND c.estado = 'pendiente' AND c.version = ? AND c.registrado_por <> ?
@@ -178,6 +171,7 @@ async function decidir(
           validacion.server_received_at,
           ctx.ahora,
           ctx.ahora,
+          marca,
           actual.id,
           actual.version,
           ctx.actor.id,
@@ -190,6 +184,7 @@ async function decidir(
     // Por las filas de `verificacion`, no por `meta.changes` del INSERT (que en D1 incluye las
     // filas que escribe el trigger y podría cambiar): B11.
     principal: { indice: 1, filasEsperadas: 1 },
+    aplicada,
     respuesta: { consumo: consumoDe(decidido), validacion },
     siNoAplica: new ErrorApi('CONFLICTO'),
   };

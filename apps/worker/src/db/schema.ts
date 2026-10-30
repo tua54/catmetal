@@ -105,6 +105,21 @@ function marcasDeTiempo() {
 
 const MARCAS = ['created_at', 'updated_at'] as const;
 
+/**
+ * Marca de escritura (ADR 0028, A1): UUID v7 que fija la sentencia principal de cada escritura
+ * auditada y que comprueban su auditoría y sus dependientes en el mismo batch. Es INTERNA: los tipos
+ * `Fila*` la omiten, no entra en ninguna lista `COLUMNAS_*`, no la exporta el backup y nunca sale
+ * por la API ni por `/sync/*`. Anulable: las filas anteriores a la migración 0009 quedan en NULL.
+ * En `consumptions` es la marca de la última escritura DIRECTA (el trigger
+ * `validations_aplica_decision` no la fija).
+ */
+function marcaDeEscritura() {
+  return { escritura_id: text('escritura_id') };
+}
+
+/** Nombre de la columna de la marca de escritura (ADR 0028). */
+export const COLUMNA_MARCA = 'escritura_id';
+
 // ---------------------------------------------------------------------------------------------
 // Usuarios, dispositivos y sesiones
 // ---------------------------------------------------------------------------------------------
@@ -123,6 +138,7 @@ export const users = sqliteTable(
     intentos_fallidos: integer('intentos_fallidos').notNull().default(0),
     bloqueado_hasta: text('bloqueado_hasta'),
     ...marcasDeTiempo(),
+    ...marcaDeEscritura(),
   },
   (t) => [
     uniqueIndex('users_email_unico').on(t.email),
@@ -176,6 +192,7 @@ export const refresh_tokens = sqliteTable(
      */
     reemplazado_por: text('reemplazado_por'),
     ...marcasDeTiempo(),
+    ...marcaDeEscritura(),
   },
   (t) => [
     uniqueIndex('refresh_tokens_token_hash').on(t.token_hash),
@@ -243,6 +260,7 @@ export const settings = sqliteTable(
     /** NULL cuando lo escribe el sistema (migración inicial). */
     actualizado_por: text('actualizado_por').references(() => users.id),
     ...marcasDeTiempo(),
+    ...marcaDeEscritura(),
   },
   () => [check('settings_valor_json', json('valor')), check('settings_fechas_iso', fechas(MARCAS))],
 );
@@ -262,6 +280,7 @@ export const materials = sqliteTable(
     costo_unitario_cop: integer('costo_unitario_cop').notNull(),
     activo: integer('activo', { mode: 'boolean' }).notNull().default(true),
     ...marcasDeTiempo(),
+    ...marcaDeEscritura(),
   },
   (t) => [
     uniqueIndex('materials_codigo_unico').on(t.codigo),
@@ -286,6 +305,7 @@ export const production_orders = sqliteTable(
       .notNull()
       .references(() => users.id),
     ...marcasDeTiempo(),
+    ...marcaDeEscritura(),
   },
   (t) => [
     uniqueIndex('production_orders_codigo_unico').on(t.codigo),
@@ -309,6 +329,7 @@ export const order_supervisors = sqliteTable(
       .references(() => users.id),
     activo: integer('activo', { mode: 'boolean' }).notNull().default(true),
     ...marcasDeTiempo(),
+    ...marcaDeEscritura(),
   },
   (t) => [
     primaryKey({ name: 'order_supervisors_pk', columns: [t.order_id, t.user_id] }),
@@ -330,6 +351,7 @@ export const order_planned_materials = sqliteTable(
     cantidad_planeada: real('cantidad_planeada').notNull(),
     unidad: text('unidad', { enum: UNIDADES }).notNull(),
     ...marcasDeTiempo(),
+    ...marcaDeEscritura(),
   },
   (t) => [
     primaryKey({ name: 'order_planned_materials_pk', columns: [t.order_id, t.material_id] }),
@@ -378,6 +400,7 @@ export const consumptions = sqliteTable(
     /** Control de concurrencia optimista: todo UPDATE la incrementa en 1 (trigger). */
     version: integer('version').notNull().default(1),
     ...marcasDeTiempo(),
+    ...marcaDeEscritura(),
   },
   (t) => [
     index('consumptions_order_id_estado').on(t.order_id, t.estado),
@@ -423,6 +446,7 @@ export const incidents = sqliteTable(
     client_created_at: text('client_created_at').notNull(),
     server_received_at: text('server_received_at').notNull(),
     ...marcasDeTiempo(),
+    ...marcaDeEscritura(),
   },
   (t) => [
     index('incidents_consumption_id').on(t.consumption_id),
@@ -447,6 +471,7 @@ export const evidences = sqliteTable(
     subido: integer('subido', { mode: 'boolean' }).notNull().default(false),
     subido_at: text('subido_at'),
     ...marcasDeTiempo(),
+    ...marcaDeEscritura(),
   },
   (t) => [
     index('evidences_incident_id').on(t.incident_id),
@@ -482,6 +507,7 @@ export const validations = sqliteTable(
     client_created_at: text('client_created_at').notNull(),
     server_received_at: text('server_received_at').notNull(),
     ...marcasDeTiempo(),
+    ...marcaDeEscritura(),
   },
   (t) => [
     // Un consumo se decide una sola vez (también cubre el índice `validations(consumption_id)` de §4).
@@ -599,31 +625,40 @@ export const schema = {
   audit_log,
 };
 
-export type FilaUsuario = typeof users.$inferSelect;
-export type NuevoUsuario = typeof users.$inferInsert;
+export type FilaUsuario = Omit<typeof users.$inferSelect, typeof COLUMNA_MARCA>;
+export type NuevoUsuario = Omit<typeof users.$inferInsert, typeof COLUMNA_MARCA>;
 export type FilaDispositivo = typeof devices.$inferSelect;
 export type NuevoDispositivo = typeof devices.$inferInsert;
-export type FilaRefreshToken = typeof refresh_tokens.$inferSelect;
-export type NuevoRefreshToken = typeof refresh_tokens.$inferInsert;
+export type FilaRefreshToken = Omit<typeof refresh_tokens.$inferSelect, typeof COLUMNA_MARCA>;
+export type NuevoRefreshToken = Omit<typeof refresh_tokens.$inferInsert, typeof COLUMNA_MARCA>;
 export type FilaLoginCupo = typeof login_cupos.$inferSelect;
-export type FilaSetting = typeof settings.$inferSelect;
-export type NuevoSetting = typeof settings.$inferInsert;
-export type FilaMaterial = typeof materials.$inferSelect;
-export type NuevoMaterial = typeof materials.$inferInsert;
-export type FilaOrden = typeof production_orders.$inferSelect;
-export type NuevaOrden = typeof production_orders.$inferInsert;
-export type FilaSupervisorOrden = typeof order_supervisors.$inferSelect;
-export type NuevoSupervisorOrden = typeof order_supervisors.$inferInsert;
-export type FilaMaterialPlaneado = typeof order_planned_materials.$inferSelect;
-export type NuevoMaterialPlaneado = typeof order_planned_materials.$inferInsert;
-export type FilaConsumo = typeof consumptions.$inferSelect;
-export type NuevoConsumo = typeof consumptions.$inferInsert;
-export type FilaNovedad = typeof incidents.$inferSelect;
-export type NuevaNovedad = typeof incidents.$inferInsert;
-export type FilaEvidencia = typeof evidences.$inferSelect;
-export type NuevaEvidencia = typeof evidences.$inferInsert;
-export type FilaValidacion = typeof validations.$inferSelect;
-export type NuevaValidacion = typeof validations.$inferInsert;
+export type FilaSetting = Omit<typeof settings.$inferSelect, typeof COLUMNA_MARCA>;
+export type NuevoSetting = Omit<typeof settings.$inferInsert, typeof COLUMNA_MARCA>;
+export type FilaMaterial = Omit<typeof materials.$inferSelect, typeof COLUMNA_MARCA>;
+export type NuevoMaterial = Omit<typeof materials.$inferInsert, typeof COLUMNA_MARCA>;
+export type FilaOrden = Omit<typeof production_orders.$inferSelect, typeof COLUMNA_MARCA>;
+export type NuevaOrden = Omit<typeof production_orders.$inferInsert, typeof COLUMNA_MARCA>;
+export type FilaSupervisorOrden = Omit<typeof order_supervisors.$inferSelect, typeof COLUMNA_MARCA>;
+export type NuevoSupervisorOrden = Omit<
+  typeof order_supervisors.$inferInsert,
+  typeof COLUMNA_MARCA
+>;
+export type FilaMaterialPlaneado = Omit<
+  typeof order_planned_materials.$inferSelect,
+  typeof COLUMNA_MARCA
+>;
+export type NuevoMaterialPlaneado = Omit<
+  typeof order_planned_materials.$inferInsert,
+  typeof COLUMNA_MARCA
+>;
+export type FilaConsumo = Omit<typeof consumptions.$inferSelect, typeof COLUMNA_MARCA>;
+export type NuevoConsumo = Omit<typeof consumptions.$inferInsert, typeof COLUMNA_MARCA>;
+export type FilaNovedad = Omit<typeof incidents.$inferSelect, typeof COLUMNA_MARCA>;
+export type NuevaNovedad = Omit<typeof incidents.$inferInsert, typeof COLUMNA_MARCA>;
+export type FilaEvidencia = Omit<typeof evidences.$inferSelect, typeof COLUMNA_MARCA>;
+export type NuevaEvidencia = Omit<typeof evidences.$inferInsert, typeof COLUMNA_MARCA>;
+export type FilaValidacion = Omit<typeof validations.$inferSelect, typeof COLUMNA_MARCA>;
+export type NuevaValidacion = Omit<typeof validations.$inferInsert, typeof COLUMNA_MARCA>;
 export type FilaMutacionSync = typeof sync_mutations.$inferSelect;
 export type NuevaMutacionSync = typeof sync_mutations.$inferInsert;
 export type FilaAuditoria = typeof audit_log.$inferSelect;
