@@ -15,6 +15,8 @@
 // - Entre pestañas (ADR 0023, M7): cerrar sesión, bloquear por inactividad o entrar con otro usuario
 //   se avisa por el canal de sesión (sin secretos); las demás pestañas descartan su sesión en memoria
 //   en el mismo tick (y vuelven al login o al bloqueo). No borran datos locales.
+// - Bajada de rol (S-03): si el perfil nuevo del servidor ya no ve lo de todos, los consumos ajenos
+//   sin pendientes se borran de la partición al guardarlo (`purgarAjenosSinVisibilidad`).
 
 import {
   loginSchema,
@@ -24,13 +26,14 @@ import {
   type Permiso,
   type RespuestaSesion,
 } from '@catmetal/shared';
-import { db, obtenerInstalacionId } from '../datos/db';
+import { db, obtenerInstalacionId, tablasDeDatos } from '../datos/db';
 import {
   borrarDatosDeUsuario,
   pendientesPorUsuario,
   puedeBorrarDatosDeUsuario,
 } from '../datos/outbox';
 import type { PerfilLocal, VerificadorLocal } from '../datos/tipos';
+import { purgarAjenosSinVisibilidad, tieneVisibilidadAmplia } from '../datos/visibilidad';
 import { crearCanalSesion, type CanalSesion, type EventoSesion } from './canal-sesion';
 import {
   conCandado,
@@ -420,7 +423,15 @@ export class GestorSesion {
 
   async #guardarPerfil(respuesta: RespuestaSesion, cambios: CambiosPerfil): Promise<void> {
     const ahora = this.#ahoraIso();
-    await db.transaction('rw', db.perfiles, async () => {
+    // S-03: el perfil guardado veía lo de todos y el nuevo del servidor ya no (bajada de rol). Lo
+    // ajeno sin pendientes se borra en la MISMA transacción que guarda el perfil nuevo: si falla, el
+    // perfil viejo queda y el próximo login lo vuelve a intentar.
+    const anterior = await db.perfiles.get(respuesta.usuario.id);
+    const perdioVisibilidad =
+      anterior !== undefined &&
+      tieneVisibilidadAmplia(anterior.perfil.permisos) &&
+      !tieneVisibilidadAmplia(respuesta.usuario.permisos);
+    await db.transaction('rw', perdioVisibilidad ? tablasDeDatos() : [db.perfiles], async () => {
       const previo = await db.perfiles.get(respuesta.usuario.id);
       // ADR 0017 §3: el admin no trabaja offline; nunca tiene verificador (y se borra uno anterior).
       const verificador =
@@ -440,6 +451,9 @@ export class GestorSesion {
         intentos_offline: cambios.reiniciarIntentos === true ? 0 : (previo?.intentos_offline ?? 0),
         espera_hasta: cambios.reiniciarIntentos === true ? null : (previo?.espera_hasta ?? null),
       });
+      if (perdioVisibilidad) {
+        await purgarAjenosSinVisibilidad(respuesta.usuario.id);
+      }
     });
   }
 
