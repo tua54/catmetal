@@ -94,3 +94,12 @@ Fuente: informe de `documentation-researcher` (URLs en cada punto).
 - Límite de tamaño de sentencia: el script de restauración parte los `INSERT` en 90 000 bytes como mucho (el límite documentado de D1 es de 100 KB por sentencia). No se verificó contra la D1 remota.
 - workerd local (Miniflare y el pool de Vitest) no aplica el límite de 128 MB de memoria de producción: la cota de memoria del backup se prueba con el medidor `observarPagina`, no con el runtime.
 - En Windows, `spawnSync('npx', [...], { shell: true })` no cita los argumentos: un `--command` con espacios hay que pasarlo entre comillas.
+
+## Restauración: revisión de esquema R-01 a R-10
+
+- **Node 24 no admite strings de más de ~512 MiB** (`buffer.constants.MAX_STRING_LENGTH` = 536 870 888). El CLI anterior (`gunzipSync(...).toString()` y el SQL armado en un solo texto) fallaba con "Cannot create a string longer than 0x1fffffe8 characters" en un backup sintético con `audit_log` de 597 MiB sin comprimir (320 006 filas). El CLI actual lee cada NDJSON con `zlib.createGunzip()` + `readline` y escribe con `fs.createWriteStream` (contrapresión con `drain`). Con el mismo backup terminó en 9,2 s, con un pico de RSS de 288 MiB y `--max-old-space-size=1024`, y escribió 663 MiB de SQL.
+- `zlib.createGunzip()` lee los gzip de varios miembros completos.
+- En la D1 local, `pragma_foreign_key_check` (función de tabla) y un `WITH … SELECT` dentro de `NOT EXISTS (…)` funcionan: así la verificación puede fallar sola dentro de un `INSERT … SELECT NOT EXISTS (…)` (R-02). Un archivo `--file` local que falla por el `CHECK` no deja la tabla auxiliar.
+- R-06: en remoto, si `wrangler d1 execute --file` es atómico y si devuelve las filas de un `SELECT` (workers-sdk #6088) **no está verificado**. Por eso la verificación aborta sola, y ante cualquier fallo de `restauracion.sql` la base se descarta.
+- R-03: si D1 no tiene `octet_length`, el error es "no such function: …". El backup lo detecta una vez por invocación, pasa a `length(CAST(col AS BLOB))` y registra `backup_sin_octet_length`.
+- R-07: el trigger `settings_insercion_valida` (migración 0008) solo admite las claves conocidas de `settings`. Una migración que agregue una clave debe recrearlo antes, y actualizar `CLAVES_SETTINGS_SEMBRADAS` en `scripts/restauracion-nucleo.mjs`, porque la guardia de la restauración exige exactamente las claves sembradas.

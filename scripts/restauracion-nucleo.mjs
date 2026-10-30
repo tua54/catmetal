@@ -2,7 +2,8 @@
 // importen tanto el CLI (scripts/restaurar-backup.mjs) como la prueba del Worker
 // (apps/worker/test/fase6-restauracion.test.ts), que ejecuta el SQL contra una D1 local real.
 //
-// Qué hace: a partir del manifest (`formato: 2`) y de las filas de cada NDJSON, reconstruye el
+// Qué hace: a partir del manifest (`formato: 2`) y de las filas de cada NDJSON, leídas EN STREAMING
+// (revisión de esquema R-01: nunca se arma una tabla ni el SQL en un solo texto), reconstruye el
 // estado EXACTO de la base en la marca de corte `C = manifest.corte.seq`:
 // - lo creado después del corte (su primera auditoría es posterior a C) se excluye;
 // - lo modificado después del corte, en las tablas cuya auditoría guarda la fila completa, se
@@ -13,9 +14,9 @@
 // - `login_cupos` se importa tal cual; `refresh_tokens` NO se restaura (todos inician sesión otra vez);
 // - `audit_log` se importa hasta C.
 //
-// Devuelve el SQL de restauración (con guardia, borrado y recreación de los triggers), el SQL de
-// verificación (cada consulta debe devolver 0 filas), el SQL posterior (cambio de época) y el
-// informe. Nunca usa DELETE: las semillas de la migración 0002 se sobrescriben con un upsert.
+// Entrega el SQL de restauración sentencia por sentencia (con guardia, borrado y recreación de los
+// triggers) y devuelve el SQL de verificación (legible, cada consulta debe devolver 0 filas, y la
+// versión que falla sola, R-02), el SQL posterior (cambio de época) y el informe. Nunca usa DELETE: las semillas de la migración 0002 se sobrescriben con un upsert.
 
 /** Máximo de bytes por sentencia (el límite documentado de D1 es de 100 KB por sentencia). */
 export const MAX_BYTES_SENTENCIA = 90_000;
@@ -389,66 +390,74 @@ function indiceAuditoria(entidad, entidadId) {
   return `${entidad}\u0000${entidadId}`;
 }
 
-function comparar(x, y) {
-  return x < y ? -1 : x > y ? 1 : 0;
+function tuplaDe(tabla, fila) {
+  return `(${TABLAS[tabla].columnas.map((c) => literal(fila[c])).join(', ')})`;
 }
 
-/** INSERT de varias filas, partido para no pasar de `MAX_FILAS_SENTENCIA` ni `MAX_BYTES_SENTENCIA`. */
-function sentenciasInsert(tabla, filas, conflicto) {
-  const columnas = TABLAS[tabla].columnas;
-  const cabecera = `INSERT INTO ${tabla} (${columnas.join(', ')}) VALUES\n`;
-  const cola =
-    conflicto === undefined
-      ? ''
-      : `\nON CONFLICT (${TABLAS[tabla].pk.join(', ')}) DO UPDATE SET ${columnas
+/**
+ * Arma `INSERT` de varias filas a medida que llegan y los entrega a `escribir` en cuanto se llenan
+ * (`MAX_FILAS_SENTENCIA` filas o `MAX_BYTES_SENTENCIA` bytes): nunca guarda más de una sentencia.
+ */
+class Insertador {
+  constructor(tabla, escribir, upsert = false) {
+    const columnas = TABLAS[tabla].columnas;
+    this.tabla = tabla;
+    this.escribir = escribir;
+    this.cabecera = `INSERT INTO ${tabla} (${columnas.join(', ')}) VALUES\n`;
+    this.cola = upsert
+      ? `\nON CONFLICT (${TABLAS[tabla].pk.join(', ')}) DO UPDATE SET ${columnas
           .filter((c) => !TABLAS[tabla].pk.includes(c))
           .map((c) => `${c} = excluded.${c}`)
-          .join(', ')}`;
-  const fijo = bytesUtf8(cabecera) + bytesUtf8(cola);
-  const sentencias = [];
-  let grupo = [];
-  let bytesGrupo = fijo;
-  const cerrar = () => {
-    if (grupo.length > 0) {
-      sentencias.push(`${cabecera}${grupo.join(',\n')}${cola}`);
-      grupo = [];
-      bytesGrupo = fijo;
-    }
-  };
-  for (const fila of filas) {
-    const tupla = `(${columnas.map((c) => literal(fila[c])).join(', ')})`;
+          .join(', ')}`
+      : '';
+    this.fijo = bytesUtf8(this.cabecera) + bytesUtf8(this.cola);
+    this.grupo = [];
+    this.bytes = this.fijo;
+  }
+
+  /** ¿Cabe la fila sola en una sentencia? */
+  cabe(fila) {
+    return this.fijo + bytesUtf8(tuplaDe(this.tabla, fila)) + 2 <= MAX_BYTES_SENTENCIA;
+  }
+
+  async agregar(fila) {
+    const tupla = tuplaDe(this.tabla, fila);
     const tamano = bytesUtf8(tupla) + 2;
-    if (fijo + tamano > MAX_BYTES_SENTENCIA) {
+    if (this.fijo + tamano > MAX_BYTES_SENTENCIA) {
       throw new ErrorRestauracion(
         'INTEGRIDAD',
-        `Una fila de ${tabla} no cabe en una sentencia de ${String(MAX_BYTES_SENTENCIA)} bytes`,
-        { tabla, clave: claveDe(tabla, fila) },
+        `Una fila de ${this.tabla} no cabe en una sentencia de ${String(MAX_BYTES_SENTENCIA)} bytes`,
+        { tabla: this.tabla, clave: claveDe(this.tabla, fila) },
       );
     }
-    if (grupo.length >= MAX_FILAS_SENTENCIA || bytesGrupo + tamano > MAX_BYTES_SENTENCIA) {
-      cerrar();
+    if (this.grupo.length >= MAX_FILAS_SENTENCIA || this.bytes + tamano > MAX_BYTES_SENTENCIA) {
+      await this.cerrar();
     }
-    grupo.push(tupla);
-    bytesGrupo += tamano;
+    this.grupo.push(tupla);
+    this.bytes += tamano;
   }
-  cerrar();
-  return sentencias;
+
+  async cerrar() {
+    if (this.grupo.length > 0) {
+      const sentencia = `${this.cabecera}${this.grupo.join(',\n')}${this.cola}`;
+      this.grupo = [];
+      this.bytes = this.fijo;
+      await this.escribir(sentencia);
+    }
+  }
 }
 
-function bytesDeFila(tabla, fila) {
-  return bytesUtf8(`(${TABLAS[tabla].columnas.map((c) => literal(fila[c])).join(', ')})`);
-}
+const PATRON_UUID_V7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 /** `payload_json` reducido de una mutación no aplicada (mismo formato que la ADR 0020). */
 function payloadRecortado(fila) {
-  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
   let payload = {};
   try {
     const original = JSON.parse(String(fila.payload_json));
     const p = original !== null && typeof original === 'object' ? original.payload : null;
     if (p !== null && typeof p === 'object') {
       for (const clave of ['id', 'consumption_id']) {
-        if (typeof p[clave] === 'string' && uuid.test(p[clave])) {
+        if (typeof p[clave] === 'string' && PATRON_UUID_V7.test(p[clave])) {
           payload[clave] = p[clave];
         }
       }
@@ -465,11 +474,25 @@ function payloadRecortado(fila) {
   });
 }
 
+/**
+ * `respuesta_json` reducida de una mutación no aplicada (R-10): conserva `resultado` y `code`, que
+ * es lo que devuelve un reenvío; el mensaje y el estado del servidor se pierden.
+ */
+function respuestaRecortada(fila) {
+  const respuesta = objetoJson(fila.respuesta_json) ?? {};
+  return JSON.stringify({
+    resultado: typeof respuesta.resultado === 'string' ? respuesta.resultado : fila.resultado,
+    ...(typeof respuesta.code === 'string' ? { code: respuesta.code.slice(0, 64) } : {}),
+    recortada: true,
+    tamano_bytes: bytesUtf8(String(fila.respuesta_json)),
+  });
+}
+
 // ---------------------------------------------------------------------------------------------
 // Validación del manifest
 // ---------------------------------------------------------------------------------------------
 
-function validarManifest(manifest, filas) {
+function validarManifest(manifest) {
   if (manifest === null || typeof manifest !== 'object' || manifest.formato !== 2) {
     throw new ErrorRestauracion(
       'INTEGRIDAD',
@@ -510,25 +533,15 @@ function validarManifest(manifest, filas) {
       }
       continue;
     }
-    if (entrada.estado !== 'completa') {
-      throw new ErrorRestauracion('INTEGRIDAD', `Estado desconocido de la tabla ${tabla}`);
-    }
-    if (tabla === 'refresh_tokens') {
-      continue;
-    }
-    const lista = filas[tabla];
-    if (!Array.isArray(lista) || lista.length !== entrada.filas) {
-      throw new ErrorRestauracion(
-        'INTEGRIDAD',
-        `Las filas de ${tabla} no coinciden con el manifest (${String(entrada.filas)})`,
-      );
+    if (entrada.estado !== 'completa' || !Number.isInteger(entrada.filas)) {
+      throw new ErrorRestauracion('INTEGRIDAD', `Estado o conteo inválido de la tabla ${tabla}`);
     }
   }
   return entradas;
 }
 
 // ---------------------------------------------------------------------------------------------
-// Reconciliación
+// Reconciliación en streaming
 // ---------------------------------------------------------------------------------------------
 
 /** Valor de la auditoría convertido al de la columna (booleanos y JSON). */
@@ -555,69 +568,64 @@ function objetoJson(texto) {
   }
 }
 
-/** Ordena los consumos de modo que un original vaya antes que su corrección (`corrige_a`). */
-function ordenTopologicoConsumos(consumos) {
-  const porId = new Map(consumos.map((c) => [c.id, c]));
-  const ordenados = [];
-  const vistos = new Set();
-  const visitar = (consumo) => {
-    if (vistos.has(consumo.id)) {
-      return;
-    }
-    vistos.add(consumo.id);
-    const original = consumo.corrige_a === null ? undefined : porId.get(consumo.corrige_a);
-    if (original !== undefined) {
-      visitar(original);
-    }
-    ordenados.push(consumo);
-  };
-  for (const consumo of [...consumos].sort((x, y) => comparar(x.id, y.id))) {
-    visitar(consumo);
-  }
-  return ordenados;
+/** Máximo de claves sin auditoría que se listan en el error o en el informe (más el total). */
+const MAX_LISTA_SIN_AUDITORIA = 1000;
+
+function accionesDe(post) {
+  return post.map((a) => ({
+    seq: a.seq,
+    accion: a.accion,
+    actor_id: a.actor_id,
+    server_at: a.server_at,
+  }));
 }
 
 /**
- * Plan de restauración (ADR 0021). Lanza `ErrorRestauracion` si el backup no es restaurable
- * (`INTEGRIDAD`) o si hay filas sin auditoría en el origen (`SIN_AUDITORIA`, salvo
- * `conservarSinAuditoria`).
+ * Restauración en streaming (ADR 0021; revisión de esquema R-01). Lee cada tabla con
+ * `leerTabla(tabla)` (un iterable asíncrono de filas en el orden del NDJSON; `audit_log` se lee dos
+ * veces: primero para indexar y al final para importar) y entrega cada sentencia SQL, en orden, a
+ * `await escribir(sentencia)` en cuanto está lista. Solo guarda en memoria los índices que necesita
+ * la reconciliación (claves auditadas hasta el corte, las auditorías posteriores al corte y los ids
+ * y versiones de lo restaurado), nunca las filas completas.
+ *
+ * Si lanza `ErrorRestauracion`, lo ya escrito no sirve y debe descartarse.
  *
  * @param {{
  *   manifest: any;
- *   filas: Record<string, Record<string, unknown>[]>;
  *   triggers: { nombre: string; sql: string }[];
+ *   leerTabla: (tabla: string) => AsyncIterable<Record<string, unknown>> | Iterable<Record<string, unknown>>;
+ *   escribir: (sentencia: string) => Promise<void>;
  *   conservarSinAuditoria?: boolean;
+ *   omitirSyncMutations?: boolean;
  * }} entrada
  */
-export function planificarRestauracion(entrada) {
-  const { manifest, triggers } = entrada;
-  const filas = entrada.filas ?? {};
-  const entradas = validarManifest(manifest, filas);
+export async function restaurarEnStreaming(entrada) {
+  const { manifest, triggers, leerTabla, escribir } = entrada;
+  const entradas = validarManifest(manifest);
   const C = manifest.corte.seq;
   const S = manifest.seq_final;
   const corteMs = Date.parse(manifest.corte.at);
   if (!Array.isArray(triggers) || triggers.length === 0) {
     throw new ErrorRestauracion('INTEGRIDAD', 'No hay triggers esperados (¿migraciones vacías?)');
   }
+  const completa = (tabla) => entradas.get(tabla)?.estado === 'completa';
+  const omitirSync = entrada.omitirSyncMutations === true || !completa('sync_mutations');
 
-  // audit_log: exactamente 1..S, sin saltos.
-  const auditoria = [...(filas.audit_log ?? [])].sort((x, y) => x.seq - y.seq);
-  if (auditoria.length !== S || auditoria.some((fila, i) => fila.seq !== i + 1)) {
-    throw new ErrorRestauracion(
-      'INTEGRIDAD',
-      `audit_log no tiene exactamente los seq 1..${String(S)} (backup corrupto)`,
-    );
-  }
-  const antesDelCorte = new Set();
-  const despuesDelCorte = new Map();
-  for (const fila of auditoria) {
-    const indice = indiceAuditoria(fila.entidad, fila.entidad_id);
-    if (fila.seq <= C) {
-      antesDelCorte.add(indice);
-    } else {
-      const lista = despuesDelCorte.get(indice) ?? [];
-      lista.push(fila);
-      despuesDelCorte.set(indice, lista);
+  /** Recorre una tabla comprobando que trae exactamente las filas del manifest. */
+  async function* filasDe(tabla) {
+    if (!completa(tabla)) {
+      return;
+    }
+    let n = 0;
+    for await (const fila of leerTabla(tabla)) {
+      n += 1;
+      yield fila;
+    }
+    if (n !== entradas.get(tabla).filas) {
+      throw new ErrorRestauracion(
+        'INTEGRIDAD',
+        `Las filas de ${tabla} (${String(n)}) no coinciden con el manifest (${String(entradas.get(tabla).filas)})`,
+      );
     }
   }
 
@@ -629,28 +637,21 @@ export function planificarRestauracion(entrada) {
     sync_mutations: {
       aplicadas_conservadas: 0,
       aplicadas_sin_efecto_descartadas: 0,
+      aplicadas_demasiado_grandes_descartadas: 0,
       no_aplicadas_conservadas: 0,
       no_aplicadas_descartadas: 0,
-      tabla_omitida: entradas.get('sync_mutations')?.estado === 'incompleta',
+      tabla_omitida: omitirSync,
+      omitida_por_opcion: entrada.omitirSyncMutations === true,
     },
-    refresh_tokens_omitidos:
-      entradas.get('refresh_tokens')?.estado === 'completa'
-        ? Number(entradas.get('refresh_tokens').filas)
-        : 0,
-    login_cupos_omitida: entradas.get('login_cupos')?.estado === 'incompleta',
-    cambios_tras_el_corte: auditoria
-      .filter((fila) => fila.seq > C)
-      .map((fila) => ({
-        seq: fila.seq,
-        entidad: fila.entidad,
-        entidad_id: fila.entidad_id,
-        accion: fila.accion,
-        actor_id: fila.actor_id,
-        server_at: fila.server_at,
-      })),
+    refresh_tokens_omitidos: completa('refresh_tokens')
+      ? Number(entradas.get('refresh_tokens').filas)
+      : 0,
+    login_cupos_omitida: !completa('login_cupos'),
+    cambios_tras_el_corte: [],
     rechazos_tras_el_corte: [],
     revisar_seguridad: [],
     sin_auditoria_conservadas: [],
+    sin_auditoria_total: 0,
   };
   const contar = (tabla) => {
     informe.tablas[tabla] ??= {
@@ -665,15 +666,90 @@ export function planificarRestauracion(entrada) {
     return informe.tablas[tabla];
   };
 
-  // Tablas auditadas: excluir lo creado tras el corte, revertir lo modificado (si es revertible).
-  const restauradas = {};
+  // 1. Índice de auditoría (primera lectura de audit_log): claves hasta el corte y, de lo posterior
+  //    al corte, solo lo que usan la reversión y el informe.
+  const antesDelCorte = new Set();
+  const despuesDelCorte = new Map();
+  {
+    let esperado = 1;
+    for await (const fila of filasDe('audit_log')) {
+      if (fila.seq !== esperado) {
+        throw new ErrorRestauracion(
+          'INTEGRIDAD',
+          `audit_log no tiene exactamente los seq 1..${String(S)} en orden (backup corrupto)`,
+        );
+      }
+      esperado += 1;
+      const indice = indiceAuditoria(fila.entidad, fila.entidad_id);
+      if (fila.seq <= C) {
+        antesDelCorte.add(indice);
+        continue;
+      }
+      const resumen = {
+        seq: fila.seq,
+        entidad: fila.entidad,
+        entidad_id: fila.entidad_id,
+        accion: fila.accion,
+        actor_id: fila.actor_id,
+        server_at: fila.server_at,
+      };
+      informe.cambios_tras_el_corte.push(resumen);
+      const lista = despuesDelCorte.get(indice) ?? [];
+      lista.push({ ...resumen, datos_antes: fila.datos_antes });
+      despuesDelCorte.set(indice, lista);
+    }
+    if (esperado - 1 !== S) {
+      throw new ErrorRestauracion(
+        'INTEGRIDAD',
+        `audit_log no tiene exactamente los seq 1..${String(S)} (backup corrupto)`,
+      );
+    }
+  }
+
+  // 2. Guardia y borrado de triggers.
+  for (const sentencia of sqlInicio(manifest, triggers)) {
+    await escribir(sentencia);
+  }
+
+  // 3. Tablas auditadas: excluir lo creado tras el corte, revertir lo modificado (si es revertible).
   const sinAuditoria = [];
-  const excluidas = { users: new Set(), devices: new Set() };
+  const usuarios = new Set();
+  const dispositivos = new Set();
+  const versiones = new Map();
+  const novedades = new Set();
+  const validaciones = new Set();
+  const correccionesPendientes = [];
   for (const tabla of ORDEN_IMPORTACION.filter((t) => TABLAS_AUDITADAS.includes(t))) {
     const definicion = TABLAS[tabla];
     const cuenta = contar(tabla);
-    const salida = [];
-    for (const fila of filas[tabla] ?? []) {
+    const insertador = new Insertador(tabla, escribir, tabla === 'settings');
+    const conservar = async (fila) => {
+      let salida = fila;
+      if (tabla === 'consumptions') {
+        // Sin ordenar en memoria (R-01): una corrección cuyo original aún no llegó se inserta sin
+        // `corrige_a` y se enlaza al final de la tabla (los triggers están borrados).
+        if (
+          fila.corrige_a !== null &&
+          fila.corrige_a !== undefined &&
+          !versiones.has(fila.corrige_a)
+        ) {
+          correccionesPendientes.push({ id: fila.id, corrige_a: fila.corrige_a });
+          salida = { ...fila, corrige_a: null };
+        }
+        versiones.set(fila.id, Number(fila.version));
+      } else if (tabla === 'users') {
+        usuarios.add(fila.id);
+      } else if (tabla === 'devices') {
+        dispositivos.add(fila.id);
+      } else if (tabla === 'incidents') {
+        novedades.add(fila.id);
+      } else if (tabla === 'validations') {
+        validaciones.add(fila.id);
+      }
+      cuenta.importadas += 1;
+      await insertador.agregar(salida);
+    };
+    for await (const fila of filasDe(tabla)) {
       cuenta.exportadas += 1;
       const clave = claveDe(tabla, fila);
       const indice = indiceAuditoria(tabla, clave);
@@ -681,33 +757,30 @@ export function planificarRestauracion(entrada) {
       const post = despuesDelCorte.get(indice) ?? [];
       if (!pre && post.length > 0) {
         cuenta.excluidas += 1;
-        excluidas[tabla]?.add(clave);
         if (tabla === 'users') {
           informe.revisar_seguridad.push({
             entidad: 'users',
             entidad_id: clave,
             tipo: 'creado_tras_el_corte_no_restaurado',
-            acciones: post.map((a) => ({
-              seq: a.seq,
-              accion: a.accion,
-              actor_id: a.actor_id,
-              server_at: a.server_at,
-            })),
+            acciones: accionesDe(post),
           });
         }
         continue;
       }
       if (!pre) {
-        sinAuditoria.push({ tabla, clave });
+        informe.sin_auditoria_total += 1;
+        if (sinAuditoria.length < MAX_LISTA_SIN_AUDITORIA) {
+          sinAuditoria.push({ tabla, clave });
+        }
         if (entrada.conservarSinAuditoria === true) {
           cuenta.sin_auditoria_conservadas += 1;
           informe.sin_auditoria_conservadas.push({ tabla, clave });
-          salida.push(fila);
+          await conservar(fila);
         }
         continue;
       }
       if (post.length === 0) {
-        salida.push(fila);
+        await conservar(fila);
         continue;
       }
       if (definicion.clase === 'ultimo_valor') {
@@ -717,70 +790,77 @@ export function planificarRestauracion(entrada) {
             entidad: 'users',
             entidad_id: clave,
             tipo: 'cambios_tras_el_corte_conservados',
-            acciones: post.map((a) => ({
-              seq: a.seq,
-              accion: a.accion,
-              actor_id: a.actor_id,
-              server_at: a.server_at,
-            })),
+            acciones: accionesDe(post),
           });
         }
-        salida.push(fila);
+        await conservar(fila);
         continue;
       }
-      // Revertible: cada columna toma el `datos_antes` de la primera auditoría posterior al corte
-      // que la incluya. Nunca se tocan la PK ni las inmutables.
+      // Revertible (R-04): el estado en el corte es EXACTAMENTE el `datos_antes` de la primera
+      // auditoría posterior al corte. Si esa imagen no trae una columna revertible, no se adivina.
+      const imagen = objetoJson(post[0].datos_antes);
       const intocables = new Set([...definicion.pk, ...(definicion.inmutables ?? [])]);
       const revertida = { ...fila };
-      const imagenes = post.map((a) => objetoJson(a.datos_antes)).filter((i) => i !== null);
       for (const columna of definicion.columnas) {
         if (intocables.has(columna)) {
           continue;
         }
-        const imagen = imagenes.find((i) => Object.hasOwn(i, columna));
-        if (imagen !== undefined) {
-          revertida[columna] = valorDeAuditoria(tabla, columna, imagen[columna]);
+        if (imagen === null || !Object.hasOwn(imagen, columna)) {
+          throw new ErrorRestauracion(
+            'INTEGRIDAD',
+            `La primera auditoría posterior al corte de ${tabla} ${clave} no trae la columna ${columna}: no se puede revertir`,
+            { tabla, clave, seq: post[0].seq, columna },
+          );
         }
+        revertida[columna] = valorDeAuditoria(tabla, columna, imagen[columna]);
       }
       cuenta.revertidas += 1;
-      salida.push(revertida);
+      await conservar(revertida);
     }
-    restauradas[tabla] = tabla === 'consumptions' ? ordenTopologicoConsumos(salida) : salida;
+    await insertador.cerrar();
+    if (tabla === 'consumptions') {
+      for (const { id, corrige_a: original } of correccionesPendientes) {
+        if (!versiones.has(original)) {
+          throw new ErrorRestauracion(
+            'INTEGRIDAD',
+            `El consumo ${String(id)} corrige a ${String(original)}, que no está en el backup restaurado`,
+          );
+        }
+        await escribir(
+          `UPDATE consumptions SET corrige_a = ${literal(original)} WHERE id = ${literal(id)}`,
+        );
+      }
+    }
   }
   if (sinAuditoria.length > 0 && entrada.conservarSinAuditoria !== true) {
     throw new ErrorRestauracion(
       'SIN_AUDITORIA',
-      `${String(sinAuditoria.length)} filas sin ninguna auditoría en el origen (defecto previo al backup)`,
+      `${String(informe.sin_auditoria_total)} filas sin ninguna auditoría en el origen (defecto previo al backup)`,
       sinAuditoria,
     );
   }
 
-  const usuarios = new Set((restauradas.users ?? []).map((f) => f.id));
-  const dispositivos = new Set((restauradas.devices ?? []).map((f) => f.id));
-
-  // login_cupos: tal cual, salvo las filas de usuarios que no se restauran.
+  // 4. login_cupos: tal cual, salvo las filas de usuarios que no se restauran.
   {
     const cuenta = contar('login_cupos');
-    restauradas.login_cupos = [];
-    for (const fila of filas.login_cupos ?? []) {
+    const insertador = new Insertador('login_cupos', escribir);
+    for await (const fila of filasDe('login_cupos')) {
       cuenta.exportadas += 1;
       if (usuarios.has(fila.user_id)) {
-        restauradas.login_cupos.push(fila);
+        cuenta.importadas += 1;
+        await insertador.agregar(fila);
       } else {
         cuenta.excluidas += 1;
       }
     }
+    await insertador.cerrar();
   }
 
-  // sync_mutations: aplicadas solo con su efecto; no aplicadas solo si son anteriores al corte.
+  // 5. sync_mutations: aplicadas solo con su efecto; no aplicadas solo si son anteriores al corte.
   {
     const cuenta = contar('sync_mutations');
-    restauradas.sync_mutations = [];
-    const versiones = new Map(
-      (restauradas.consumptions ?? []).map((c) => [c.id, Number(c.version)]),
-    );
-    const novedades = new Set((restauradas.incidents ?? []).map((f) => f.id));
-    const validaciones = new Set((restauradas.validations ?? []).map((f) => f.id));
+    const insertador = new Insertador('sync_mutations', escribir);
+    const resumen = informe.sync_mutations;
     const efectoExiste = (fila) => {
       const respuesta = objetoJson(fila.respuesta_json);
       const servidor = respuesta === null ? null : respuesta.servidor;
@@ -807,40 +887,53 @@ export function planificarRestauracion(entrada) {
           return false;
       }
     };
-    for (const fila of informe.sync_mutations.tabla_omitida ? [] : (filas.sync_mutations ?? [])) {
+    for await (const fila of omitirSync ? [] : filasDe('sync_mutations')) {
       cuenta.exportadas += 1;
+      const aplicada = fila.resultado === 'aplicada';
       if (!usuarios.has(fila.user_id) || !dispositivos.has(fila.device_id)) {
         cuenta.excluidas += 1;
-        if (fila.resultado === 'aplicada') {
-          informe.sync_mutations.aplicadas_sin_efecto_descartadas += 1;
+        if (aplicada) {
+          resumen.aplicadas_sin_efecto_descartadas += 1;
         } else {
-          informe.sync_mutations.no_aplicadas_descartadas += 1;
+          resumen.no_aplicadas_descartadas += 1;
         }
         continue;
       }
-      if (fila.resultado === 'aplicada') {
-        if (efectoExiste(fila)) {
-          informe.sync_mutations.aplicadas_conservadas += 1;
-          restauradas.sync_mutations.push(fila);
-        } else {
-          informe.sync_mutations.aplicadas_sin_efecto_descartadas += 1;
+      if (aplicada) {
+        if (!efectoExiste(fila)) {
+          resumen.aplicadas_sin_efecto_descartadas += 1;
           cuenta.excluidas += 1;
+        } else if (!insertador.cabe(fila)) {
+          // Descartar una aplicada es seguro (el reenvío se reconoce por clave natural, ADR 0016).
+          resumen.aplicadas_demasiado_grandes_descartadas += 1;
+          cuenta.excluidas += 1;
+        } else {
+          resumen.aplicadas_conservadas += 1;
+          cuenta.importadas += 1;
+          await insertador.agregar(fila);
         }
         continue;
       }
       if (Date.parse(String(fila.procesada_at)) < corteMs - MARGEN_NO_APLICADAS_MS) {
         let conservada = fila;
-        if (bytesDeFila('sync_mutations', fila) + 200 > MAX_BYTES_SENTENCIA) {
-          conservada = { ...fila, payload_json: payloadRecortado(fila) };
+        if (!insertador.cabe(conservada)) {
+          conservada = {
+            ...conservada,
+            payload_json: conservada.payload_json === null ? null : payloadRecortado(conservada),
+          };
           cuenta.recortadas += 1;
         }
-        informe.sync_mutations.no_aplicadas_conservadas += 1;
-        restauradas.sync_mutations.push(conservada);
+        if (!insertador.cabe(conservada)) {
+          conservada = { ...conservada, respuesta_json: respuestaRecortada(conservada) };
+        }
+        resumen.no_aplicadas_conservadas += 1;
+        cuenta.importadas += 1;
+        await insertador.agregar(conservada);
         continue;
       }
       // ADR 0021, 4.3: descartarla NO es "siempre seguro" (el cliente no reenvía un rechazo que ya
       // recibió): va al informe para que alguien la revise.
-      informe.sync_mutations.no_aplicadas_descartadas += 1;
+      resumen.no_aplicadas_descartadas += 1;
       cuenta.excluidas += 1;
       const respuesta = objetoJson(fila.respuesta_json);
       informe.rechazos_tras_el_corte.push({
@@ -851,54 +944,99 @@ export function planificarRestauracion(entrada) {
         code: respuesta !== null && typeof respuesta.code === 'string' ? respuesta.code : null,
       });
     }
+    await insertador.cerrar();
   }
 
-  // audit_log hasta el corte.
+  // 6. audit_log hasta el corte (segunda lectura).
   {
     const cuenta = contar('audit_log');
-    cuenta.exportadas = auditoria.length;
-    restauradas.audit_log = auditoria.filter((fila) => fila.seq <= C);
-    cuenta.excluidas = auditoria.length - restauradas.audit_log.length;
+    cuenta.exportadas = S;
+    cuenta.excluidas = S - C;
+    const insertador = new Insertador('audit_log', escribir, true);
+    for await (const fila of filasDe('audit_log')) {
+      if (fila.seq <= C) {
+        cuenta.importadas += 1;
+        await insertador.agregar(fila);
+      }
+    }
+    await insertador.cerrar();
   }
+
+  // 7. Triggers y fin de la guardia.
+  for (const t of triggers) {
+    await escribir(t.sql);
+  }
+  await escribir('DROP TABLE _restauracion_guardia');
 
   for (const tabla of ORDEN_IMPORTACION) {
-    contar(tabla).importadas = (restauradas[tabla] ?? []).length;
+    contar(tabla);
   }
-
-  const restauracion = sqlRestauracion(manifest, triggers, restauradas);
   const verificacion = sqlVerificacion(C, triggers, informe);
   return {
-    restauracion,
     verificacion,
+    verificacionAutofallante: sqlVerificacionAutofallante(verificacion),
     postRestauracion: SQL_POST_RESTAURACION,
     informe,
   };
 }
 
+/**
+ * Versión en memoria de `restaurarEnStreaming` (pruebas y backups pequeños): toma las filas de cada
+ * tabla como arreglos y devuelve las sentencias en un arreglo.
+ *
+ * @param {{
+ *   manifest: any;
+ *   filas: Record<string, Record<string, unknown>[]>;
+ *   triggers: { nombre: string; sql: string }[];
+ *   conservarSinAuditoria?: boolean;
+ *   omitirSyncMutations?: boolean;
+ * }} entrada
+ */
+export async function planificarRestauracion(entrada) {
+  const restauracion = [];
+  const filas = entrada.filas ?? {};
+  const resultado = await restaurarEnStreaming({
+    manifest: entrada.manifest,
+    triggers: entrada.triggers,
+    conservarSinAuditoria: entrada.conservarSinAuditoria,
+    omitirSyncMutations: entrada.omitirSyncMutations,
+    leerTabla: (tabla) => filas[tabla] ?? [],
+    escribir: (sentencia) => {
+      restauracion.push(sentencia);
+      return Promise.resolve();
+    },
+  });
+  return { restauracion, ...resultado };
+}
+
 // ---------------------------------------------------------------------------------------------
-// restauracion.sql
+// restauracion.sql: inicio (guardia y borrado de triggers)
 // ---------------------------------------------------------------------------------------------
 
 function valoresEsperados(triggers) {
   return triggers.map((t) => `(${literal(t.nombre)}, ${literal(t.sql)})`).join(',\n  ');
 }
 
-function sqlRestauracion(manifest, triggers, restauradas) {
-  const sentencias = [
+/** Tablas que deben estar vacías en una base recién migrada (todas salvo settings y audit_log). */
+const VACIAS_EN_BASE_NUEVA = [...ORDEN_IMPORTACION, 'refresh_tokens'].filter(
+  (t) => t !== 'settings' && t !== 'audit_log',
+);
+/** Claves que siembra la migración 0002 (en orden alfabético). */
+const CLAVES_SETTINGS_SEMBRADAS = 'sync_epoca,tolerancia_pct';
+
+function sqlInicio(manifest, triggers) {
+  return [
     'PRAGMA defer_foreign_keys = on',
     'CREATE TABLE _restauracion_guardia (ok INTEGER NOT NULL CHECK (ok = 1))',
-    // Guardia: base recién migrada, con la misma última migración del backup y exactamente los
-    // triggers de las migraciones. Si algo no cuadra, el CHECK (o el NOT NULL) aborta antes de
-    // tocar nada.
+    // Guardia (R-05): base recién migrada (todas las tablas vacías salvo las semillas de 0002), con
+    // la misma última migración del backup y exactamente los triggers de las migraciones. Si algo
+    // no cuadra, el CHECK (o el NOT NULL) aborta antes de tocar nada.
     `WITH esperados(n, s) AS (VALUES
   ${valoresEsperados(triggers)})
 INSERT INTO _restauracion_guardia (ok) SELECT COALESCE(
-  (SELECT COUNT(*) FROM users) = 0
-  AND (SELECT COUNT(*) FROM devices) = 0
-  AND (SELECT COUNT(*) FROM consumptions) = 0
-  AND (SELECT COUNT(*) FROM refresh_tokens) = 0
-  AND (SELECT COUNT(*) FROM login_cupos) = 0
+  ${VACIAS_EN_BASE_NUEVA.map((t) => `NOT EXISTS (SELECT 1 FROM ${t})`).join('\n  AND ')}
   AND NOT EXISTS (SELECT 1 FROM audit_log WHERE accion <> 'seed')
+  AND (SELECT group_concat(clave, ',') FROM (SELECT clave FROM settings ORDER BY clave)) = '${CLAVES_SETTINGS_SEMBRADAS}'
   AND (SELECT name FROM d1_migrations ORDER BY id DESC LIMIT 1) = ${literal(manifest.ultima_migracion)}
   AND (SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger') = (SELECT COUNT(*) FROM esperados)
   AND NOT EXISTS (
@@ -907,13 +1045,27 @@ INSERT INTO _restauracion_guardia (ok) SELECT COALESCE(
   0)`,
     ...triggers.map((t) => `DROP TRIGGER IF EXISTS ${t.nombre}`),
   ];
-  for (const tabla of ORDEN_IMPORTACION) {
-    const conflicto = tabla === 'settings' || tabla === 'audit_log' ? 'upsert' : undefined;
-    sentencias.push(...sentenciasInsert(tabla, restauradas[tabla] ?? [], conflicto));
-  }
-  sentencias.push(...triggers.map((t) => t.sql));
-  sentencias.push('DROP TABLE _restauracion_guardia');
-  return sentencias;
+}
+
+// ---------------------------------------------------------------------------------------------
+// verificacion.sql que falla sola (R-02)
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * Cada verificación como un `INSERT … SELECT NOT EXISTS (<consulta>)` en una tabla con
+ * `CHECK (ok = 1)`: si alguna devuelve filas, el archivo aborta. Sirve con `wrangler d1 execute
+ * --remote --file`, que puede no devolver las filas de los SELECT.
+ */
+function sqlVerificacionAutofallante(verificacion) {
+  return [
+    'DROP TABLE IF EXISTS _verificacion_restauracion',
+    'CREATE TABLE _verificacion_restauracion (nombre TEXT NOT NULL, ok INTEGER NOT NULL CHECK (ok = 1))',
+    ...verificacion.map(
+      (v) =>
+        `INSERT INTO _verificacion_restauracion (nombre, ok) SELECT ${literal(v.nombre)}, NOT EXISTS (\n${v.sql}\n)`,
+    ),
+    'DROP TABLE _verificacion_restauracion',
+  ];
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -994,7 +1146,8 @@ HAVING MAX(seq) IS NOT ${String(C)} OR COUNT(*) IS NOT ${String(C)}`,
     ELSE 0
   END, 0)`,
   });
-  consultas.push({ nombre: 'V7_foreign_keys', sql: 'PRAGMA foreign_key_check' });
+  // Función de tabla (y no `PRAGMA foreign_key_check`) para que también sirva dentro de NOT EXISTS.
+  consultas.push({ nombre: 'V7_foreign_keys', sql: 'SELECT * FROM pragma_foreign_key_check' });
   consultas.push({
     nombre: 'V8_triggers',
     sql: `WITH esperados(n, s) AS (VALUES

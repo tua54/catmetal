@@ -58,8 +58,9 @@ export default defineConfig({
       wrangler: { configPath: './wrangler.jsonc' },
       miniflare: {
         // Segunda D1 local, SOLO de pruebas: la base limpia donde la prueba de restauración importa
-        // el NDJSON del backup (ADR 0021, punto 9). No existe en wrangler.jsonc.
-        d1Databases: { DB_RESTAURADA: 'restauracion-pruebas' },
+        // el NDJSON del backup (ADR 0021, punto 9), y otra para probar la guardia (R-05). No existen
+        // en wrangler.jsonc.
+        d1Databases: { DB_RESTAURADA: 'restauracion-pruebas', DB_GUARDIA: 'guardia-pruebas' },
         bindings: {
           ...SECRETOS_DE_PRUEBA,
           TEST_MIGRATIONS: migraciones,

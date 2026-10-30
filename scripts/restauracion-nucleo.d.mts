@@ -57,8 +57,11 @@ export interface InformeRestauracion {
     aplicadas_conservadas: number;
     aplicadas_sin_efecto_descartadas: number;
     no_aplicadas_conservadas: number;
+    aplicadas_demasiado_grandes_descartadas: number;
     no_aplicadas_descartadas: number;
     tabla_omitida: boolean;
+    /** La omitió `--omitir-sync-mutations` (y no un backup parcial). */
+    omitida_por_opcion: boolean;
   };
   refresh_tokens_omitidos: number;
   login_cupos_omitida: boolean;
@@ -84,13 +87,20 @@ export interface InformeRestauracion {
     acciones: AccionAuditada[];
   }[];
   sin_auditoria_conservadas: { tabla: string; clave: string }[];
+  sin_auditoria_total: number;
 }
 
-export interface PlanRestauracion {
-  restauracion: string[];
+export interface ResultadoRestauracion {
+  /** Consultas legibles: cada una debe devolver 0 filas. */
   verificacion: { nombre: string; sql: string }[];
+  /** Las mismas, como sentencias que abortan si alguna encuentra filas (R-02). */
+  verificacionAutofallante: string[];
   postRestauracion: string[];
   informe: InformeRestauracion;
+}
+
+export interface PlanRestauracion extends ResultadoRestauracion {
+  restauracion: string[];
 }
 
 export interface EntradaRestauracion {
@@ -98,6 +108,17 @@ export interface EntradaRestauracion {
   filas: Record<string, Fila[]>;
   triggers: TriggerEsperado[];
   conservarSinAuditoria?: boolean;
+  omitirSyncMutations?: boolean;
+}
+
+export interface EntradaStreaming {
+  manifest: unknown;
+  triggers: TriggerEsperado[];
+  /** Filas de la tabla en el orden del NDJSON (audit_log se lee dos veces). */
+  leerTabla: (tabla: string) => AsyncIterable<Fila> | Iterable<Fila>;
+  escribir: (sentencia: string) => Promise<void>;
+  conservarSinAuditoria?: boolean;
+  omitirSyncMutations?: boolean;
 }
 
 export function triggersDeMigraciones(
@@ -106,5 +127,6 @@ export function triggersDeMigraciones(
 ): TriggerEsperado[];
 export function filasDeNdjson(texto: string): Fila[];
 export function literal(valor: unknown): string;
-export function planificarRestauracion(entrada: EntradaRestauracion): PlanRestauracion;
+export function restaurarEnStreaming(entrada: EntradaStreaming): Promise<ResultadoRestauracion>;
+export function planificarRestauracion(entrada: EntradaRestauracion): Promise<PlanRestauracion>;
 export function archivoSql(sentencias: readonly string[], encabezado?: readonly string[]): string;

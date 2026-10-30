@@ -190,7 +190,15 @@ export interface InfoPagina {
   bytesNdjson: number;
   /** Filas que midió la ventana de la consulta. */
   filasMedicion: number;
+  /** Cómo se midió el tamaño de las filas (R-03: respaldo si `octet_length` no existe). */
+  medida: MedidaTamano;
 }
+
+/**
+ * Cómo mide D1 el tamaño de una columna: `octet_length(col)` (SQLite ≥ 3.43; no lee el contenido) o,
+ * si no existe, `length(CAST(col AS BLOB))` (revisión de esquema R-03).
+ */
+export type MedidaTamano = 'octet_length' | 'length_blob';
 
 export interface OpcionesBackup {
   presupuesto?: Presupuesto;
@@ -206,6 +214,11 @@ export interface OpcionesBackup {
   observarPagina?: (info: InfoPagina) => void;
   /** Inyección de fallos (solo pruebas): se llama antes de cada página y, si lanza, falla la tabla. */
   fallarEn?: (tabla: string) => void;
+  /**
+   * Función de SQL para medir columnas (por defecto `octet_length`; solo pruebas: una inexistente
+   * fuerza el respaldo `length(CAST(... AS BLOB))`).
+   */
+  funcionTamano?: string;
 }
 
 interface ResumenTerminado {
@@ -255,6 +268,9 @@ export async function ejecutarBackup(
     tamanoParte: opciones.tamanoParteBytes ?? TAMANO_PARTE_BYTES,
     observarPagina: opciones.observarPagina,
     fallarEn: opciones.fallarEn,
+    funcionTamano: opciones.funcionTamano ?? 'octet_length',
+    medida: 'octet_length',
+    fecha: fechaBackup(ahora),
   };
   // Todo lo del backup (tablas, manifest, progreso y parciales) va al bucket BACKUPS; EVIDENCE queda
   // solo para las fotos (F6-08).
@@ -454,6 +470,11 @@ interface Config {
   tamanoParte: number;
   observarPagina: ((info: InfoPagina) => void) | undefined;
   fallarEn: ((tabla: string) => void) | undefined;
+  /** Función de tamaño de `octet_length` (inyectable en pruebas). */
+  funcionTamano: string;
+  /** Se pasa a `length_blob` la primera vez que la función no existe, y se recuerda. */
+  medida: MedidaTamano;
+  fecha: string;
 }
 
 function estadoNuevo(tabla: string): TablaEnCurso {
@@ -539,6 +560,9 @@ function epocaDe(valor: unknown): string | null {
  *
  * Cada fila trae dos columnas auxiliares: `__bk_total` (filas que midió la ventana) y `__bk_n`
  * (filas que entraron). Se quitan con `sinColumnasAuxiliares` antes de serializar.
+ *
+ * `funcionTamano`: `length_blob` usa `length(CAST(col AS BLOB))` (respaldo, R-03); cualquier otro
+ * valor es el nombre de la función de SQL (por defecto `octet_length`).
  */
 export function sentenciaPagina(
   db: D1Database,
@@ -547,6 +571,7 @@ export function sentenciaPagina(
   filas: number,
   maxBytes: number = MAX_BYTES_PAGINA,
   seqFinal: number | null = null,
+  funcionTamano = 'octet_length',
 ): D1PreparedStatement {
   const orden = tabla.pk.join(', ');
   const descendente = tabla.pk.map((columna) => `${columna} DESC`).join(', ');
@@ -566,7 +591,11 @@ export function sentenciaPagina(
   }
   const donde = condiciones.length > 0 ? `WHERE ${condiciones.join(' AND ')}` : '';
   const tamano = tabla.columnas
-    .map((columna) => `COALESCE(octet_length(${columna}), 0)`)
+    .map((columna) =>
+      funcionTamano === 'length_blob'
+        ? `COALESCE(length(CAST(${columna} AS BLOB)), 0)`
+        : `COALESCE(${funcionTamano}(${columna}), 0)`,
+    )
     .join(' + ');
   // `{}` y salto de línea, más `"nombre":` y la coma de cada columna (las comillas de un texto
   // quedan dentro del margen de 6 bytes por columna).
@@ -651,6 +680,51 @@ async function escribirPagina(
 }
 
 /**
+ * Una página de la tabla. Si D1 no tiene la función de tamaño ("no such function", R-03), pasa a
+ * `length(CAST(col AS BLOB))` para el resto de la invocación, lo registra una vez y repite la
+ * página (no cuenta como fallo de la tabla).
+ */
+async function leerPagina(
+  db: D1Database,
+  tabla: TablaBackup,
+  cursor: readonly ValorPk[] | null,
+  ventana: number,
+  seqFinal: number | null,
+  config: Config,
+  presupuesto: Presupuesto,
+): Promise<Fila[]> {
+  const consultar = async (): Promise<Fila[]> => {
+    presupuesto.consumirD1();
+    const funcion = config.medida === 'length_blob' ? 'length_blob' : config.funcionTamano;
+    const { results } = await sentenciaPagina(
+      db,
+      tabla,
+      cursor,
+      ventana,
+      config.maxBytesPagina,
+      seqFinal,
+      funcion,
+    ).all<Fila>();
+    return results;
+  };
+  try {
+    return await consultar();
+  } catch (error) {
+    const mensaje = error instanceof Error ? error.message : '';
+    if (config.medida === 'length_blob' || !/no such function/i.test(mensaje)) {
+      throw error;
+    }
+    config.medida = 'length_blob';
+    registrar('aviso', 'backup_sin_octet_length', {
+      fecha: config.fecha,
+      tabla: tabla.nombre,
+      funcion: config.funcionTamano,
+    });
+    return consultar();
+  }
+}
+
+/**
  * Exporta (o continúa) una tabla. Devuelve su entrada del manifest si la terminó, o `'pausada'` si
  * el presupuesto se agotó (el estado queda en `estado`, listo para guardarse en el progreso).
  */
@@ -682,15 +756,15 @@ async function exportarTabla(
     while (presupuesto.disponible(reserva)) {
       config.fallarEn?.(tabla.nombre);
       const ventana = Math.min(Math.max(estado.filas_medicion, minimo), config.tamanoPagina);
-      presupuesto.consumirD1();
-      const { results } = await sentenciaPagina(
+      const results = await leerPagina(
         db,
         tabla,
         estado.cursor,
         ventana,
-        config.maxBytesPagina,
         seqFinal,
-      ).all<Fila>();
+        config,
+        presupuesto,
+      );
       const ultima = results.at(-1);
       if (ultima === undefined) {
         terminada = true;
@@ -703,6 +777,7 @@ async function exportarTabla(
         filas: results.length,
         bytesNdjson,
         filasMedicion: ventana,
+        medida: config.medida,
       });
       estado.filas += results.length;
       estado.cursor = cursorDe(tabla, ultima);

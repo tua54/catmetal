@@ -136,6 +136,8 @@ npx wrangler deploy --env staging
 - Alertas a revisar en los logs: `backup_incompleto_del_dia`, `backup_fallido`, `backup_tabla_incompleta`, `backup_parcial`, `secretos_invalidos`, `sync_mutation_no_registrada`, `sync_push_transitorio`, `error_no_controlado`.
   - `backup_tabla_incompleta` (con `tabla`, `intentos` y `motivo`): una tabla falló `MAX_INTENTOS_TABLA` = 3 veces seguidas sin avanzar y el backup siguió con las demás (ADR 0020).
   - `backup_parcial` (con `tablas_incompletas`, separadas por coma): el backup del día terminó, pero sin esas tablas. Solo es restaurable si las incompletas son `sync_mutations`, `login_cupos` o `refresh_tokens` (sección 9.2). Investigue el `motivo` el mismo día.
+  - `backup_no_restaurable` (con `tablas`): un backup `parcial` con alguna tabla incompleta que la restauración no admite. Ese día solo se puede restaurar con Time Travel. Es urgente (revisión de esquema R-03).
+  - `backup_sin_octet_length` (aviso): D1 no tiene `octet_length`. El backup midió las filas con `length(CAST(col AS BLOB))` y siguió normalmente; anótelo en `docs/notas-plataforma.md`.
 
 ## 8. Backups
 
@@ -189,10 +191,18 @@ Procedimiento (ADR 0021, que reemplaza el de la revisión de esquema H9). La bas
    ```powershell
    node scripts/restaurar-backup.mjs --backup "$env:TEMP\catmetal-restaurar\2026-11-02" --salida "$env:TEMP\catmetal-restaurar\salida"
    ```
-   - El script comprueba `bytes` y `sha256` de cada archivo, descomprime (lee los gzip de varios miembros) y reconcilia al corte.
-   - Escribe `restauracion.sql`, `verificacion.sql`, `post-restauracion.sql` e `informe-restauracion.json`. Se niega a escribir dentro del repositorio.
+   - El script comprueba `bytes` y `sha256` de cada archivo. Luego lee cada NDJSON **en streaming** (descomprime línea a línea, también los gzip de varios miembros), reconcilia al corte y escribe el SQL sentencia a sentencia. No arma ninguna tabla en memoria, así que los backups grandes caben (revisión de esquema R-01).
+   - Escribe:
+     - `restauracion.sql`;
+     - `verificacion.sql`, que **aborta sola** si una verificación falla;
+     - `verificacion-detalle.sql`, las mismas consultas legibles;
+     - `post-restauracion.sql`;
+     - `informe-restauracion.json`.
+
+     Se niega a escribir dentro del repositorio. Si falla, no deja un `restauracion.sql` a medias.
    - Códigos de salida: 0 correcto; 1 uso o E/S; 2 backup no íntegro o no admitido; 3 filas sin ninguna auditoría en el origen. Con 3, revise la lista. `--conservar-sin-auditoria` las conserva tal cual y la verificación las excluye; nunca se descartan en silencio.
-   - Si se queda sin memoria con tablas grandes: `node --max-old-space-size=8192 scripts/restaurar-backup.mjs …`.
+   - `--omitir-sync-mutations` restaura sin ninguna fila de `sync_mutations`, igual que si la tabla hubiera quedado incompleta. Es seguro (ADR 0021, 4.1) y es la salida inmediata si esa tabla es enorme o está dañada. Los rechazos guardados se pierden y el informe lo indica.
+   - Las respuestas guardadas de mutaciones no aplicadas que no caben en una sentencia se recortan a `resultado` y `code` (R-10).
 6. **Revise el informe** antes de seguir:
    - `revisar_seguridad`: usuarios creados o modificados después del corte. Los creados no se restauran. Los modificados conservan su valor más reciente (una desactivación, un bloqueo o una contraseña nueva se mantienen); confirme que es lo deseado.
    - `cambios_tras_el_corte`: lo que se escribió en la ventana del backup y no está en la base restaurada.
@@ -201,13 +211,22 @@ Procedimiento (ADR 0021, que reemplaza el de la revisión de esquema H9). La bas
    - comprueba con una guardia que la base está recién migrada, con la misma última migración y exactamente los triggers de las migraciones;
    - borra los triggers, inserta los datos (padres primero, sin ningún `DELETE`), recrea los triggers con el mismo SQL y quita la guardia.
 
-   Si falla a mitad, **descarte la base y vuelva al paso 4**.
+   Si falla a mitad, **descarte la base y vuelva al paso 4**. La atomicidad de `--file` en remoto no está verificada (R-06). En local sí lo es. Una base con un fallo a mitad puede quedar sin triggers.
    ```powershell
    npx wrangler d1 execute <base-nueva> --remote --file "$env:TEMP\catmetal-restaurar\salida\restauracion.sql"
    ```
-8. **Verifique.** Cada consulta de `verificacion.sql` debe devolver **0 filas**. Incluye consumos decididos sin su validación, filas sin auditoría, filas distintas de su última auditoría, auditoría hasta el corte, `sqlite_sequence`, mutaciones aplicadas sin efecto, FK (`PRAGMA foreign_key_check`), triggers y conteos. Si alguna devuelve filas, no siga: descarte la base.
+8. **Verifique.** `verificacion.sql` revisa:
+   - consumos decididos sin su validación;
+   - filas sin auditoría y filas distintas de su última auditoría;
+   - la auditoría hasta el corte y `sqlite_sequence`;
+   - mutaciones aplicadas sin efecto;
+   - FK (`pragma_foreign_key_check`), triggers y conteos.
+
+   Cada verificación es un `INSERT … SELECT NOT EXISTS (…)` en una tabla con `CHECK (ok = 1)`. Si alguna encuentra filas, **el archivo aborta** con `CHECK constraint failed: ok = 1`, sin depender de que `--file` muestre filas (en remoto puede no hacerlo, R-02). Si termina sin errores, todo está bien.
+
+   Si aborta, no siga y descarte la base. Para saber qué falló, ejecute en local (o una por una con `--command`) las consultas de `verificacion-detalle.sql`: cada una debe devolver 0 filas.
    ```powershell
-   npx wrangler d1 execute <base-nueva> --remote --json --file "$env:TEMP\catmetal-restaurar\salida\verificacion.sql"
+   npx wrangler d1 execute <base-nueva> --remote --file "$env:TEMP\catmetal-restaurar\salida\verificacion.sql"
    ```
 9. **Cambie la época** con `post-restauracion.sql`, que equivale al comando de la sección 9.1 y escribe su auditoría:
    ```powershell
@@ -225,6 +244,10 @@ Procedimiento (ADR 0021, que reemplaza el de la revisión de esquema H9). La bas
 - haga los pasos 4 a 9 con `--local --persist-to <destino>` en lugar de `--remote`.
 
 La evidencia del ensayo de la v1.1 está en `docs/evidencia/correcciones.md`.
+
+**Mantenimiento del procedimiento:**
+- R-07: una migración futura que agregue una clave a `settings` debe recrear antes el trigger `settings_insercion_valida` (migración 0008), que solo admite las claves conocidas. Además, debe actualizar en `scripts/restauracion-nucleo.mjs` las claves que la guardia espera de una base recién migrada (`CLAVES_SETTINGS_SEMBRADAS`).
+- Si una migración agrega una tabla, hay que sumarla a `TABLAS_BACKUP` y a `TABLAS` del núcleo de la restauración (lo comprueban las pruebas).
 
 ### 9.3 Verificaciones después de restaurar
 

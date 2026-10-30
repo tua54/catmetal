@@ -11,6 +11,8 @@ declare global {
       TEST_WORKFLOWS: { ruta: string; contenido: string }[];
       /** D1 limpia para la prueba de restauración del backup (ADR 0021). */
       DB_RESTAURADA: D1Database;
+      /** D1 recién migrada para probar la guardia de la restauración (R-05). */
+      DB_GUARDIA: D1Database;
     }
   }
 }

@@ -27,8 +27,10 @@ import {
   ErrorRestauracion,
   literal,
   MAX_BYTES_SENTENCIA,
+  MAX_FILAS_SENTENCIA,
   ORDEN_IMPORTACION,
   planificarRestauracion,
+  restaurarEnStreaming,
   TABLAS,
   TABLAS_AUDITADAS,
   triggersDeMigraciones,
@@ -293,7 +295,7 @@ describe('restauración del backup de R2 (M4)', () => {
 
   it('tras restaurar no queda ningún consumo decidido sin validación ni fila sin su auditoría', async () => {
     const triggers = triggersDeMigraciones(migraciones(), String(manifest.ultima_migracion));
-    plan = planificarRestauracion({ manifest, filas, triggers });
+    plan = await planificarRestauracion({ manifest, filas, triggers });
     const db = env.DB_RESTAURADA;
     await ejecutarEn(db, plan.restauracion);
 
@@ -302,6 +304,8 @@ describe('restauración del backup de R2 (M4)', () => {
       expect((await db.prepare(v.sql).all()).results, v.nombre).toEqual([]);
     }
     expect(await invariantes(db)).toEqual(VACIAS);
+    // R-02: la versión que falla sola (para `--file` en remoto) tampoco encuentra nada.
+    await ejecutarEn(db, plan.verificacionAutofallante);
 
     // Estado exacto en el corte.
     const consumo = (id: string) =>
@@ -339,6 +343,11 @@ describe('restauración del backup de R2 (M4)', () => {
   it('después de la restauración los triggers están vivos y el jefe puede volver a aprobar B', async () => {
     const db = env.DB_RESTAURADA;
     await ejecutarEn(db, plan.postRestauracion);
+    // R-02: tras el cambio de época la auditoría pasa del corte (V5): la verificación autofallante
+    // aborta el archivo en lugar de devolver filas que nadie mira.
+    await expect(ejecutarEn(db, plan.verificacionAutofallante)).rejects.toThrow(
+      /CHECK constraint failed/,
+    );
     const epoca = await db
       .prepare("SELECT valor FROM settings WHERE clave = 'sync_epoca'")
       .first<{ valor: string }>();
@@ -478,7 +487,7 @@ const TRIGGERS = [
   { nombre: 't', sql: 'CREATE TRIGGER t BEFORE DELETE ON users BEGIN SELECT 1; END' },
 ];
 
-function planDe(s: Sintetico, conservarSinAuditoria = false): PlanRestauracion {
+function planDe(s: Sintetico, conservarSinAuditoria = false): Promise<PlanRestauracion> {
   return planificarRestauracion({ ...s, triggers: TRIGGERS, conservarSinAuditoria });
 }
 
@@ -486,10 +495,10 @@ function insertsDe(plan: PlanRestauracion, tabla: string): string[] {
   return plan.restauracion.filter((s) => s.startsWith(`INSERT INTO ${tabla} `));
 }
 
-function esperarRechazo(fn: () => unknown, codigo: string): void {
+async function esperarRechazo(fn: () => Promise<unknown>, codigo: string): Promise<void> {
   let error: unknown = null;
   try {
-    fn();
+    await fn();
   } catch (e) {
     error = e;
   }
@@ -534,30 +543,33 @@ describe('núcleo de la restauración (ADR 0021)', () => {
     }
   });
 
-  it('rechaza un backup de formato 1, un parcial no admitido y un salto de seq', () => {
+  it('rechaza un backup de formato 1, un parcial no admitido y un salto de seq', async () => {
     const s = base();
-    esperarRechazo(() => planDe({ ...s, manifest: { ...s.manifest, formato: 1 } }), 'INTEGRIDAD');
+    await esperarRechazo(
+      () => planDe({ ...s, manifest: { ...s.manifest, formato: 1 } }),
+      'INTEGRIDAD',
+    );
     const sinConsumos = sintetico(
       { users: [usuario(U1)] },
       [auditoriaDe('users', U1, null, {})],
       [],
       ['consumptions'],
     );
-    esperarRechazo(() => planDe(sinConsumos), 'INTEGRIDAD');
+    await esperarRechazo(() => planDe(sinConsumos), 'INTEGRIDAD');
     const saltada = base();
     const auditoria = saltada.filas.audit_log ?? [];
     auditoria[0] = { ...auditoria[0], seq: 2 };
-    esperarRechazo(() => planDe(saltada), 'INTEGRIDAD');
+    await esperarRechazo(() => planDe(saltada), 'INTEGRIDAD');
   });
 
-  it('un parcial sin sync_mutations ni login_cupos se restaura sin esas filas', () => {
+  it('un parcial sin sync_mutations ni login_cupos se restaura sin esas filas', async () => {
     const s = sintetico(
       { users: [usuario(U1)] },
       [auditoriaDe('users', U1, null, {})],
       [],
       ['sync_mutations', 'login_cupos'],
     );
-    const plan = planDe(s);
+    const plan = await planDe(s);
     expect(insertsDe(plan, 'sync_mutations')).toEqual([]);
     expect(insertsDe(plan, 'login_cupos')).toEqual([]);
     expect(plan.informe.sync_mutations.tabla_omitida).toBe(true);
@@ -565,21 +577,21 @@ describe('núcleo de la restauración (ADR 0021)', () => {
     expect(insertsDe(plan, 'users')).toHaveLength(1);
   });
 
-  it('una fila sin ninguna auditoría en el origen detiene la restauración, salvo que se acepte', () => {
+  it('una fila sin ninguna auditoría en el origen detiene la restauración, salvo que se acepte', async () => {
     const s = sintetico(
       { users: [usuario(U1), usuario(U2)] },
       [auditoriaDe('users', U1, null, {})],
       [],
     );
-    esperarRechazo(() => planDe(s), 'SIN_AUDITORIA');
-    const plan = planDe(s, true);
+    await esperarRechazo(() => planDe(s), 'SIN_AUDITORIA');
+    const plan = await planDe(s, true);
     expect(plan.informe.sin_auditoria_conservadas).toEqual([{ tabla: 'users', clave: U2 }]);
     expect(insertsDe(plan, 'users')[0]).toContain(U2);
     const v3 = plan.verificacion.find((v) => v.nombre === 'V3_fila_sin_auditoria_users');
     expect(v3?.sql).toContain(`NOT IN ('${U2}')`);
   });
 
-  it('revierte una evidencia subida después del corte sin tocar su PK ni storage_key', () => {
+  it('revierte una evidencia subida después del corte sin tocar su PK ni storage_key', async () => {
     const evidencia = {
       id: U2,
       incident_id: U1,
@@ -605,13 +617,13 @@ describe('núcleo de la restauración (ADR 0021)', () => {
       [auditoriaDe('evidences', U2, null, { ...antes, id: U2 })],
       [auditoriaDe('evidences', U2, antes, { ...evidencia, subido: true })],
     );
-    const sql = insertsDe(planDe(s), 'evidences')[0] ?? '';
+    const sql = insertsDe(await planDe(s), 'evidences')[0] ?? '';
     expect(sql).toContain(
       `('${U2}', '${U1}', 'evidencias/k', 'image/jpeg', 10, '${'a'.repeat(64)}', 0, NULL, '${ANTES}', '${ANTES}')`,
     );
   });
 
-  it('users conserva su valor más reciente y queda en revisar_seguridad', () => {
+  it('users conserva su valor más reciente y queda en revisar_seguridad', async () => {
     const s = sintetico(
       { users: [usuario(U1, 0)] },
       [auditoriaDe('users', U1, null, { id: U1, activo: true })],
@@ -625,14 +637,14 @@ describe('núcleo de la restauración (ADR 0021)', () => {
         ),
       ],
     );
-    const plan = planDe(s);
+    const plan = await planDe(s);
     expect(insertsDe(plan, 'users')[0]).toContain("'admin', 0, 0");
     expect(plan.informe.revisar_seguridad).toEqual([
       expect.objectContaining({ entidad_id: U1, tipo: 'cambios_tras_el_corte_conservados' }),
     ]);
   });
 
-  it('excluye un usuario creado tras el corte, con sus cupos', () => {
+  it('excluye un usuario creado tras el corte, con sus cupos', async () => {
     const cupo = {
       user_id: U2,
       origen: 'g',
@@ -648,7 +660,7 @@ describe('núcleo de la restauración (ADR 0021)', () => {
       [auditoriaDe('users', U1, null, {})],
       [auditoriaDe('users', U2, null, { id: U2 }, 'usuario.crear')],
     );
-    const plan = planDe(s);
+    const plan = await planDe(s);
     expect(plan.informe.tablas.users).toMatchObject({ excluidas: 1, importadas: 1 });
     expect(plan.informe.tablas.login_cupos).toMatchObject({ excluidas: 1, importadas: 1 });
     expect(plan.informe.revisar_seguridad[0]).toMatchObject({
@@ -657,7 +669,7 @@ describe('núcleo de la restauración (ADR 0021)', () => {
     });
   });
 
-  it('recorta un payload_json que no cabe en una sentencia (no aplicada, anterior al corte)', () => {
+  it('recorta un payload_json que no cabe en una sentencia (no aplicada, anterior al corte)', async () => {
     const fila = {
       mutation_id: U2,
       user_id: U1,
@@ -685,7 +697,7 @@ describe('núcleo de la restauración (ADR 0021)', () => {
       [auditoriaDe('users', U1, null, {}), auditoriaDe('devices', DEV, null, {})],
       [],
     );
-    const plan = planDe(s);
+    const plan = await planDe(s);
     const sql = insertsDe(plan, 'sync_mutations');
     expect(sql).toHaveLength(1);
     expect(sql[0]).toContain('"recortado":true');
@@ -713,5 +725,230 @@ describe('núcleo de la restauración (ADR 0021)', () => {
     expect(literal(null)).toBe('NULL');
     expect(literal(0.1)).toBe('0.1');
     expect(() => literal(Number.NaN)).toThrow(ErrorRestauracion);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Revisión de esquema de las correcciones (docs/auditoria/revision-esquema-correcciones.md)
+// ---------------------------------------------------------------------------------------------
+
+function consumoSintetico(id: string, extra: Fila = {}): Fila {
+  return {
+    id,
+    order_id: U1,
+    material_id: U1,
+    cantidad: 1,
+    unidad: 'kg',
+    cantidad_en_unidad_plan: 1,
+    lote: 'L',
+    costo_unitario_cop_snapshot: 1,
+    registrado_por: U1,
+    device_id: DEV,
+    client_created_at: ANTES,
+    server_received_at: ANTES,
+    estado: 'pendiente',
+    corrige_a: null,
+    registro_tardio: 0,
+    requiere_novedad: 0,
+    version: 1,
+    created_at: ANTES,
+    updated_at: ANTES,
+    ...extra,
+  };
+}
+
+/** Id UUID v7 sintético y ordenable para la fila `i`. */
+function idDe(i: number): string {
+  return `01900000-0000-7000-8000-${String(i).padStart(12, '0')}`;
+}
+
+describe('R-01: el núcleo procesa el backup en streaming', () => {
+  it('nunca acumula las filas de una tabla y recorre audit_log dos veces sin guardarla', async () => {
+    const N = 20_000;
+    const manifest = sintetico({}, [], []).manifest as Record<string, unknown> & {
+      tablas: { tabla: string; estado: string; filas?: number }[];
+    };
+    for (const t of manifest.tablas) {
+      t.filas = t.tabla === 'consumptions' || t.tabla === 'audit_log' ? N : 0;
+    }
+    manifest.corte = { seq: N, at: T0 };
+    manifest.seq_inicial = N;
+    manifest.seq_final = N;
+    let leidas = 0;
+    let emitidas = 0;
+    let maxPendientes = 0;
+    const lecturas: string[] = [];
+    function* leerTabla(tabla: string): Generator<Fila> {
+      lecturas.push(tabla);
+      if (tabla === 'consumptions') {
+        for (let i = 1; i <= N; i++) {
+          leidas += 1;
+          maxPendientes = Math.max(maxPendientes, leidas - emitidas);
+          yield consumoSintetico(idDe(i));
+        }
+      } else if (tabla === 'audit_log') {
+        for (let i = 1; i <= N; i++) {
+          yield {
+            ...auditoriaDe('consumptions', idDe(i), null, consumoSintetico(idDe(i))),
+            seq: i,
+          };
+        }
+      }
+    }
+    let sentencias = 0;
+    const resultado = await restaurarEnStreaming({
+      manifest,
+      triggers: TRIGGERS,
+      leerTabla,
+      escribir: (sentencia: string) => {
+        sentencias += 1;
+        if (sentencia.startsWith('INSERT INTO consumptions ')) {
+          emitidas += sentencia.split('\n(').length - 1;
+        }
+        return Promise.resolve();
+      },
+    });
+    expect(emitidas).toBe(N);
+    // Lo leído y aún no escrito nunca pasa de un INSERT de varias filas.
+    expect(maxPendientes).toBeLessThanOrEqual(MAX_FILAS_SENTENCIA + 1);
+    expect(lecturas.filter((t) => t === 'audit_log')).toHaveLength(2);
+    expect(resultado.informe.tablas.consumptions?.importadas).toBe(N);
+    expect(resultado.informe.tablas.audit_log?.importadas).toBe(N);
+    expect(sentencias).toBeGreaterThan(2 * (N / MAX_FILAS_SENTENCIA));
+  });
+
+  it('una corrección que llega antes que su original se enlaza al final (sin ordenar en memoria)', async () => {
+    const original = consumoSintetico(idDe(9), { estado: 'rechazado', version: 2 });
+    const correccion = consumoSintetico(idDe(1), { corrige_a: idDe(9) });
+    const s = sintetico(
+      { consumptions: [correccion, original] },
+      [
+        auditoriaDe('consumptions', idDe(9), null, original),
+        auditoriaDe('consumptions', idDe(1), null, correccion),
+      ],
+      [],
+    );
+    const plan = await planDe(s);
+    const sql = insertsDe(plan, 'consumptions').join('\n');
+    expect(sql).toContain(`('${idDe(1)}'`);
+    const actualizacion = plan.restauracion.find((x) => x.startsWith('UPDATE consumptions'));
+    expect(actualizacion).toBe(
+      `UPDATE consumptions SET corrige_a = '${idDe(9)}' WHERE id = '${idDe(1)}'`,
+    );
+    // El enlace va antes de recrear los triggers.
+    expect(plan.restauracion.indexOf(actualizacion ?? '')).toBeLessThan(
+      plan.restauracion.findIndex((x) => x === TRIGGERS[0]?.sql),
+    );
+  });
+
+  it('--omitir-sync-mutations restaura como si la tabla hubiera quedado incompleta', async () => {
+    const s = sintetico({ users: [usuario(U1)] }, [auditoriaDe('users', U1, null, {})], []);
+    const plan = await planificarRestauracion({
+      ...s,
+      triggers: TRIGGERS,
+      omitirSyncMutations: true,
+    });
+    expect(insertsDe(plan, 'sync_mutations')).toEqual([]);
+    expect(plan.informe.sync_mutations).toMatchObject({
+      tabla_omitida: true,
+      omitida_por_opcion: true,
+    });
+  });
+
+  it('R-10: una respuesta_json enorme de una no aplicada se recorta para caber en la sentencia', async () => {
+    const fila = {
+      mutation_id: U2,
+      user_id: U1,
+      device_id: DEV,
+      tipo: 'consumo.editar',
+      resultado: 'conflicto',
+      respuesta_json: JSON.stringify({
+        resultado: 'conflicto',
+        code: 'CONFLICTO',
+        message: "'".repeat(95_000),
+      }),
+      payload_json: null,
+      procesada_at: ANTES,
+      created_at: ANTES,
+      updated_at: ANTES,
+    };
+    const dispositivo = {
+      id: DEV,
+      user_id: U1,
+      instalacion_id: null,
+      nombre: null,
+      user_agent: null,
+      ultimo_sync_at: null,
+      created_at: ANTES,
+      updated_at: ANTES,
+    };
+    const s = sintetico(
+      { users: [usuario(U1)], devices: [dispositivo], sync_mutations: [fila] },
+      [auditoriaDe('users', U1, null, {}), auditoriaDe('devices', DEV, null, {})],
+      [],
+    );
+    const plan = await planDe(s);
+    const sql = insertsDe(plan, 'sync_mutations');
+    expect(sql).toHaveLength(1);
+    expect(sql[0]).toContain('"recortada":true');
+    expect(sql[0]).toContain('"code":"CONFLICTO"');
+  });
+});
+
+describe('R-04: la reversión usa solo la primera auditoría posterior al corte', () => {
+  it('si su datos_antes no trae una columna revertible, la restauración se detiene', async () => {
+    const material = {
+      id: U2,
+      codigo: 'M',
+      nombre: 'Nuevo',
+      unidad: 'kg',
+      costo_unitario_cop: 9,
+      activo: 1,
+      created_at: ANTES,
+      updated_at: DESPUES,
+    };
+    const completo = { ...material, nombre: 'Viejo', costo_unitario_cop: 5, updated_at: ANTES };
+    const s = sintetico(
+      { materials: [material] },
+      [auditoriaDe('materials', U2, null, completo)],
+      [
+        // La primera posterior al corte trae una imagen parcial; la segunda, completa.
+        auditoriaDe('materials', U2, { id: U2, nombre: 'Viejo' }, { id: U2, nombre: 'Medio' }),
+        auditoriaDe('materials', U2, { ...completo, nombre: 'Medio' }, material),
+      ],
+    );
+    await esperarRechazo(() => planDe(s), 'INTEGRIDAD');
+  });
+});
+
+describe('R-05: la guardia exige una base recién migrada', () => {
+  it('rechaza una base con un material (antes solo miraba usuarios, dispositivos y consumos)', async () => {
+    const db = env.DB_GUARDIA;
+    await applyD1Migrations(db, env.TEST_MIGRATIONS);
+    const triggers = await triggersDe(db);
+    const { results: migracion } = await db
+      .prepare('SELECT name FROM d1_migrations ORDER BY id DESC LIMIT 1')
+      .all<{ name: string }>();
+    const s = sintetico({ users: [usuario(U1)] }, [auditoriaDe('users', U1, null, {})], []);
+    s.manifest.ultima_migracion = migracion[0]?.name;
+    const plan = await planificarRestauracion({ ...s, triggers });
+    const guardia = plan.restauracion.slice(0, 3);
+    expect(guardia[1]).toContain('_restauracion_guardia');
+
+    // En la base recién migrada la guardia pasa (en un batch: se deshace con el DROP).
+    await db.batch([...guardia, 'DROP TABLE _restauracion_guardia'].map((x) => db.prepare(x)));
+    // Con un material ya cargado, no.
+    const t = new Date().toISOString();
+    await db
+      .prepare(
+        `INSERT INTO materials (id, codigo, nombre, unidad, costo_unitario_cop, activo, created_at,
+           updated_at) VALUES (?, 'G-1', 'Guardia', 'kg', 1, 1, ?, ?)`,
+      )
+      .bind(uuidv7(), t, t)
+      .run();
+    await expect(db.batch(guardia.map((x) => db.prepare(x)))).rejects.toThrow(
+      /CHECK constraint failed|NOT NULL constraint failed/,
+    );
+    expect(guardia[2]).toContain("(SELECT group_concat(clave, ',') FROM");
   });
 });

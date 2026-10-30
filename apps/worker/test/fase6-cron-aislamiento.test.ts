@@ -13,6 +13,8 @@ import {
 } from '../src/cron/backup';
 import { CRON_CONTINUACION, CRON_INICIO, ejecutarCron } from '../src/cron/ejecutar';
 import { Presupuesto } from '../src/cron/presupuesto';
+import { INCOMPLETAS_ADMITIDAS_RESTAURACION } from '../src/cron/tablas';
+import { INCOMPLETAS_ADMITIDAS } from '../../../scripts/restauracion-nucleo.mjs';
 import {
   leerManifest,
   leerProgreso,
@@ -217,5 +219,59 @@ describe('tabla que falla de forma persistente (ADR 0020, punto 3)', () => {
       }),
     );
     expect(eventos().map((e) => e.evento)).not.toContain('backup_incompleto_del_dia');
+  });
+});
+
+// Revisión de esquema de las correcciones, R-03.
+describe('R-03: respaldo si octet_length no existe y aviso de backup no restaurable', () => {
+  it('con una función de tamaño inexistente usa length(CAST(... AS BLOB)) y completa', async () => {
+    const fecha = '2027-04-06';
+    const eventos = espiarLogs();
+    const paginas: InfoPagina[] = [];
+    const r = await ejecutarBackup(env, a(fecha, 8), {
+      funcionTamano: 'funcion_inexistente',
+      observarPagina: (info) => paginas.push(info),
+    });
+    expect(r.estado).toBe('completo');
+    expect(paginas.length).toBeGreaterThan(0);
+    // Se detecta una sola vez por invocación y se recuerda.
+    expect(paginas.every((p) => p.medida === 'length_blob')).toBe(true);
+    const avisos = eventos().filter((e) => e.evento === 'backup_sin_octet_length');
+    expect(avisos).toHaveLength(1);
+    await verificarBackupCompleto(fecha);
+  });
+
+  it('un parcial con una tabla que la restauración no admite registra backup_no_restaurable', async () => {
+    const fecha = '2027-04-07';
+    const eventos = espiarLogs();
+    const fallarConsumos = (tabla: string) => {
+      if (tabla === 'consumptions') {
+        throw new Error('fallo simulado de consumptions');
+      }
+    };
+    for (const [cron, hora] of [
+      [CRON_INICIO, 8],
+      [CRON_CONTINUACION, 9],
+      [CRON_CONTINUACION, 10],
+    ] as const) {
+      await ejecutarCron(
+        env,
+        { cron, scheduledTime: a(fecha, hora).getTime() },
+        { ahora: a(fecha, hora), opcionesBackup: { fallarEn: fallarConsumos } },
+      );
+    }
+    expect((await leerManifest(fecha))?.estado).toBe('parcial');
+    expect(eventos()).toContainEqual(
+      expect.objectContaining({
+        nivel: 'error',
+        evento: 'backup_no_restaurable',
+        fecha,
+        tablas: 'consumptions',
+      }),
+    );
+  });
+
+  it('las tablas incompletas admitidas son las mismas que acepta el script de restauración', () => {
+    expect([...INCOMPLETAS_ADMITIDAS_RESTAURACION]).toEqual(INCOMPLETAS_ADMITIDAS);
   });
 });

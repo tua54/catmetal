@@ -221,3 +221,15 @@ export const TABLAS_BACKUP: readonly TablaBackup[] = [
     acotadaPorSeqFinal: true,
   },
 ];
+
+/**
+ * Tablas que pueden quedar `incompleta` en un backup `parcial` sin impedir la restauración (ADR
+ * 0021, 4.1). Debe coincidir con `INCOMPLETAS_ADMITIDAS` de scripts/restauracion-nucleo.mjs (lo
+ * comprueba `fase6-cron-aislamiento.test.ts`). Con otra tabla incompleta, el día no es restaurable
+ * desde R2 y `ejecutarCron` registra `backup_no_restaurable` (revisión de esquema R-03).
+ */
+export const INCOMPLETAS_ADMITIDAS_RESTAURACION: readonly string[] = [
+  'sync_mutations',
+  'login_cupos',
+  'refresh_tokens',
+];

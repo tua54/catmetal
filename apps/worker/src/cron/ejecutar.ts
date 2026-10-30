@@ -21,6 +21,7 @@ import {
 import { describirError } from './errores';
 import { ejecutarMantenimiento } from './mantenimiento';
 import { Presupuesto } from './presupuesto';
+import { INCOMPLETAS_ADMITIDAS_RESTAURACION } from './tablas';
 
 export { describirError };
 
@@ -81,6 +82,17 @@ export async function ejecutarCron(
         fecha: backup.fecha,
         tablas_incompletas: tablasIncompletas,
       });
+      // R-03: con una tabla incompleta que la restauración no admite, el día no sirve para restaurar
+      // desde R2 (solo queda Time Travel): es un error distinto, para alertar aunque haya manifest.
+      const noAdmitidas = incompletas.filter(
+        (t) => !INCOMPLETAS_ADMITIDAS_RESTAURACION.includes(t),
+      );
+      if (noAdmitidas.length > 0) {
+        registrar('error', 'backup_no_restaurable', {
+          fecha: backup.fecha,
+          tablas: noAdmitidas.join(','),
+        });
+      }
     } else {
       const nivel =
         backup.estado === 'pausado' || backup.estado === 'sin_iniciar' ? 'aviso' : 'info';
