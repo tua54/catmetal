@@ -78,3 +78,7 @@ Fuente: informe de `documentation-researcher` (URLs en cada punto).
 ## Hooks de Claude Code (sesión de correcciones v1.1)
 
 - Si la sesión principal corre con un agente (`--agent` o `"agent"` en `settings.json`), la entrada de los hooks trae `agent_type` también en la sesión principal (https://code.claude.com/docs/en/hooks, campos comunes). Para distinguir un subagente hay que usar `agent_id`, no `agent_type`. Ver `docs/BLOQUEO.md`.
+
+## AUTOINCREMENT y conflictos ignorados (N2)
+
+- En SQLite (3.53.1 de Node 24) y en la D1 local, un `INSERT` que se omite por `ON CONFLICT DO NOTHING` u `OR IGNORE` **hace avanzar igual** `sqlite_sequence` en una tabla AUTOINCREMENT. En cambio, un fallo por CHECK, por trigger (`RAISE(ABORT)`) o por rollback de la transacción no lo hace avanzar. En `audit_log`, ese avance abre un hueco en `seq`, y `audit_log_seq_sin_saltos` rechaza toda auditoría posterior. Las inserciones idempotentes en `audit_log` usan `INSERT … SELECT … WHERE NOT EXISTS`. Lo protege `apps/worker/test/correcciones-n2-autoincrement.test.ts`.

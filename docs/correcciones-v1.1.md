@@ -212,8 +212,8 @@ Los cambios de la spec de esta ronda están en `docs/spec.md` §14 (v2.1).
 
 - **Dónde**: `scripts/seed.mjs` (`sentenciasDe`: la auditoría usa `INSERT … SELECT … ON CONFLICT DO NOTHING`).
 - **Hallazgo**: en SQLite, un `INSERT` que se omite por `ON CONFLICT DO NOTHING` u `OR IGNORE` **igual hace avanzar** `sqlite_sequence` en una tabla AUTOINCREMENT. Comprobado con SQLite 3.53.1. Al volver a correr el seed idempotente, `audit_log` queda con `sqlite_sequence` por encima de `max(seq)`, y el trigger `audit_log_seq_sin_saltos` rechaza **toda** auditoría posterior: la D1 local de desarrollo tenía 31 filas y la secuencia en 60. El código del Worker y los scripts de producción (`crear-admin-sql.mjs` y `desbloqueo-emergencia-sql.mjs`) no usan esa forma sobre `audit_log`.
-- **Corrección**: la auditoría del seed usa `WHERE NOT EXISTS`. Una prueba estática impide `ON CONFLICT` y `OR IGNORE` en las inserciones a `audit_log` de `apps/worker/src` y `scripts/`.
-- **Estado**: pendiente.
+- **Corrección**: la auditoría del seed usa `WHERE NOT EXISTS`. Una prueba estática impide `ON CONFLICT` y `OR IGNORE` en las inserciones a `audit_log` de `apps/worker/src`, `migrations/` y `scripts/`.
+- **Estado**: RESUELTO (ver el commit `fix(db): …` de N2).
 
 ### N3. El filtro de auditoría no acepta la entidad `login_cupos` (P2)
 

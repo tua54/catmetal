@@ -11,7 +11,9 @@
 // - Idempotente: ids UUID v7 fijos y `INSERT ... ON CONFLICT DO NOTHING`. Se prefiere a la variante
 //   "OR IGNORE" porque esa también descarta en silencio las filas que violan un CHECK o un NOT NULL;
 //   así un dato inválido hace fallar el seed en vez de desaparecer. Nunca se usa el reemplazo
-//   implícito de SQLite (ADR 0006).
+//   implícito de SQLite (ADR 0006). La auditoría NO usa ON CONFLICT: en `audit_log`, que es
+//   AUTOINCREMENT, un conflicto ignorado avanza `sqlite_sequence` y deja la base sin poder auditar
+//   (N2). Para ella se usa `INSERT … SELECT … WHERE NOT EXISTS`.
 // - Cada fila de negocio lleva su fila de audit_log (`accion = 'seed'`, actor NULL, id fijo), porque
 //   /sync/pull recorre la auditoría (ADR 0005). `datos_despues` se arma en SQL a partir de la fila
 //   guardada, así coincide con lo que quedó en la base aunque se ejecute varias veces. `seq` lo
@@ -348,7 +350,9 @@ function sentenciasDe(tabla, fila, idAuditoria) {
     `  json_object(${pares.join(', ')}),\n` +
     '  NULL, created_at, 0, created_at, created_at\n' +
     `FROM ${tabla} WHERE ${filtro}\n` +
-    'ON CONFLICT DO NOTHING;';
+    // N2: NOT EXISTS y no ON CONFLICT. Un conflicto ignorado avanza `sqlite_sequence` igual, deja un
+    // hueco en `seq` y el trigger `audit_log_seq_sin_saltos` rechaza toda auditoría posterior.
+    `  AND NOT EXISTS (SELECT 1 FROM audit_log WHERE id = ${literal(idAuditoria)});`;
   return [insercion, auditoria];
 }
 
