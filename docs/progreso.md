@@ -11,7 +11,7 @@
 
 ## Siguiente paso
 
-Sesión v1.2: P1 cerrado (A1+N1 `6fbad17`, A2 `8206366`), A9 y A10 confirmados. En curso: revisión de esquema de A1 (database-specialist), backend P2 (A3 → A5 → A8 → A6-servidor) y cliente P2 (A4; luego A7 y A6-cliente, uno a uno). Al recibir cada entrega: revisar diff, gates, commit por ítem.
+Sesión v1.2: P1 cerrado; P2 confirmado salvo A6-cliente (en curso con react-developer) y A11 (cierre). Después: revisión de seguridad (A1, A3, A5, A6, A8), gates finales completos (e2e, format, audit, lighthouse), 20 repeticiones de concurrencia, cierre de procesos, informe y tag.
 
 ## Sesión de correcciones v1.2
 
@@ -41,6 +41,8 @@ No se usan `mvc-dotnet-developer`, `angular-developer` ni `orchestrator`.
 - A10 y A9 preparados por el orquestador (prueba estática de runners: falla con `ubuntu-latest`, pasa con `ubuntu-24.04`). Se confirman después de A1 y A2.
 - A2 entregado (646 pruebas web, E2E 3/3). A1 entregado (1411 pruebas worker, 98,41 %; N1 confirmado y corregido). Gates del orquestador sobre el árbol combinado: lint, typecheck, format:check OK; `pnpm test` 2322 pruebas sin fallos; `pnpm test:e2e` 36 passed. Commits: ADR 0028 notas `d2ee8af`, A1+N1 `6fbad17`, ADR 0023 notas `233015c`, A2 `8206366`, estados `a47bff0`.
 - Enmiendas de ADR para P2: 0026 (`8cd866b`), 0018 (`b0647aa`), ADR 0029 nuevo para A6 (`8129096`), 0022 enmienda 1 para A7 (`b5d9b9f`). A10 `f57c03f`, A9 `81aa189`.
+- Revisión de esquema de A1 (database-specialist): aprobado; R-v12-01 → N2. Guardada en `b5d777c`.
+- P2: A4 `6775a8a`, A3 `30641d4`, A5 `d0bdf03`, A8 `11965e0`, A6-servidor `77f0612`, N2 `d20436b`, A7 `7c8cf4f`.
 
 ## Sesión de correcciones v1.1
 

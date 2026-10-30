@@ -97,6 +97,8 @@ Este documento es **el alcance de la sesión v1.2**. Cada ítem trae:
 
 ### A7. Si el reemplazo del snapshot falla por cuota llena, la tablet no sale sola de ese estado
 
+- **Estado**: RESUELTO (`7c8cf4f`). ADR 0022, enmienda 1.
+
 - **Dónde**: `apps/web/src/datos/snapshot-temporal.ts:82` y `apps/web/src/sync/motor.ts:806`.
 - **Aceptación**:
   - Ante `QuotaExceededError` en una página o en el reemplazo, se descarta el área temporal sin tocar el estado vivo. Se reintenta con espera y se muestra un aviso claro: "Almacenamiento lleno: sincroniza o libera espacio".
@@ -158,6 +160,8 @@ Este documento es **el alcance de la sesión v1.2**. Cada ítem trae:
 - **Aceptación**: la principal exige también la marca de escritura leída (`escritura_id IS ?`, ADR 0028). Prueba determinista en `apps/worker/test/correcciones-n1-concurrencia-optimista.test.ts`.
 
 ### N2. Dos escrituras de `users` no renuevan la marca de escritura
+
+- **Estado**: RESUELTO (`d20436b`).
 
 - **Prioridad**: P2 (bajo; hallazgo R-v12-01 de `docs/auditoria/revision-esquema-v1.2.md`). Está en el área de A1.
 - **Dónde**: `apps/worker/src/auth/sesiones.ts` (el `UPDATE users SET intentos_fallidos = 0, updated_at = ?` del login, sin auditar) y `scripts/desbloqueo-emergencia-sql.mjs` (reinicio de `users`).
