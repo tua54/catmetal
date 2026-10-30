@@ -5,12 +5,11 @@
 ## Estado actual
 
 - Rama de trabajo: `build/v1` (línea base en `main`: `bfa8975`).
-- Fases 0 a 5 cerradas (tags `fase-0` a `fase-5`). Fase en curso: **Fase 6 — Endurecimiento y despliegue**.
-- Ya hechas de la Fase 6 (adelantadas): 6.1 cron de backup (con continuaciones, ADR 0014/0016) y 6.4 guía de despliegue, workflow manual de staging y generador del primer admin.
+- **Fases 0 a 6 cerradas** (tags `fase-0` a `fase-6`). Sesión terminada: ver `docs/INFORME-FINAL.md`.
 
 ## Siguiente paso
 
-Fase 6: 6.2 endurecimiento de la UI (errores, estados vacíos, accesibilidad, rendimiento en tablet), 6.3 instalabilidad y Lighthouse automatizados (≥ 90), 6.5 revisión de seguridad final, 6.6 evidencia e informe final (`docs/INFORME-FINAL.md`).
+Ninguno en esta sesión. El equipo humano revisa `docs/INFORME-FINAL.md`, ejecuta `docs/pendientes-humanos.md` y hace el push cuando lo apruebe.
 
 ## Mapeo de subagentes
 
@@ -112,7 +111,9 @@ No se usan `mvc-dotnet-developer`, `angular-developer` ni `orchestrator`.
 - Ejecutada adelantada en paralelo con la Fase 4: 5.1–5.2 pantallas del jefe (`react-developer`), 5.3 administración (`react-developer`), 5.4 E2E (`test-engineer`).
 - Cierre: mismos gates que la Fase 4. Evidencia: `docs/evidencia/fase-5.md`.
 
-### Fase 6 — Endurecimiento y despliegue (en curso)
+### Fase 6 — Endurecimiento y despliegue (cerrada)
 
 - Adelantadas y confirmadas: 6.1 cron de backup; 6.4 `docs/despliegue.md`, `deploy-staging.yml` (solo manual) y `scripts/crear-admin-sql.mjs`; `wrangler.jsonc` sin invocation logs, producción sin workers.dev ni preview URLs.
 - En curso: 6.3 instalabilidad, Lighthouse y axe automatizados (`test-engineer`); 6.2 endurecimiento de la UI (`ui-ux-designer`); M5 rendimiento del snapshot (`general-purpose`).
+- 6.2 UI endurecida (`ui-ux-designer`), M5 snapshot, 6.3 instalabilidad/Lighthouse/axe (`test-engineer`), 6.5 revisión final (`security-reviewer`: 0 críticos, 0 altos, 1 medio), 6.7 correcciones (servidor, cliente, workflow por SHA, guía).
+- Cierre: 1.926 pruebas, 33 E2E, Lighthouse ≥ 90, audit --prod sin vulnerabilidades. Evidencia: `docs/evidencia/fase-6.md`.

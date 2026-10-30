@@ -47,11 +47,15 @@ Correcciones de la Fase 4 (cliente y servidor), pantallas de jefe y admin, cron 
 
 | # | Estado | Referencia |
 |---|---|---|
-| F6-01 | En corrección (tarea 6.7: workflow y guía); la cuenta separada y el token mínimo son pendientes humanos | — |
-| F6-02, F6-03 | En corrección (tarea 6.7, guía y `.gitignore`) | — |
-| F6-04, F6-05, F6-09 | En corrección (tarea 6.7, cliente) | — |
-| F6-07, F6-08 | En corrección (tarea 6.7, servidor y shared) | — |
-| F6-06 | Riesgo aceptado | ADR 0017 |
+| F6-01 | **Corregido en el repositorio**: acciones fijadas por SHA, `persist-credentials: false`, sin caché en el job con secretos, guía con cuenta/token sin alcance sobre producción y política de ramas. **Pendiente humano**: crear la cuenta o el token mínimo y configurar el environment | `a26e580`, `86a4aac`, `docs/pendientes-humanos.md` (16) |
+| F6-02 | Corregido en la guía (Access sobre todo staging; en producción solo `/api/v1/users*`) | `86a4aac` |
+| F6-03 | Corregido (secretos por tubería, contraseña con entrada oculta, SQL y backups fuera del repo, `.gitignore`) | `86a4aac`, `3c27abb` |
+| F6-04 | Corregido (`queryClient.clear()` al cambiar de usuario) | `e7d61e4` |
+| F6-05 | Corregido (`encodeURIComponent` y validación UUID v7) | `e7d61e4` |
+| F6-06 | Riesgo aceptado | ADR 0017 (enmienda) |
+| F6-07 | Corregido: COOP, lista de 194 contraseñas comunes (Worker y generador del primer admin), retención diaria y al cerrar sesión. Trusted Types diferido (justificado en `cabeceras.ts`) | `dcc0b6b`, `ac1a924`, `e7d61e4` |
+| F6-08 | Corregido: bucket propio `mp-backups-*` (binding `BACKUPS`) | `dcc0b6b`, ADR 0014 (enmienda) |
+| F6-09 | Corregido (`inert` como pila) | `e7d61e4` |
 
 ## 5. Riesgos residuales aceptados
 
