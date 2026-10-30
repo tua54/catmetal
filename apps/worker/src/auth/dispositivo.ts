@@ -33,6 +33,8 @@ export const MAX_APARICIONES_DISPOSITIVO = 8;
 const VERSION = 'v1';
 const SEPARADOR_ENTRADAS = '~';
 const ETIQUETA_FIRMA = 'mp-dispositivo-v1';
+/** Etiqueta (info de HKDF) de la clave del nonce determinista por familia (S-v12-01). */
+const ETIQUETA_NONCE_FAMILIA = 'mp-dispositivo-familia-v1';
 const DIA_MS = 86_400_000;
 const PATRON_ENTRADA =
   /^v1\.([A-Za-z0-9-]{1,64})\.(\d{1,7})\.([A-Za-z0-9_-]{22})\.([A-Za-z0-9_-]{22})$/;
@@ -122,6 +124,32 @@ export async function nuevaEntrada(
 ): Promise<EntradaDispositivo> {
   const emitidaDia = diaUtc(ahoraMs);
   const nonce = aBase64Url(bytesAleatorios(16));
+  const texto = await firmarEntrada(secreto, userId, emitidaDia, nonce);
+  return { texto, userId, emitidaDia, nonce };
+}
+
+/**
+ * Nonce DETERMINISTA de una familia de refresh (S-v12-01): HMAC-SHA-256 con la clave derivada de
+ * REFRESH_SECRET y la etiqueta propia `mp-dispositivo-familia-v1` (HKDF, S-05) sobre `familia_id`,
+ * truncado a 128 bits y en base64url (22 caracteres: el mismo formato que el nonce aleatorio).
+ */
+export async function nonceDeFamilia(secreto: string, familiaId: string): Promise<string> {
+  return aBase64Url(await hmacTruncado(secreto, ETIQUETA_NONCE_FAMILIA, familiaId));
+}
+
+/**
+ * Entrada para `userId` emitida hoy por un refresh de la familia `familiaId`, con el nonce
+ * determinista de esa familia (S-v12-01). Todas las rotaciones de la familia dan el mismo nonce y,
+ * por tanto, el mismo cupo `d:<nonce>`: un refresh token robado no fabrica cupos de dispositivo.
+ */
+export async function entradaDeFamilia(
+  secreto: string,
+  userId: string,
+  familiaId: string,
+  ahoraMs: number,
+): Promise<EntradaDispositivo> {
+  const emitidaDia = diaUtc(ahoraMs);
+  const nonce = await nonceDeFamilia(secreto, familiaId);
   const texto = await firmarEntrada(secreto, userId, emitidaDia, nonce);
   return { texto, userId, emitidaDia, nonce };
 }
@@ -272,18 +300,22 @@ export async function valorRenovado(
  * vigente de esa familia) y no da acceso adicional: la cookie solo elige el cupo de login.
  * - Si la cookie presentada ya tiene una entrada válida de ese usuario, se conserva TAL CUAL (mismo
  *   nonce: su cupo `d:` no se reinicia); al reemitir la cookie solo se renueva su Max-Age.
- * - Si no, se agrega una entrada nueva, igual que en el login correcto.
+ * - Si no, se agrega una entrada nueva. A diferencia del login correcto (nonce aleatorio), su nonce
+ *   es el DETERMINISTA de la familia de refresh (S-v12-01, `entradaDeFamilia`): el refresh no exige
+ *   contraseña, así que rotar una y otra vez un refresh token (robado, o el anterior dentro de la
+ *   gracia) con cookies vacías siempre da el mismo cupo `d:`, no uno nuevo por rotación.
  * En los dos casos se arma como en el login (`valorRenovado`): la del usuario primero, después las
  * válidas de otros usuarios, máximo 16, y las inválidas se descartan.
  */
 export async function valorTrasRefresh(
   secreto: string,
   valores: readonly string[],
-  userId: string,
+  sesion: { userId: string; familiaId: string },
   ahoraMs: number,
 ): Promise<string> {
-  const conocida = await entradaDelUsuario(secreto, valores, userId, ahoraMs);
-  const propia = conocida ?? (await nuevaEntrada(secreto, userId, ahoraMs));
+  const conocida = await entradaDelUsuario(secreto, valores, sesion.userId, ahoraMs);
+  const propia =
+    conocida ?? (await entradaDeFamilia(secreto, sesion.userId, sesion.familiaId, ahoraMs));
   return valorRenovado(secreto, valores, propia, ahoraMs);
 }
 

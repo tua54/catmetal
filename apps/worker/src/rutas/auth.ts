@@ -315,13 +315,14 @@ async function refrescar(c: Context<AppEnv>): Promise<Response> {
   }
   // A8 (ADR 0018, enmienda 2): solo un refresh exitoso (rotación o reintento legítimo dentro de la
   // ventana de gracia) llega aquí; los errores y la detección de reutilización lanzan antes. Se
-  // conserva la entrada válida del usuario (mismo nonce) o se agrega una nueva.
+  // conserva la entrada válida del usuario (mismo nonce) o se agrega una nueva con el nonce
+  // determinista de la familia (S-v12-01): un refresh token robado da como mucho un cupo `d:`.
   ponerCookieDispositivo(
     c,
     await valorTrasRefresh(
       c.env.REFRESH_SECRET,
       valoresCookieDispositivo(c.req.header('Cookie')),
-      emitido.userId,
+      { userId: emitido.userId, familiaId: emitido.familiaId },
       Date.now(),
     ),
   );
