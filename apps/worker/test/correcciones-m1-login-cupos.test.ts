@@ -17,6 +17,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { TIEMPO_MINIMO_LOGIN_FALLIDO_MS } from '../src/rutas/auth';
 import { crearUsuarioConClave, peticion, refrescar, type UsuarioPrueba } from './auth-helpers';
 import { api, sesion } from './fase2-helpers';
+import { enVentanaDelLimitador } from './limitador-helpers';
 import { pullTodo } from './fase3-helpers';
 
 // Pruebas con PBKDF2 y muchas peticiones: con la máquina cargada superan el límite por defecto de
@@ -165,11 +166,8 @@ describe('M1 (a): dispositivo conocido', () => {
   }, 60_000);
 
   it('con la IP agotada en el limitador (NAT compartido), el dispositivo conocido sigue entrando', async () => {
-    // El limitador simulado cuenta por minuto de reloj: si queda poco del minuto, se espera al siguiente.
-    const restanteMs = 60_000 - (Date.now() % 60_000);
-    if (restanteMs < 10_000) {
-      await new Promise((resolver) => setTimeout(resolver, restanteMs + 200));
-    }
+    // El limitador simulado cuenta por ventanas alineadas al reloj (N3, limitador-helpers.ts).
+    await enVentanaDelLimitador();
     const u = await crearUsuarioConClave('jefe');
     const conocida = await loginConocido(u);
     const ipPlanta = ipv4Aleatoria();

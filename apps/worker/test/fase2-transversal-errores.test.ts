@@ -6,6 +6,7 @@
 import { MAX_EVIDENCIA_BYTES, MENSAJES_ERROR, uuidv7 } from '@catmetal/shared';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { cuerpoConsumo, jpeg, png } from './fase2-consumos-helpers';
+import { enVentanaDelLimitador } from './limitador-helpers';
 import { peticion as peticionCruda } from './auth-helpers';
 import { asignar, nuevaOrden, nuevoMaterial, planear, sesion } from './fase2-helpers';
 import {
@@ -503,6 +504,8 @@ const CASOS: readonly Caso[] = [
     estado: 429,
     code: 'DEMASIADOS_INTENTOS',
     ejecutar: async () => {
+      // El limitador cuenta por ventanas alineadas al reloj: la ráfaga debe caer entera en una (N3).
+      await enVentanaDelLimitador();
       const peticion: Peticion = {
         metodo: 'POST',
         ruta: '/auth/login',

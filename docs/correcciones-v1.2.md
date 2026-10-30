@@ -167,3 +167,10 @@ Este documento es **el alcance de la sesión v1.2**. Cada ítem trae:
 - **Dónde**: `apps/worker/src/auth/sesiones.ts` (el `UPDATE users SET intentos_fallidos = 0, updated_at = ?` del login, sin auditar) y `scripts/desbloqueo-emergencia-sql.mjs` (reinicio de `users`).
 - **Escenario**: en esos caminos el testigo de concurrencia de N1 queda solo en `updated_at`. Si el login cae en el mismo milisegundo que el `updated_at` que leyó un admin, su `usuario.editar` se aplica con un `datos_antes.intentos_fallidos` viejo. No se pierde ninguna actualización.
 - **Aceptación**: las dos escrituras fijan una marca nueva (nunca `NULL`). Prueba determinista.
+
+### N3. Las pruebas del limitador de login dependen de la hora
+
+- **Prioridad**: P1 (mismo tipo de defecto que A1: hace fallar el CI del PR al azar). Encontrado al correr los gates finales.
+- **Dónde**: `apps/worker/test/fase2-transversal-errores.test.ts` (caso "429 DEMASIADOS_INTENTOS: sexto intento de login con la misma IP y correo") y `apps/worker/test/auth-login.test.ts` ("sin cf-connecting-ip usa la clave local"). Otras dos pruebas (`auth-login.test.ts` y `correcciones-m1-login-cupos.test.ts`) ya tenían la precondición escrita a mano.
+- **Escenario**: el limitador simulado de Miniflare cuenta por ventanas alineadas al reloj de pared (`epoch = floor(Date.now() / (period * 1000))`). Si la ráfaga de 6 intentos cruza el cambio de minuto, el contador vuelve a 0 y el sexto da 401 en lugar de 429. Falló así en la corrida de gates finales: `expected { estado: 401 } to deeply equal { estado: 429 }`.
+- **Aceptación**: un helper único (`apps/worker/test/limitador-helpers.ts`) asegura antes de la ráfaga un margen de 15 s en la ventana; las cuatro pruebas lo usan. Prueba determinista que fuerza la ráfaga a 1,5 s del cambio de ventana: `apps/worker/test/correcciones-n3-limitador-ventana.test.ts`.

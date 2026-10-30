@@ -4,6 +4,7 @@ import { BLOQUEO_MINUTOS, MENSAJES_ERROR, permisosDeRol, uuidv7 } from '@catmeta
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 import { verificarAccessToken } from '../src/auth/tokens';
+import { enVentanaDelLimitador } from './limitador-helpers';
 import {
   cookieRefresh,
   crearUsuarioConClave,
@@ -274,14 +275,9 @@ describe('cupo de login por origen (5 intentos, 15 min; ADR 0018)', () => {
 
 describe('rate limiting (IP + email, 5 por 60 s)', () => {
   it('la sexta petición con la misma IP y correo responde 429 DEMASIADOS_INTENTOS', async () => {
-    // El limitador simulado de Miniflare cuenta por ventanas alineadas al minuto del reloj de pared
-    // (docs/notas-plataforma.md). Las 7 peticiones tardan unos 3 s (cada 401 espera 400 ms, H-02):
-    // si quedan menos de 10 s del minuto actual, se espera al siguiente para que todas caigan en la
-    // misma ventana. Antes la prueba fallaba de forma intermitente al cruzar el cambio de minuto.
-    const restanteMs = 60_000 - (Date.now() % 60_000);
-    if (restanteMs < 10_000) {
-      await new Promise((resolver) => setTimeout(resolver, restanteMs + 200));
-    }
+    // El limitador simulado cuenta por ventanas alineadas al reloj: la ráfaga debe caer entera en una
+    // (N3, limitador-helpers.ts).
+    await enVentanaDelLimitador();
     const email = `limite-${uuidv7()}@catmetal.test`;
     const ip = `ip-${crypto.randomUUID()}`;
     const estados: number[] = [];
@@ -296,10 +292,11 @@ describe('rate limiting (IP + email, 5 por 60 s)', () => {
     });
     // Otra IP con el mismo correo no está limitada por esa clave.
     expect((await intentar(email, 'x')).status).toBe(401);
-    // Tiempo máximo propio: la espera al minuto siguiente puede durar hasta ~10 s.
-  }, 20_000);
+    // Tiempo máximo propio: la espera a la ventana siguiente puede durar hasta el margen (15 s).
+  }, 30_000);
 
   it('sin cf-connecting-ip usa la clave "local"', async () => {
+    await enVentanaDelLimitador();
     const email = `local-${uuidv7()}@catmetal.test`;
     const estados: number[] = [];
     for (let i = 0; i < 6; i += 1) {
@@ -309,7 +306,7 @@ describe('rate limiting (IP + email, 5 por 60 s)', () => {
       estados.push(respuesta.status);
     }
     expect(estados.at(-1)).toBe(429);
-  });
+  }, 30_000);
 });
 
 describe('auditoría de login', () => {
