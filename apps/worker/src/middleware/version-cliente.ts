@@ -6,7 +6,13 @@
 // Corre antes de autenticar, de leer el cuerpo y de tocar D1: un cliente desactualizado no escribe,
 // no audita, no consume cupos de login y no deja filas en `sync_mutations`. El 426 es de la
 // petición entera, no de una mutación: el cliente deja su outbox `pendiente` y se actualiza.
-// `GET /api/v1/health` queda fuera (diagnóstico del despliegue, sin datos de negocio).
+//
+// Quedan fuera:
+// - `GET /api/v1/health` (diagnóstico del despliegue, sin datos de negocio);
+// - `POST /api/v1/auth/logout` (A3, ADR 0026 enmienda 1): solo reduce privilegios (revoca la familia
+//   y borra la cookie), así un cliente desactualizado siempre puede cerrar sesión. Se compara el
+//   método Y la ruta exactos: cualquier otro método sobre esa ruta, o cualquier otra ruta (también
+//   `POST /auth/refresh`, que emite credenciales nuevas), sigue exigiendo la versión.
 
 import { CABECERA_VERSION_CLIENTE, versionClienteDe } from '@catmetal/shared';
 import type { MiddlewareHandler } from 'hono';
@@ -14,9 +20,15 @@ import { responderError } from '../errores';
 import type { AppEnv } from '../tipos';
 
 const RUTA_SALUD = '/api/v1/health';
+const RUTA_LOGOUT = '/api/v1/auth/logout';
+
+/** Peticiones que no exigen la versión mínima (ver la cabecera del archivo). */
+function exenta(metodo: string, ruta: string): boolean {
+  return ruta === RUTA_SALUD || (metodo === 'POST' && ruta === RUTA_LOGOUT);
+}
 
 export const verificarVersionCliente: MiddlewareHandler<AppEnv> = async (c, next) => {
-  if (c.req.path === RUTA_SALUD) {
+  if (exenta(c.req.method, c.req.path)) {
     await next();
     return undefined;
   }
