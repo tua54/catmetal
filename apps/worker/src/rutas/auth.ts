@@ -31,6 +31,7 @@ import {
 import {
   buscarRefresh,
   type FilaRefresh,
+  familiaVencida,
   iniciarSesion,
   reintentarDentroDeGracia,
   revocarFamilia,
@@ -101,7 +102,7 @@ async function responderSesion(
     did: emitido.deviceId,
     fam: emitido.familiaId,
   });
-  ponerCookieRefresh(c, emitido.token);
+  ponerCookieRefresh(c, emitido.token, emitido.vidaRestanteS);
   const cuerpo: RespuestaSesion = {
     access_token: accessToken,
     expira_en: ACCESS_TOKEN_TTL_S,
@@ -247,6 +248,15 @@ async function refrescar(c: Context<AppEnv>): Promise<Response> {
   const tokenHash = await hashRefreshToken(c.env.REFRESH_SECRET, token);
   let presentado = await buscarRefresh(db, tokenHash);
   if (presentado === null) {
+    borrarCookieRefresh(c);
+    throw new ErrorApi('TOKEN_INVALIDO');
+  }
+  // B1 (docs/spec.md §5 v2.1): pasados 30 días del login con contraseña la familia no sirve, por
+  // recientes que sean sus rotaciones; se exige la contraseña. Va antes de la ventana de gracia y de
+  // la detección de reutilización: una familia vencida ya no da acceso, así que revocarla no
+  // protege nada. También corta las familias de antes de esta corrección (rotadas con 30 días
+  // nuevos), porque mide desde el primer token de la familia y no desde el vencimiento del último.
+  if (familiaVencida(presentado, ahoraIso())) {
     borrarCookieRefresh(c);
     throw new ErrorApi('TOKEN_INVALIDO');
   }

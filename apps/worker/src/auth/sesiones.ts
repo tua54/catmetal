@@ -4,9 +4,14 @@
 // condicionales en SQL: gana quien obtiene `changes = 1` en el INSERT del token nuevo, así dos
 // refresh concurrentes con el mismo token nunca dejan dos sucesores vigentes.
 
-import { ahoraIso, uuidv7, VENTANA_GRACIA_REFRESH_MS } from '@catmetal/shared';
+import { ahoraIso, REFRESH_TOKEN_TTL_S, uuidv7, VENTANA_GRACIA_REFRESH_MS } from '@catmetal/shared';
 import { sentenciaAuditoria, sentenciaAuditoriaCondicional } from '../auditoria/auditar';
-import { generarRefreshToken, hashRefreshToken, vencimientoRefresh } from './tokens';
+import {
+  generarRefreshToken,
+  hashRefreshToken,
+  vencimientoFamilia,
+  vencimientoRefresh,
+} from './tokens';
 
 export interface TokenEmitido {
   id: string;
@@ -15,6 +20,8 @@ export interface TokenEmitido {
   familiaId: string;
   userId: string;
   deviceId: string;
+  /** Segundos que le quedan al token emitido (Max-Age de la cookie, B1). */
+  vidaRestanteS: number;
 }
 
 /** Fila de `refresh_tokens` (sin `token_hash`) con el estado del usuario dueño. */
@@ -27,7 +34,19 @@ export interface FilaRefresh {
   revocado_at: string | null;
   reemplazado_por: string | null;
   usuario_activo: number;
+  /**
+   * Hora del login con contraseña que abrió la familia: `created_at` de su primer token (B1). Usa el
+   * índice `refresh_tokens_familia_id`. La purga del cron solo borra tokens vencidos hace más de
+   * 90 días: si ya borró el primero, la familia tiene más de 120 días y el mínimo que queda sigue
+   * siendo de hace más de 30, así que la familia sigue vencida.
+   */
+  familia_inicio: string;
 }
+
+const COLUMNAS_FILA_REFRESH = `r.id, r.user_id, r.device_id, r.familia_id, r.expira_at,
+  r.revocado_at, r.reemplazado_por, u.activo AS usuario_activo,
+  (SELECT MIN(f.created_at) FROM refresh_tokens AS f WHERE f.familia_id = r.familia_id)
+    AS familia_inicio`;
 
 export async function buscarRefresh(
   db: D1Database,
@@ -35,13 +54,17 @@ export async function buscarRefresh(
 ): Promise<FilaRefresh | null> {
   return db
     .prepare(
-      `SELECT r.id, r.user_id, r.device_id, r.familia_id, r.expira_at, r.revocado_at,
-              r.reemplazado_por, u.activo AS usuario_activo
+      `SELECT ${COLUMNAS_FILA_REFRESH}
        FROM refresh_tokens AS r JOIN users AS u ON u.id = r.user_id
        WHERE r.token_hash = ?`,
     )
     .bind(tokenHash)
     .first<FilaRefresh>();
+}
+
+/** La familia superó su vida máxima absoluta (B1): se exige la contraseña de nuevo. */
+export function familiaVencida(fila: Pick<FilaRefresh, 'familia_inicio'>, ahora: string): boolean {
+  return vencimientoFamilia(fila.familia_inicio) <= ahora;
 }
 
 export interface DatosNuevaSesion {
@@ -174,6 +197,8 @@ export async function iniciarSesion(
     familiaId: uuidv7(),
     userId: datos.userId,
     deviceId: datos.deviceId,
+    // La familia nace aquí: su vida máxima (B1) es la de este primer token.
+    vidaRestanteS: REFRESH_TOKEN_TTL_S,
   };
   const tokenHash = await hashRefreshToken(secretoRefresh, token);
   const expira = vencimientoRefresh(Date.parse(ahora));
@@ -324,7 +349,10 @@ export async function iniciarSesion(
  * (a) INSERT … SELECT del token nuevo solo si `origen` cumple `condicionOrigen`;
  * (b) UPDATE de `origen` (revocado, reemplazado_por) solo si (a) insertó;
  * (c) auditoría solo si (a) insertó.
- * Devuelve el token nuevo, o `null` si otro proceso ganó la carrera o la condición no se cumplió.
+ * El sucesor vence con la familia (B1): min(ahora + 30 días, login + 30 días), que es siempre el
+ * vencimiento de la familia; nunca la extiende.
+ * Devuelve el token nuevo, o `null` si otro proceso ganó la carrera, la condición no se cumplió o
+ * la familia ya venció.
  */
 async function emitirSucesor(
   db: D1Database,
@@ -339,7 +367,12 @@ async function emitirSucesor(
   const token = generarRefreshToken();
   const nuevoId = uuidv7();
   const tokenHash = await hashRefreshToken(secretoRefresh, token);
-  const expira = vencimientoRefresh(Date.parse(ahora));
+  const porToken = vencimientoRefresh(Date.parse(ahora));
+  const deFamilia = vencimientoFamilia(origen.familia_inicio);
+  const expira = deFamilia < porToken ? deFamilia : porToken;
+  if (expira <= ahora) {
+    return null;
+  }
   const existeNuevo = {
     sql: 'EXISTS (SELECT 1 FROM refresh_tokens WHERE id = ?)',
     parametros: [nuevoId],
@@ -402,6 +435,7 @@ async function emitirSucesor(
     familiaId: origen.familia_id,
     userId: origen.user_id,
     deviceId: origen.device_id,
+    vidaRestanteS: (Date.parse(expira) - Date.parse(ahora)) / 1000,
   };
 }
 
@@ -441,8 +475,7 @@ export async function reintentarDentroDeGracia(
   }
   const sucesor = await db
     .prepare(
-      `SELECT r.id, r.user_id, r.device_id, r.familia_id, r.expira_at, r.revocado_at,
-              r.reemplazado_por, u.activo AS usuario_activo
+      `SELECT ${COLUMNAS_FILA_REFRESH}
        FROM refresh_tokens AS r JOIN users AS u ON u.id = r.user_id
        WHERE r.id = ? AND r.familia_id = ?`,
     )

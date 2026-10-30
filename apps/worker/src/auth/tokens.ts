@@ -75,3 +75,11 @@ export async function hashRefreshToken(secreto: string, token: string): Promise<
 export function vencimientoRefresh(ahoraMs: number): string {
   return new Date(ahoraMs + REFRESH_TOKEN_TTL_S * 1000).toISOString();
 }
+
+/**
+ * Vencimiento ABSOLUTO de una familia de refresh (docs/spec.md §5 v2.1, B1): 30 días desde el login
+ * con contraseña (`created_at` del primer token de la familia). Las rotaciones no lo extienden.
+ */
+export function vencimientoFamilia(familiaInicio: string): string {
+  return vencimientoRefresh(Date.parse(familiaInicio));
+}
