@@ -11,10 +11,17 @@
 //     como supervisor (los sigue viendo, P9).
 // Nunca se toca lo propio ni otras particiones. Lo que siga siendo visible lo vuelve a traer el
 // snapshot del `reiniciar`; no se pierde nada de planta (lo ajeno ya está en el servidor).
+//
+// A6 (ADR 0029, punto 1): en la MISMA transacción se descarta el área temporal del snapshot del
+// usuario. Una descarga a medias guardada cuando aún veía lo ajeno no se reanuda (volvería a meterlo
+// en el estado vivo al completarse): la siguiente sync empieza el snapshot de cero. El área temporal
+// solo tiene datos del servidor, nunca mutaciones locales: descartarla no pierde nada.
 
+import type { Table } from 'dexie';
 import type { Permiso } from '@catmetal/shared';
-import { db, rangoDe, tablasDeDatos } from './db';
+import { db, rangoDe, tablasDeDatos, tablasDeSnapshot } from './db';
 import { borrarConsumoConHijos, consumoProtegido } from './entidades';
+import { borrarAreaTemporal } from './snapshot-temporal';
 
 /** Permisos con los que se ven consumos de otras personas fuera de las órdenes asignadas. */
 const PERMISOS_DE_VISIBILIDAD_AMPLIA: readonly Permiso[] = [
@@ -27,13 +34,19 @@ export function tieneVisibilidadAmplia(permisos: readonly Permiso[]): boolean {
   return permisos.some((p) => PERMISOS_DE_VISIBILIDAD_AMPLIA.includes(p));
 }
 
+/** Tablas que toca la purga: los datos de la partición y el área temporal del snapshot (A6). */
+export function tablasDePurgaDeVisibilidad(): Table[] {
+  return [...tablasDeDatos(), ...tablasDeSnapshot()];
+}
+
 /**
- * Borra de la partición de `userId` los consumos ajenos que ya no le corresponden (ver la cabecera).
- * Debe llamarse DENTRO de una transacción `rw` sobre `tablasDeDatos()` o fuera de toda transacción
- * (abre la suya). Devuelve cuántos consumos borró.
+ * Borra de la partición de `userId` los consumos ajenos que ya no le corresponden y descarta su área
+ * temporal del snapshot (ver la cabecera). Debe llamarse DENTRO de una transacción `rw` sobre
+ * `tablasDePurgaDeVisibilidad()` o fuera de toda transacción (abre la suya). Devuelve cuántos
+ * consumos borró.
  */
 export async function purgarAjenosSinVisibilidad(userId: string): Promise<number> {
-  return db.transaction('rw', tablasDeDatos(), async () => {
+  return db.transaction('rw', tablasDePurgaDeVisibilidad(), async () => {
     const rango = rangoDe(userId);
     const asignadas = new Set(
       (
@@ -60,6 +73,8 @@ export async function purgarAjenosSinVisibilidad(userId: string): Promise<number
       await borrarConsumoConHijos(userId, c.id);
       borrados += 1;
     }
+    // A6: solo el área de `userId`; la de otros usuarios de la tablet no se toca.
+    await borrarAreaTemporal(userId);
     return borrados;
   });
 }

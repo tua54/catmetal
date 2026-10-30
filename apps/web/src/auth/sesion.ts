@@ -36,14 +36,18 @@ import {
   type Permiso,
   type RespuestaSesion,
 } from '@catmetal/shared';
-import { db, obtenerInstalacionId, tablasDeDatos } from '../datos/db';
+import { db, obtenerInstalacionId } from '../datos/db';
 import {
   borrarDatosDeUsuario,
   pendientesPorUsuario,
   puedeBorrarDatosDeUsuario,
 } from '../datos/outbox';
 import type { PerfilLocal, VerificadorLocal } from '../datos/tipos';
-import { purgarAjenosSinVisibilidad, tieneVisibilidadAmplia } from '../datos/visibilidad';
+import {
+  purgarAjenosSinVisibilidad,
+  tablasDePurgaDeVisibilidad,
+  tieneVisibilidadAmplia,
+} from '../datos/visibilidad';
 import {
   crearCanalSesion,
   type CanalSesion,
@@ -591,7 +595,9 @@ export class GestorSesion {
       anterior !== undefined &&
       tieneVisibilidadAmplia(anterior.perfil.permisos) &&
       !tieneVisibilidadAmplia(respuesta.usuario.permisos);
-    await db.transaction('rw', perdioVisibilidad ? tablasDeDatos() : [db.perfiles], async () => {
+    // A6: la purga también descarta el área temporal del snapshot, así que la transacción la incluye.
+    const tablas = perdioVisibilidad ? tablasDePurgaDeVisibilidad() : [db.perfiles];
+    await db.transaction('rw', tablas, async () => {
       const previo = await db.perfiles.get(respuesta.usuario.id);
       // ADR 0017 §3: el admin no trabaja offline; nunca tiene verificador (y se borra uno anterior).
       const verificador =
