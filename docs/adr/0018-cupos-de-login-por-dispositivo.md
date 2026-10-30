@@ -154,3 +154,38 @@ Se adopta la opción 3.
 ## Cómo revertir
 
 Volver al bloqueo por cuenta de la ADR 0008, punto 6: restaurar `reservarIntento` sobre `users` y dejar de emitir y leer `mp_dispositivo`. La tabla `login_cupos` puede quedar sin uso. Revertir **no** es recomendable porque reabre el abuso M1.
+
+## Enmienda 2 — Correcciones v1.2 (ítems A5 y A8)
+
+- Fecha: 2026-10-30.
+
+### A5: un login correcto nunca deja `g` bloqueado
+
+**Contexto.** La reserva suma 1 en `g` antes de comparar el hash (punto 4 y S-02). Si `g` estaba en `máximo − 1`, la reserva de un login **correcto** lo bloquea, y el descuento posterior (`fallos - 1`) no aplica porque solo actúa sobre un `g` sin bloqueo. Resultado: el usuario entra, pero deja bloqueados durante 15 min todos sus orígenes desconocidos, por un intento que no fue un fallo.
+
+**Decisión.** La reserva no puede evitar sumar, porque se hace antes de saber si la contraseña es correcta (es lo que la hace atómica). Lo corrige el batch del login correcto:
+
+1. Si `g` quedó bloqueado **por esta misma reserva** (`reserva_id` de `g` igual al de la reserva y `bloqueado_hasta` no nulo), el login correcto descuenta su unidad y quita ese bloqueo, con un `reserva_id` nuevo, y audita `login_cupos.desbloqueado` (tipo `global`) condicionado a esa marca (ADR 0028). Un bloqueo puesto por otra reserva no se toca: `g` lo conserva hasta que vence.
+2. Si `g` no está bloqueado, se descuenta la unidad como antes.
+3. Con `g` bloqueado por esta reserva, ninguna otra reserva pudo cambiar `g` en medio, porque el upsert de `g` no aplica sobre un bloqueo vigente. Por eso `reserva_id` identifica sin ambigüedad quién lo bloqueó.
+
+**Consecuencia.** La auditoría muestra el bloqueo y el desbloqueo del mismo instante, lo que deja trazado que el bloqueo lo causó el login correcto. El atacante no gana intentos: `g` queda con los mismos fallos reales que antes del login.
+
+### A8: el refresh renueva o emite la cookie del dispositivo
+
+**Contexto.** Solo un login con contraseña emitía `mp_dispositivo`. Una tablet con sesión viva desde antes de la v1.1, o que perdió la cookie, seguía contando como origen desconocido hasta su próximo login con contraseña.
+
+**Decisión.**
+
+1. Un `POST /auth/refresh` **exitoso** (rotación correcta, no la detección de reutilización ni ningún error) pone `mp_dispositivo` para el usuario de la sesión:
+   - si la cookie presentada ya tiene una entrada válida de ese usuario, se conserva tal cual (mismo nonce, así no se reinicia su cupo `d:`) y solo se renueva el `Max-Age` de la cookie;
+   - si no la tiene, se agrega una entrada nueva, igual que en el login correcto, respetando el máximo de 16 y las entradas válidas de otros usuarios.
+2. El refresh demuestra lo mismo que un login correcto previo en este navegador: tener un refresh token vigente de esa familia. No da acceso adicional: la cookie solo elige el cupo de login.
+3. Logout sigue sin tocar la cookie.
+
+### Rotar `REFRESH_SECRET`
+
+- Las firmas de `mp_dispositivo` usan una clave derivada de `REFRESH_SECRET` (S-05). Rotarlo invalida **todas** las entradas: todos los dispositivos pasan a ser de origen desconocido, y además se cierran todas las sesiones.
+- **Cuándo rotarlo:** ante una sospecha de filtración del secreto, después de una restauración por incidente de seguridad (`docs/despliegue.md` §9.2) o como mantenimiento planificado, **fuera de un ataque de adivinanza en curso**. Durante un ataque activo, rotarlo quitaría a los usuarios legítimos la protección de su dispositivo conocido y los dejaría expuestos al tope global `g`.
+- **Mitigación:** avisar antes a planta (todos inician sesión otra vez, con conexión); tener a mano el desbloqueo del admin y el de emergencia (`docs/despliegue.md` §5.1). Como la rotación también cierra todas las sesiones, el refresh no puede recuperar la cookie: cada dispositivo vuelve a ser conocido tras su primer login correcto con contraseña.
+- El procedimiento queda en `docs/despliegue.md` §3.
