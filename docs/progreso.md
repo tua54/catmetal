@@ -93,3 +93,7 @@ No se usan `mvc-dotnet-developer`, `angular-developer` ni `orchestrator`.
 - 3.1–3.2 servidor de sync confirmado (`8388341`); ADR 0015 (visibilidad de usuarios, revocación, errores).
 - Adelantadas confirmadas: 4.2 (shell PWA, login, layout, estado de sync) y 6.1 (cron de backup, ADR 0014). Planes de las Fases 4, 5 y 6 confirmados por adelantado.
 - En curso: 3.6 (revisión de protocolo y esquema, `database-specialist`), 4.3 (pantallas del supervisor) y 4.4a (infraestructura E2E, `test-engineer`).
+- 3.6 revisión del protocolo (`docs/auditoria/revision-esquema-fase-3.md`): 3 altos. ADR 0016 (época en el push, retención de 30 días, idempotencia por clave natural, backup con continuaciones). Contrato de shared ajustado por el orquestador (`dc92e42`). Pregunta P24.
+- 4.4a infraestructura E2E confirmada (18 pruebas, Chromium y WebKit; login offline ~280 ms en Chromium y ~1,5 s en WebKit).
+- En curso: 3.8 (correcciones del servidor), 3.9 (correcciones del cliente), 4.3 (pantallas del supervisor).
+- Pendiente menor: que `scripts/seed.mjs` acepte `SEED_PASSWORD` por variable de entorno para retirar `scripts/e2e-precarga-seed.mjs`.
