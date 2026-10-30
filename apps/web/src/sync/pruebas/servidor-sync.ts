@@ -8,9 +8,12 @@
 // - `GET /sync/pull?cursor=`: `audit_log` por `seq`, estado actual, `hay_mas`, cursor = último revisado.
 // - `GET /sync/snapshot`: estado actual paginado; cursor = `MAX(seq)` al pedir la primera página.
 // - `PUT /evidences/:id`: sha256 del cuerpo; 404 `EVIDENCIA_DESCONOCIDA`; 409 si ya se subió otra.
+// - Toda petición: `X-Version-Cliente` menor que `versionMinima` → 426 `CLIENTE_DESACTUALIZADO`
+//   sin procesar nada (B5, ADR 0026).
 // El token es `tok-<user_id>`.
 
 import {
+  CABECERA_VERSION_CLIENTE,
   crearError,
   ESTADO_HTTP_POR_CODIGO,
   leerMutationId,
@@ -24,6 +27,7 @@ import {
   type Novedad,
   type ResultadoMutacion,
   type Validacion,
+  versionClienteDe,
 } from '@catmetal/shared';
 import { urlDe } from '../../auth/pruebas/servidor-falso';
 
@@ -35,6 +39,8 @@ export interface PeticionSync {
   query: URLSearchParams;
   user_id: string | null;
   cuerpo: unknown;
+  /** Cabecera `X-Version-Cliente` tal como llegó (B5). */
+  version_cliente: string | null;
 }
 
 interface Registro {
@@ -74,6 +80,8 @@ export interface ServidorSync {
   fallarSnapshotEnPagina: number | null;
   /** Próximas N peticiones de snapshot con `pagina` responden 400 `VALIDACION` (token inválido). */
   rechazarPaginaSnapshot: number;
+  /** Versión mínima del cliente (B5): con una menor, toda petición responde 426. Por defecto, 1. */
+  versionMinima: number;
   /** `epoca` recibida en cada push (`null` si no vino). */
   epocasRecibidas: (string | null)[];
   seq(): number;
@@ -438,6 +446,7 @@ export function crearServidorSync(): ServidorSync {
     ordenesNoVisibles: new Set(),
     fallarSnapshotEnPagina: null,
     rechazarPaginaSnapshot: 0,
+    versionMinima: 1,
     epocasRecibidas: [],
     seq: () => seq,
     entidades: (entidad) =>
@@ -469,7 +478,8 @@ export function crearServidorSync(): ServidorSync {
     },
     fetch: async (entrada, init) => {
       const url = new URL(urlDe(entrada), 'http://localhost');
-      const bearer = new Headers(init?.headers).get('Authorization');
+      const cabeceras = new Headers(init?.headers);
+      const bearer = cabeceras.get('Authorization');
       const userId = /^Bearer tok-(.+)$/.exec(bearer ?? '')?.[1] ?? null;
       const metodo = init?.method ?? 'GET';
       const peticion: PeticionSync = {
@@ -478,9 +488,17 @@ export function crearServidorSync(): ServidorSync {
         query: url.searchParams,
         user_id: userId,
         cuerpo: typeof init?.body === 'string' ? (JSON.parse(init.body) as unknown) : init?.body,
+        version_cliente: cabeceras.get(CABECERA_VERSION_CLIENTE),
       };
       peticiones.push(peticion);
       servidor.alRecibir?.(peticion);
+      if (versionClienteDe(peticion.version_cliente) < servidor.versionMinima) {
+        // Como el middleware real: antes de autenticar y sin procesar nada.
+        return json(
+          crearError('CLIENTE_DESACTUALIZADO', { version_minima: servidor.versionMinima }),
+          ESTADO_HTTP_POR_CODIGO.CLIENTE_DESACTUALIZADO,
+        );
+      }
       if (userId === null || userId === 'invalido') {
         return error('NO_AUTENTICADO');
       }

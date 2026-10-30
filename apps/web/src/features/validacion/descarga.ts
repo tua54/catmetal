@@ -7,6 +7,7 @@
 
 import { esCodigoError, type CodigoError } from '@catmetal/shared';
 import { BASE_API, ErrorApi, ErrorRed, sesion } from '../../auth';
+import { avisarSiDesactualizado, cabeceraVersionCliente } from '../../auth/cliente-api';
 
 /** Lo que necesita la descarga de la sesión (la real en la app; reemplazable en pruebas). */
 export interface ProveedorToken {
@@ -58,7 +59,8 @@ async function pedir(ruta: string, token: string): Promise<Response> {
   try {
     return await globalThis.fetch(`${BASE_API}${ruta}`, {
       method: 'GET',
-      headers: { Authorization: `Bearer ${token}` },
+      // `X-Version-Cliente` como toda petición a la API (B5, ADR 0026).
+      headers: { ...cabeceraVersionCliente(), Authorization: `Bearer ${token}` },
       credentials: 'same-origin',
       cache: 'no-store',
     });
@@ -88,7 +90,9 @@ export async function descargarAutenticado(
     respuesta = await pedir(ruta, nuevo);
   }
   if (!respuesta.ok) {
-    throw await errorDe(respuesta);
+    const error = await errorDe(respuesta);
+    avisarSiDesactualizado(error);
+    throw error;
   }
   return {
     blob: await respuesta.blob(),

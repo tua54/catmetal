@@ -119,5 +119,10 @@ export async function reiniciarApp(): Promise<void> {
     actualizacionDisponible: false,
     listaSinConexion: false,
     actualizar: null,
+    // B5: sin aviso de versión mínima entre pruebas.
+    desactualizado: false,
+    versionMinima: null,
+    sinVersionNueva: false,
+    forzarActualizacion: null,
   });
 }

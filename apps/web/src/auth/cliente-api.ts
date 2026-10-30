@@ -9,13 +9,19 @@
 // - Toda escritura (método distinto de GET/HEAD) lleva `X-Hora-Dispositivo` con la hora del
 //   dispositivo en el momento de CADA `fetch`, también en el reintento (ADR 0019, M2). No es un
 //   secreto: el servidor la compara con la suya para `alerta_reloj`.
+// - TODA petición lleva `X-Version-Cliente` (B5, ADR 0026). Un 426 `CLIENTE_DESACTUALIZADO` es un
+//   error de la petición entera: se lanza como `ErrorApi` y, además, se avisa a la app para que se
+//   actualice sola (`avisarClienteDesactualizado`).
 
 import {
   CABECERA_HORA_DISPOSITIVO,
+  CABECERA_VERSION_CLIENTE,
   esCodigoError,
   MENSAJES_ERROR,
+  VERSION_CLIENTE,
   type CodigoError,
 } from '@catmetal/shared';
+import { avisarClienteDesactualizado } from '../pwa/registro';
 
 export const BASE_API = '/api/v1';
 const TIEMPO_ESPERA_MS = 20_000;
@@ -98,6 +104,32 @@ export interface ConfiguracionCliente {
   proveedor?: ProveedorSesion;
   /** Reloj del dispositivo para `X-Hora-Dispositivo` (por defecto, `Date.now`). */
   ahora?: () => number;
+  /**
+   * El servidor respondió 426 `CLIENTE_DESACTUALIZADO` (B5). Por defecto, el aviso global de la PWA
+   * (aviso bloqueante y actualización forzada del Service Worker).
+   */
+  alClienteDesactualizado?: (error: ErrorApi) => void;
+}
+
+/** `X-Version-Cliente`: va en toda petición a `/api/v1` (también en las de `descarga.ts`). */
+export function cabeceraVersionCliente(): Record<string, string> {
+  return { [CABECERA_VERSION_CLIENTE]: String(VERSION_CLIENTE) };
+}
+
+/** Avisa a la app si el error es `CLIENTE_DESACTUALIZADO` (ADR 0026). Nunca lanza. */
+export function avisarSiDesactualizado(
+  error: ErrorApi,
+  alClienteDesactualizado: (error: ErrorApi) => void = (e) =>
+    avisarClienteDesactualizado(e.details),
+): void {
+  if (error.code !== 'CLIENTE_DESACTUALIZADO') {
+    return;
+  }
+  try {
+    alClienteDesactualizado(error);
+  } catch {
+    // El aviso nunca debe ocultar el error de la petición.
+  }
 }
 
 /** Métodos que no escriben: no llevan la hora del dispositivo. */
@@ -148,7 +180,7 @@ export function crearClienteApi(configuracion: ConfiguracionCliente = {}): Clien
     opciones: OpcionesPeticion,
     token: string | null,
   ): Promise<Response> {
-    const cabeceras = new Headers({ Accept: 'application/json' });
+    const cabeceras = new Headers({ Accept: 'application/json', ...cabeceraVersionCliente() });
     let cuerpo: BodyInit | undefined;
     if (opciones.binario !== undefined) {
       cabeceras.set('Content-Type', opciones.binario.tipo);
@@ -213,6 +245,7 @@ export function crearClienteApi(configuracion: ConfiguracionCliente = {}): Clien
     let respuesta = await enviar(ruta, opciones, token);
     if (!respuesta.ok) {
       let error = await leerError(respuesta);
+      avisarSiDesactualizado(error, configuracion.alClienteDesactualizado);
       if (autenticar && proveedor !== undefined && error.code === 'NO_AUTENTICADO') {
         const nuevo = await proveedor.refrescar(ligado);
         if (nuevo === null) {
@@ -223,6 +256,7 @@ export function crearClienteApi(configuracion: ConfiguracionCliente = {}): Clien
           return leerCuerpo<T>(respuesta);
         }
         error = await leerError(respuesta);
+        avisarSiDesactualizado(error, configuracion.alClienteDesactualizado);
       }
       if (autenticar && error.code === 'SESION_REVOCADA') {
         proveedor?.sesionRevocada?.(error);

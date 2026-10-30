@@ -16,6 +16,11 @@
 //      se reemplaza cuando está completo (ADR 0022, M5).
 //   5. Subida de fotos de novedades ya aplicadas. Nunca bloquea los registros.
 //   6. Purga de aplicadas > 7 días y evento de trazabilidad.
+//
+// 426 `CLIENTE_DESACTUALIZADO` (B5, ADR 0026) en CUALQUIER petición: la respuesta es de la petición
+// entera, no de una mutación. El motor se detiene sin rechazar ni reprogramar nada: el lote en vuelo
+// vuelve a `pendiente` tal cual y las fotos no cuentan el intento. El cliente HTTP ya avisó a la app,
+// que se actualiza sola; la próxima sync (con la versión nueva) lo envía todo.
 
 import {
   MAX_MUTACIONES_POR_LOTE,
@@ -228,7 +233,16 @@ function esErrorEsperado(error: unknown): boolean {
 
 /** El error impide seguir con la red o con la sesión (no vale la pena subir fotos ahora). */
 function detieneLaRed(error: ErrorSync): boolean {
-  return error.code === null || CODIGOS_DE_SESION.includes(error.code);
+  return (
+    error.code === null ||
+    error.code === 'CLIENTE_DESACTUALIZADO' ||
+    CODIGOS_DE_SESION.includes(error.code)
+  );
+}
+
+/** B5: el servidor exige una versión más nueva de la app (426 de la petición entera). */
+function esClienteDesactualizado(error: unknown): error is ErrorApi {
+  return error instanceof ErrorApi && error.code === 'CLIENTE_DESACTUALIZADO';
 }
 
 function resumenVacio(motivo: MotivoSync): ResumenSync {
@@ -628,6 +642,14 @@ export class MotorSync {
           resumen.enviadas -= lote.length;
           return 'epoca_cambiada';
         }
+        if (esClienteDesactualizado(error)) {
+          // B5: el servidor no procesó nada (rechazó la petición entera, no una mutación). El lote
+          // vuelve a `pendiente` sin contar el intento ni backoff, y la sync se detiene.
+          await devolverAPendiente(userId, lote, this.#ahora());
+          resumen.enviadas -= lote.length;
+          resumen.error = errorSyncDe(error);
+          return 'ok';
+        }
         // Sin respuesta utilizable: todo el lote queda sin resultado (sigue pendiente, con backoff).
         this.#verificarAutor(userId);
         const r = await aplicarResultados(userId, lote, [], {
@@ -847,8 +869,9 @@ export class MotorSync {
         await marcarEvidenciaSubida(userId, foto.id, this.#ahora());
         resumen.fotos_subidas += 1;
       } catch (error) {
-        if (error instanceof SesionCambiada) {
-          // Sigue `pendiente`: el servidor acepta otra vez los mismos bytes (mismo sha256).
+        if (error instanceof SesionCambiada || esClienteDesactualizado(error)) {
+          // Sigue `pendiente`: el servidor acepta otra vez los mismos bytes (mismo sha256). Con 426
+          // (B5) la foto no cuenta el intento: se sube con la versión nueva.
           throw error;
         }
         const detalle = errorSyncDe(error);

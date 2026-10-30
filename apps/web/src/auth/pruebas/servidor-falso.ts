@@ -4,6 +4,7 @@
 // `mp_refresh` por origen (la del último login) y logout por cookie o, sin cookie, por Bearer.
 
 import {
+  CABECERA_VERSION_CLIENTE,
   crearError,
   ESTADO_HTTP_POR_CODIGO,
   permisosDeRol,
@@ -20,6 +21,8 @@ export interface PeticionRegistrada {
   autorizacion: string | null;
   credenciales: RequestCredentials | undefined;
   cuerpo: string | null;
+  /** Cabecera `X-Version-Cliente` (B5). */
+  version_cliente: string | null;
 }
 
 interface UsuarioFalso {
@@ -108,6 +111,7 @@ export function crearServidorFalso(): ServidorFalso {
         autorizacion: cabeceras.get('Authorization'),
         credenciales: init?.credentials,
         cuerpo: typeof init?.body === 'string' ? init.body : null,
+        version_cliente: cabeceras.get(CABECERA_VERSION_CLIENTE),
       };
       peticiones.push(registrada);
       if (servidor.modo === 'caido') {
