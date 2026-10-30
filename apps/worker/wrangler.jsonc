@@ -37,6 +37,11 @@
   // Workers Logs: los logs estructurados del Worker quedan disponibles en el panel.
   "observability": {
     "enabled": true,
+    // Los "invocation logs" registran la petición y la respuesta de cada invocación y la documentación
+    // no garantiza que excluyan cabeceras como Authorization o Cookie (pendiente de la revisión de
+    // seguridad de la Fase 2). Se desactivan: solo quedan los logs estructurados del código, que nunca
+    // incluyen cabeceras, cuerpos ni datos personales. Se hereda en los entornos.
+    "logs": { "invocation_logs": false },
   },
 
   // Variables no secretas del entorno local. `ORIGENES_DEV` lista los orígenes que, solo en desarrollo,
@@ -92,6 +97,9 @@
   "env": {
     // Staging: se despliega solo de forma manual (workflow_dispatch con environment protegido).
     "staging": {
+      // Staging se publica en workers.dev (catmetal-mp-staging.<subdominio>.workers.dev) mientras no
+      // tenga dominio propio; sin URLs de previsualización por versión (docs/despliegue.md).
+      "preview_urls": false,
       "vars": {
         "ENTORNO": "staging",
         // Vacío: fuera de desarrollo solo se acepta el propio origen.
@@ -133,6 +141,11 @@
 
     // Producción.
     "production": {
+      // Producción solo en su dominio propio: sin workers.dev ni URLs de previsualización. Una persona
+      // configura el dominio (docs/despliegue.md) descomentando y ajustando `routes`.
+      "workers_dev": false,
+      "preview_urls": false,
+      // "routes": [{ "pattern": "REEMPLAZAR_CON_DOMINIO_PRODUCCION", "custom_domain": true }],
       "vars": {
         "ENTORNO": "production",
         "ORIGENES_DEV": "",
