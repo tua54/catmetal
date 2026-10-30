@@ -33,3 +33,7 @@ La PWA debe registrar sin conexión (§6), funcionar en tablets compartidas sin 
 ## Cómo revertir
 
 Cambiar `ITERACIONES_VERIFICADOR` (los verificadores existentes guardan su número de iteraciones y siguen verificándose). Para separar bases por usuario, migrar con una versión nueva del esquema de Dexie.
+
+## Enmienda (2026-10-29, ADR 0017)
+
+La consecuencia "El verificador solo abre los datos locales; no da acceso al servidor" es **incorrecta**: si alguien extrae IndexedDB, puede atacar el verificador por diccionario y la contraseña recuperada es la misma del servidor. Se mitiga con el límite de intentos offline, el borrado del verificador al 10.º fallo, la ausencia de verificador para el admin, su invalidación cuando el servidor rechaza la contraseña y una política MDM sin depuración USB (ADR 0017).
