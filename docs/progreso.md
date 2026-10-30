@@ -10,7 +10,7 @@
 
 ## Siguiente paso
 
-C2 (Node 24), luego la ola 1 de P1 (M1, M3→M4, M5→M6) según `docs/plan-correcciones.md`.
+Ola 1 de P1 en curso: M1 (implementación, general-purpose), M3/M4 (diseño ADR 0020/0021, general-purpose), M5/M6 (diseño ADR 0022, react-developer). Después: M2-servidor (después de M1, porque comparten auditar.ts), M7 y M2-cliente.
 
 ## Sesión de correcciones v1.1
 
@@ -144,3 +144,5 @@ No se usan `mvc-dotnet-developer`, `angular-developer` ni `orchestrator`.
 - En curso: 6.3 instalabilidad, Lighthouse y axe automatizados (`test-engineer`); 6.2 endurecimiento de la UI (`ui-ux-designer`); M5 rendimiento del snapshot (`general-purpose`).
 - 6.2 UI endurecida (`ui-ux-designer`), M5 snapshot, 6.3 instalabilidad/Lighthouse/axe (`test-engineer`), 6.5 revisión final (`security-reviewer`: 0 críticos, 0 altos, 1 medio), 6.7 correcciones (servidor, cliente, workflow por SHA, guía).
 - Cierre: 1.926 pruebas, 33 E2E, Lighthouse ≥ 90, audit --prod sin vulnerabilidades. Evidencia: `docs/evidencia/fase-6.md`.
+- C2 y N1 resueltos (e06919d). ADR 0019 (M2), 0023 (M7) y 0018 (M1, con la segunda opinión de software-architect: aprobar con cambios, todos incorporados).
+- D9 (desviaciones) y P25 (preguntas abiertas) registradas para M1.
