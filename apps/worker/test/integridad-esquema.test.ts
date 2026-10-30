@@ -7,6 +7,8 @@ import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { crearDb, MAX_PAYLOAD_JSON_BYTES, schema, settings, users } from '../src/db/schema';
 import { CONSULTA_SESION } from '../src/middleware/autenticar';
+import { SENTENCIA_PURGA } from '../src/cron/mantenimiento';
+import { CONSULTA_CREACION_NO_APLICADA } from '../src/sync/push';
 import {
   ahora,
   crearDispositivo,
@@ -75,7 +77,11 @@ const TRIGGERS_ESPERADOS = [
 
 // Índices con nombre: los de la §4 de la spec, los adicionales de las ADR 0008/0009 y los de las FK.
 // (Las PK y UNIQUE implícitas generan `sqlite_autoindex_*`, que no se listan.)
-const INDICES_ESPERADOS: Record<string, { tabla: string; columnas: string[]; unico: boolean }> = {
+/** `null` en `columnas`: columna de un índice por expresión (`pragma_index_info` no da nombre). */
+const INDICES_ESPERADOS: Record<
+  string,
+  { tabla: string; columnas: (string | null)[]; unico: boolean }
+> = {
   // §4
   consumptions_order_id_estado: {
     tabla: 'consumptions',
@@ -139,6 +145,13 @@ const INDICES_ESPERADOS: Record<string, { tabla: string; columnas: string[]; uni
     unico: false,
   },
   audit_log_order_id_seq: { tabla: 'audit_log', columnas: ['order_id', 'seq'], unico: false },
+  // Revisión de la Fase 3: B5 (purga del cron) y B1 (por expresión, solo en migrations/0006)
+  refresh_tokens_expira_at: { tabla: 'refresh_tokens', columnas: ['expira_at'], unico: false },
+  sync_mutations_no_aplicadas_consumo: {
+    tabla: 'sync_mutations',
+    columnas: ['user_id', null],
+    unico: false,
+  },
 };
 
 interface FilaMaestra {
@@ -182,7 +195,7 @@ describe('sqlite_master después de todas las migraciones', () => {
         `SELECT name FROM pragma_index_info(?) ORDER BY seqno`,
       )
         .bind(nombre)
-        .all<{ name: string }>();
+        .all<{ name: string | null }>();
       expect(
         columnas.map((c) => c.name),
         nombre,
@@ -671,6 +684,27 @@ describe('ADR 0010: planes de consulta (EXPLAIN QUERY PLAN en la D1 local)', () 
       uuidv7(),
     );
     expect(detalle).toContain('refresh_tokens_vigentes_usuario');
+  });
+
+  it('la búsqueda de una creación de consumo no aplicada (/sync/push) usa el índice por expresión', async () => {
+    const detalle = await plan(CONSULTA_CREACION_NO_APLICADA, uuidv7(), uuidv7(), uuidv7());
+    expect(detalle).toContain('sync_mutations_no_aplicadas_consumo');
+    const definicion = await env.DB.prepare(
+      "SELECT sql FROM sqlite_master WHERE name = 'sync_mutations_no_aplicadas_consumo'",
+    ).first<{ sql: string }>();
+    expect(definicion?.sql).toContain("json_extract(payload_json, '$.payload.id')");
+    expect(definicion?.sql).toContain("WHERE tipo = 'consumo.crear' AND resultado <> 'aplicada'");
+    const parcial = await env.DB.prepare(
+      "SELECT partial FROM pragma_index_list('sync_mutations') WHERE name = 'sync_mutations_no_aplicadas_consumo'",
+    ).first<{ partial: number }>();
+    expect(parcial?.partial).toBe(1);
+  });
+
+  it('la purga de refresh tokens del cron usa refresh_tokens_expira_at', async () => {
+    const { results } = await env.DB.prepare(`EXPLAIN QUERY PLAN ${SENTENCIA_PURGA}`)
+      .bind(ahora(), 500)
+      .all<{ detail: string }>();
+    expect(results.map((r) => r.detail).join(' | ')).toContain('refresh_tokens_expira_at');
   });
 
   it('la línea de tiempo de una orden usa audit_log_order_id_seq', async () => {

@@ -25,9 +25,13 @@
     "run_worker_first": true,
   },
 
-  // Cron diario a las 08:00 UTC (03:00 en Bogotá, fuera de turno): backup y mantenimiento (Fase 6).
+  // Crons (ADR 0014 y 0016), en UTC:
+  // - "0 8 * * *" (03:00 en Bogotá, fuera de turno): inicia el backup del día y hace el mantenimiento.
+  // - "0 9-13 * * *": continuaciones horarias del MISMO día (04:00–08:00 en Bogotá); solo siguen un
+  //   backup en pausa. Con intervalo ≥ 1 h cada invocación dispone de hasta 15 min de CPU.
+  // `triggers` SÍ se hereda en `env.staging` y `env.production` (no se repite allí).
   "triggers": {
-    "crons": ["0 8 * * *"],
+    "crons": ["0 8 * * *", "0 9-13 * * *"],
   },
 
   // Workers Logs: los logs estructurados del Worker quedan disponibles en el panel.

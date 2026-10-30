@@ -157,10 +157,11 @@ describe('backup completo en una invocación', () => {
 
   it('con páginas mínimas recorre bien todas las PK (simples, compuestas, seq y clave)', async () => {
     const fecha = '2026-11-05';
-    // Una consulta por fila: se levanta el tope de operaciones solo para esta prueba.
+    // Una consulta por fila: se levanta el tope de consultas a D1 solo para esta prueba (desde la
+    // ADR 0016 D1 y R2 tienen topes separados; antes se levantaba el tope único de operaciones).
     const resultado = await ejecutarBackup(env, dia(fecha), {
       tamanoPagina: 1,
-      presupuesto: new Presupuesto({ maxOperaciones: 100_000 }),
+      presupuesto: new Presupuesto({ maxConsultasD1: 100_000 }),
     });
     expect(resultado.estado).toBe('completo');
     await verificarBackupCompleto(fecha);

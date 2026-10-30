@@ -1,13 +1,24 @@
-// Orquestación del Cron Trigger diario (`0 8 * * *`): backup de D1 a R2 y luego mantenimiento.
+// Orquestación de los Cron Triggers (ADR 0014, enmendada por la ADR 0016):
+//
+// - `0 8 * * *` (inicio, 03:00 en Bogotá): backup de D1 a R2 y luego mantenimiento.
+// - `0 9-13 * * *` (continuaciones horarias): solo continúan un backup del día que quedó en pausa.
+//   No inician uno nuevo ni repiten el mantenimiento. Si la de las 13:00 UTC (la última del día)
+//   termina sin backup completo, registra el error `backup_incompleto_del_dia`.
+// - Cualquier otra expresión (por ejemplo, un disparo manual en `wrangler dev`) se trata como inicio.
 //
 // Nunca lanza: un error del backup no impide el mantenimiento (ni al revés) y todo queda en logs
 // estructurados sin datos personales (solo estados, conteos, nombres de tabla y el mensaje técnico
 // del error, truncado).
 
 import { registrar } from '../log';
-import { ejecutarBackup, type ResultadoBackup } from './backup';
+import { ejecutarBackup, fechaBackup, type ModoBackup, type ResultadoBackup } from './backup';
 import { ejecutarMantenimiento } from './mantenimiento';
 import { Presupuesto } from './presupuesto';
+
+export const CRON_INICIO = '0 8 * * *';
+export const CRON_CONTINUACION = '0 9-13 * * *';
+/** Hora UTC de la última continuación del día (la de `CRON_CONTINUACION`). */
+export const HORA_ULTIMA_CONTINUACION_UTC = 13;
 
 export interface DisparoCron {
   cron: string;
@@ -32,6 +43,10 @@ export function describirError(error: unknown): string {
   return texto.slice(0, MAX_MENSAJE_ERROR);
 }
 
+export function modoDeCron(cron: string): ModoBackup {
+  return cron === CRON_CONTINUACION ? 'continuacion' : 'inicio';
+}
+
 export async function ejecutarCron(
   env: Env,
   disparo: DisparoCron,
@@ -39,23 +54,40 @@ export async function ejecutarCron(
 ): Promise<ResultadoCron> {
   const ahora = opciones.ahora ?? new Date();
   const presupuesto = opciones.presupuesto ?? new Presupuesto();
+  const modo = modoDeCron(disparo.cron);
   registrar('info', 'cron_ejecutado', {
     cron: disparo.cron,
+    modo,
     programado_para: new Date(disparo.scheduledTime).toISOString(),
   });
 
   let backup: ResultadoBackup | null = null;
   try {
-    backup = await ejecutarBackup(env, ahora, { presupuesto });
-    registrar(backup.estado === 'pausado' ? 'aviso' : 'info', 'backup_resumen', { ...backup });
+    backup = await ejecutarBackup(env, ahora, { presupuesto, modo });
+    const nivel = backup.estado === 'pausado' || backup.estado === 'sin_iniciar' ? 'aviso' : 'info';
+    registrar(nivel, 'backup_resumen', { ...backup });
   } catch (error) {
     registrar('error', 'backup_fallido', { error: describirError(error) });
   }
 
-  // Si el backup del día ya estaba hecho (o lo lleva otra invocación), el mantenimiento ya corrió
-  // en esa invocación: no se repite en las invocaciones de respaldo.
+  const ultimaDelDia =
+    modo === 'continuacion' &&
+    new Date(disparo.scheduledTime).getUTCHours() === HORA_ULTIMA_CONTINUACION_UTC;
+  const completo = backup?.estado === 'completo' || backup?.estado === 'ya_existia';
+  if (ultimaDelDia && !completo) {
+    // Ya no habrá más continuaciones hoy: el día queda sin backup completo (sin manifest).
+    registrar('error', 'backup_incompleto_del_dia', {
+      fecha: backup?.fecha ?? fechaBackup(ahora),
+      estado: backup?.estado ?? 'error',
+    });
+  }
+
+  // El mantenimiento solo corre en el inicio. Si el backup del día ya estaba hecho (o lo lleva otra
+  // invocación), el mantenimiento ya corrió en esa invocación: no se repite.
   const omitir =
-    backup?.estado === 'ya_existia' || backup?.estado === 'en_curso_en_otra_invocacion';
+    modo === 'continuacion' ||
+    backup?.estado === 'ya_existia' ||
+    backup?.estado === 'en_curso_en_otra_invocacion';
   let mantenimiento: ResultadoCron['mantenimiento'] = 'omitido';
   if (!omitir) {
     try {
@@ -73,7 +105,8 @@ export async function ejecutarCron(
     'cron_fin',
     {
       ...resultado,
-      operaciones: presupuesto.usadas,
+      consultas_d1: presupuesto.usadasD1,
+      operaciones_r2: presupuesto.usadasR2,
       duracion_ms: presupuesto.transcurridoMs,
     },
   );

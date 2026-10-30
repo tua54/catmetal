@@ -36,10 +36,22 @@ const CODIGO_POR_TRIGGER: Readonly<Record<string, CodigoError>> = {
 /** Columnas que son la clave primaria propia de una entidad (colisión → `ID_DUPLICADO`). */
 const COLUMNAS_ID = new Set(['id', 'mutation_id']);
 
-const PATRON_RESTRICCION = /SQLITE_CONSTRAINT(?: \(extended: SQLITE_CONSTRAINT_([A-Z]+)\))?/;
-const PATRON_UNICO = /UNIQUE constraint failed: ([^:]+): SQLITE_CONSTRAINT/;
+const PATRON_EXTENDIDO = /SQLITE_CONSTRAINT(?: \(extended: SQLITE_CONSTRAINT_([A-Z]+)\))?/;
+const PATRON_UNICO = /UNIQUE constraint failed: ([^:]+)/i;
 const PATRON_TRIGGER =
   /^(?:D1_ERROR: )?(.+): SQLITE_CONSTRAINT \(extended: SQLITE_CONSTRAINT_TRIGGER\)/;
+/**
+ * Alternativa por texto (revisión de la Fase 3, B3): si D1 cambiara el formato y dejara de
+ * agregar el sufijo `SQLITE_CONSTRAINT`, el mensaje de SQLite (`<TIPO> constraint failed`) sigue
+ * identificando la restricción. Nunca se clasifica como transitorio un error de restricción.
+ */
+const TIPO_POR_TEXTO: readonly (readonly [RegExp, string])[] = [
+  [/UNIQUE constraint failed/i, 'UNIQUE'],
+  [/CHECK constraint failed/i, 'CHECK'],
+  [/NOT NULL constraint failed/i, 'NOTNULL'],
+  [/FOREIGN KEY constraint failed/i, 'FOREIGNKEY'],
+  [/constraint failed/i, 'OTRA'],
+];
 
 export interface DetalleRestriccionUnica {
   entidad: string;
@@ -50,10 +62,40 @@ function mensajeDe(error: unknown): string | null {
   return error instanceof Error ? error.message : null;
 }
 
+/** Regla de un `RAISE` conocido, con o sin el sufijo de D1. */
+function reglaDeTrigger(mensaje: string): string | null {
+  const conSufijo = PATRON_TRIGGER.exec(mensaje)?.[1];
+  if (conSufijo !== undefined) {
+    return conSufijo;
+  }
+  return Object.keys(CODIGO_POR_TRIGGER).find((regla) => mensaje.includes(regla)) ?? null;
+}
+
+interface Restriccion {
+  tipo: string;
+  /** El tipo viene del código extendido de D1 (si no, se dedujo del texto). */
+  extendido: boolean;
+}
+
+function restriccionDe(mensaje: string): Restriccion | null {
+  const extendido = PATRON_EXTENDIDO.exec(mensaje);
+  const porTexto = TIPO_POR_TEXTO.find(([patron]) => patron.test(mensaje))?.[1];
+  if (extendido?.[1] !== undefined) {
+    return { tipo: extendido[1], extendido: true };
+  }
+  if (porTexto !== undefined) {
+    return { tipo: porTexto, extendido: false };
+  }
+  if (reglaDeTrigger(mensaje) !== null) {
+    return { tipo: 'TRIGGER', extendido: false };
+  }
+  return extendido === null ? null : { tipo: 'OTRA', extendido: false };
+}
+
 /** Indica si el error es una violación de restricción o de trigger de SQLite (no transitorio). */
 export function esErrorDeRestriccion(error: unknown): boolean {
   const mensaje = mensajeDe(error);
-  return mensaje !== null && PATRON_RESTRICCION.test(mensaje);
+  return mensaje !== null && restriccionDe(mensaje) !== null;
 }
 
 /** `production_orders.codigo` / `order_supervisors.order_id, order_supervisors.user_id`. */
@@ -68,7 +110,8 @@ function leerUnico(lista: string): DetalleRestriccionUnica {
  * red, sobrecarga, SQL inválido…), para que el llamador lo relance como error interno o transitorio.
  *
  * - PK propia (`id`, `mutation_id`) → `ID_DUPLICADO` (un id del cliente que ya existe: nunca se
- *   sobrescribe) con `details: { entidad, campos }`.
+ *   sobrescribe) con `details: { entidad, campos }`. Sin el código extendido (PK y UNIQUE dan el
+ *   mismo texto), una única columna `id`/`mutation_id` se trata como PK propia.
  * - Otro UNIQUE o PK compuesta → `CONFLICTO` con `details: { entidad, campos }` (código repetido o
  *   carrera entre dos peticiones).
  * - Trigger → el código de negocio del mensaje (`CODIGO_POR_TRIGGER`) o `CONFLICTO`.
@@ -80,25 +123,24 @@ export function traducirErrorD1(error: unknown): ErrorApi | null {
   if (mensaje === null) {
     return null;
   }
-  const restriccion = PATRON_RESTRICCION.exec(mensaje);
+  const restriccion = restriccionDe(mensaje);
   if (restriccion === null) {
     return null;
   }
-  const tipo = restriccion[1] ?? '';
-  switch (tipo) {
+  switch (restriccion.tipo) {
     case 'PRIMARYKEY':
     case 'UNIQUE': {
       const lista = PATRON_UNICO.exec(mensaje)?.[1];
       const detalle = lista === undefined ? undefined : leerUnico(lista);
-      const esIdPropio =
-        tipo === 'PRIMARYKEY' &&
+      const columnaId =
         detalle !== undefined &&
         detalle.campos.length === 1 &&
         COLUMNAS_ID.has(detalle.campos[0] ?? '');
+      const esIdPropio = columnaId && (restriccion.tipo === 'PRIMARYKEY' || !restriccion.extendido);
       return new ErrorApi(esIdPropio ? 'ID_DUPLICADO' : 'CONFLICTO', detalle);
     }
     case 'TRIGGER': {
-      const regla = PATRON_TRIGGER.exec(mensaje)?.[1] ?? '';
+      const regla = reglaDeTrigger(mensaje) ?? '';
       const codigo = Object.hasOwn(CODIGO_POR_TRIGGER, regla)
         ? CODIGO_POR_TRIGGER[regla]
         : undefined;

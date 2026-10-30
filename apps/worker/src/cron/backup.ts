@@ -1,4 +1,5 @@
-// Backup diario paginado de D1 a R2 (spec §2 y §4 "Backups", ADR 0014, revisión del esquema H9).
+// Backup diario paginado de D1 a R2 (spec §2 y §4 "Backups", ADR 0014 enmendada por la ADR 0016,
+// revisión del esquema H9 y revisión de la Fase 3 A3).
 //
 // Formato en R2 (bucket privado `EVIDENCE`, prefijo `backups/`, retención por regla de ciclo de vida):
 //
@@ -9,17 +10,17 @@
 //
 // Decisiones (detalle en la entrega de la tarea 6.1 y en docs/despliegue.md):
 //
-// - Fecha: día UTC del MOMENTO DE EJECUCIÓN (no `scheduledTime`). El cron corre a las 08:00 UTC,
-//   lejos de la medianoche, así que ambos coinciden; un reintento manual del mismo día continúa el
-//   mismo backup.
-// - Paginación por PK en lotes de 500 (`seq > ?`, `id > ?`, `(a, b) > (?, ?)`, `clave > ?`). No se
+// - Fecha: día UTC del MOMENTO DE EJECUCIÓN (no `scheduledTime`). Los crons corren de 08:00 a 13:00
+//   UTC, lejos de la medianoche, así que ambos coinciden; un reintento manual del mismo día continúa
+//   el mismo backup.
+// - Paginación por PK en lotes de 2000 (`seq > ?`, `id > ?`, `(a, b) > (?, ?)`, `clave > ?`). No se
 //   usa la exportación nativa de D1 (bloquea las demás consultas).
 // - Compresión con `CompressionStream('gzip')` en streaming. Los bytes comprimidos se suben con
 //   multipart upload de R2 en partes de 5 MiB exactos (R2 exige que todas las partes salvo la última
 //   midan lo mismo y al menos 5 MiB); si la tabla cabe en menos de una parte se sube con un `put`
 //   simple. Así la memoria queda acotada a ~1 parte y no hace falta conocer la longitud de antemano
 //   (`R2.put` con un `ReadableStream` exige longitud conocida).
-// - Reanudación: si el presupuesto (consultas + operaciones R2, tiempo) se agota a mitad de una tabla,
+// - Reanudación: si el presupuesto (consultas a D1, operaciones de R2 o tiempo) se agota a mitad de una tabla,
 //   se cierra el miembro gzip actual, los bytes que no completan una parte van a `_parciales/` y el
 //   cursor, las partes subidas y el `uploadId` a `progreso.json`. La siguiente invocación DEL MISMO
 //   DÍA abre un miembro gzip nuevo y continúa. El archivo final es entonces un gzip de varios miembros
@@ -29,19 +30,26 @@
 // - sha256 y bytes: se calculan RELEYENDO de R2 el objeto ya escrito (`crypto.DigestStream`), es
 //   decir, describen exactamente lo almacenado, aunque se haya escrito en varias invocaciones.
 // - Idempotencia: si existe el manifest del día, no se hace nada.
-// - Reintento: el cron de wrangler.jsonc es diario. Si el backup no termina en una invocación, solo
-//   lo continúa otra invocación del mismo día (reintento manual o un segundo cron de respaldo, por
-//   ejemplo `30 8 * * *`, que docs/despliegue.md puede añadir); las invocaciones sobrantes solo hacen
-//   un `head` del manifest. Un backup sin manifest está INCOMPLETO y no se usa para restaurar.
+// - Continuaciones (ADR 0016): el cron `0 8 * * *` inicia el backup del día y `0 9-13 * * *` lo
+//   continúa cada hora (modo `continuacion`: nunca inicia uno nuevo; sin `progreso.json` no hace
+//   nada). Con presupuestos de ~950 consultas de 2000 filas por invocación, seis invocaciones cubren
+//   bases de varios millones de filas. Las invocaciones sobrantes solo hacen un `head` del manifest.
+//   Un backup sin manifest está INCOMPLETO y no se usa para restaurar; si la continuación de las
+//   13:00 UTC termina sin completarlo, `ejecutarCron` registra el error `backup_incompleto_del_dia`.
 // - Concurrencia: `progreso.json` lleva un arriendo (`en_curso_hasta`) para que dos invocaciones
 //   solapadas no escriban a la vez. Es de mejor esfuerzo (R2 no se usa aquí con escritura condicional).
-// - El backup NO es una foto de un único instante (ADR 0014): `seq_inicial` es `MAX(seq)` al empezar.
+// - El backup NO es una foto de un único instante (ADR 0014): `seq_inicial` es `MAX(seq)` al empezar
+//   y `seq_final` (ADR 0016) `MAX(seq)` al terminar.
 
-import { Presupuesto } from './presupuesto';
+import { Presupuesto, type Reserva } from './presupuesto';
 import { TABLAS_BACKUP, type TablaBackup } from './tablas';
 
 export const PREFIJO_BACKUPS = 'backups/';
-export const TAMANO_PAGINA = 500;
+/**
+ * Filas por consulta (ADR 0016: 2000, medido en fase6-cron-multipart.test.ts con filas de ~6 KB:
+ * una página de 1500 filas de ese tamaño, ~9 MB de NDJSON, se lee, comprime y sube sin problema).
+ */
+export const TAMANO_PAGINA = 2000;
 /** Mínimo de R2 para las partes de un multipart upload (salvo la última). */
 export const TAMANO_PARTE_BYTES = 5 * 1024 * 1024;
 
@@ -49,8 +57,13 @@ export const TAMANO_PARTE_BYTES = 5 * 1024 * 1024;
  * Operaciones reservadas para cerrar ordenadamente: guardar el parcial y el progreso, o completar
  * la subida, releer el objeto y guardar el progreso; más margen para el mantenimiento del cron.
  */
-const RESERVA_CIERRE = 6;
-const RESERVA_MANTENIMIENTO = 20;
+const RESERVA: Reserva = {
+  // R2: guardar el parcial y el progreso, o completar la subida, releer el objeto y guardar el
+  // progreso, más el manifest y el borrado del progreso.
+  r2: 6,
+  // D1: `MAX(seq)` final del manifest y el mantenimiento del cron (conteos y purga).
+  d1: 20,
+};
 /** Margen del arriendo sobre el tiempo máximo de la invocación. */
 const MARGEN_ARRIENDO_MS = 60_000;
 
@@ -78,6 +91,11 @@ export interface ManifestBackup {
   epoca: string | null;
   /** `MAX(audit_log.seq)` al empezar el backup. */
   seq_inicial: number;
+  /**
+   * `MAX(audit_log.seq)` al terminar (ADR 0016, M2). Entre `seq_inicial` y `seq_final` el backup no
+   * es una foto de un instante: al restaurar, el runbook verifica esas filas de auditoría.
+   */
+  seq_final: number;
   /** Última migración aplicada (`d1_migrations.name`): versión del esquema. */
   ultima_migracion: string | null;
   /** En orden de exportación (hijos antes que padres). Se restaura en orden inverso. */
@@ -110,9 +128,18 @@ interface ProgresoBackup {
   en_curso_hasta: string | null;
 }
 
+/**
+ * `inicio`: el cron de las 08:00 UTC empieza (o continúa) el backup del día. `continuacion`: los
+ * crons horarios de 09:00 a 13:00 UTC solo continúan uno empezado; si no hay `progreso.json` no
+ * hacen nada (`sin_iniciar`) y, si ya hay manifest, tampoco (`ya_existia`).
+ */
+export type ModoBackup = 'inicio' | 'continuacion';
+
 export interface OpcionesBackup {
   presupuesto?: Presupuesto;
-  /** Filas por consulta (500 por la ADR 0014; inyectable solo para pruebas). */
+  /** Por defecto, `inicio`. */
+  modo?: ModoBackup;
+  /** Filas por consulta (`TAMANO_PAGINA`; inyectable solo para pruebas). */
   tamanoPagina?: number;
   /** Bytes de cada parte del multipart upload (≥ 5 MiB en R2). */
   tamanoParteBytes?: number;
@@ -120,6 +147,7 @@ export interface OpcionesBackup {
 
 export type ResultadoBackup =
   | { estado: 'ya_existia'; fecha: string }
+  | { estado: 'sin_iniciar'; fecha: string }
   | { estado: 'en_curso_en_otra_invocacion'; fecha: string }
   | {
       estado: 'pausado';
@@ -166,14 +194,17 @@ export async function ejecutarBackup(
   const claveManifest = `${base}manifest.json`;
   const claveProgreso = `${base}progreso.json`;
 
-  presupuesto.consumir();
+  presupuesto.consumirR2();
   if ((await bucket.head(claveManifest)) !== null) {
     return { estado: 'ya_existia', fecha };
   }
 
-  presupuesto.consumir();
+  presupuesto.consumirR2();
   const guardado = await bucket.get(claveProgreso);
   let progreso: ProgresoBackup;
+  if (guardado === null && opciones.modo === 'continuacion') {
+    return { estado: 'sin_iniciar', fecha };
+  }
   if (guardado === null) {
     progreso = await iniciarProgreso(env.DB, fecha, ahora, presupuesto);
   } else {
@@ -184,14 +215,14 @@ export async function ejecutarBackup(
   }
 
   const guardarProgreso = async (): Promise<void> => {
-    presupuesto.consumir();
+    presupuesto.consumirR2();
     await bucket.put(claveProgreso, JSON.stringify(progreso), {
       httpMetadata: { contentType: 'application/json' },
     });
   };
   const borrarParcial = async (clave: string | null): Promise<void> => {
     if (clave !== null) {
-      presupuesto.consumir();
+      presupuesto.consumirR2();
       await bucket.delete(clave);
     }
   };
@@ -247,20 +278,25 @@ export async function ejecutarBackup(
     await borrarParcial(parcialAnterior);
   }
 
+  presupuesto.consumirD1();
+  const final = await env.DB.prepare('SELECT COALESCE(MAX(seq), 0) AS valor FROM audit_log').first<{
+    valor: number;
+  }>();
   const manifest: ManifestBackup = {
     formato: 1,
     fecha,
     generado_at: new Date().toISOString(),
     epoca: progreso.epoca,
     seq_inicial: progreso.seq_inicial,
+    seq_final: Number(final?.valor ?? progreso.seq_inicial),
     ultima_migracion: progreso.ultima_migracion,
     tablas: progreso.terminadas,
   };
-  presupuesto.consumir();
+  presupuesto.consumirR2();
   await bucket.put(claveManifest, JSON.stringify(manifest, null, 2), {
     httpMetadata: { contentType: 'application/json' },
   });
-  presupuesto.consumir();
+  presupuesto.consumirR2();
   await bucket.delete(claveProgreso);
 
   return {
@@ -297,7 +333,7 @@ async function iniciarProgreso(
   ahora: Date,
   presupuesto: Presupuesto,
 ): Promise<ProgresoBackup> {
-  presupuesto.consumir();
+  presupuesto.consumirD1();
   const [seq, epoca, migracion] = await db.batch([
     db.prepare('SELECT COALESCE(MAX(seq), 0) AS valor FROM audit_log'),
     db.prepare("SELECT valor FROM settings WHERE clave = 'sync_epoca'"),
@@ -385,7 +421,7 @@ async function exportarTabla(
   presupuesto: Presupuesto,
   config: Config,
 ): Promise<ArchivoBackup | 'pausada'> {
-  const reserva = RESERVA_CIERRE + RESERVA_MANTENIMIENTO;
+  const reserva = RESERVA;
   if (!presupuesto.disponible(reserva)) {
     return 'pausada';
   }
@@ -400,7 +436,7 @@ async function exportarTabla(
   let terminada = false;
   try {
     while (presupuesto.disponible(reserva)) {
-      presupuesto.consumir();
+      presupuesto.consumirD1();
       const { results } = await sentenciaPagina(
         db,
         tabla,
@@ -475,7 +511,7 @@ class SubidaPorPartes {
   ): Promise<SubidaPorPartes> {
     const subida = new SubidaPorPartes(bucket, clave, base, estado, config, presupuesto);
     if (estado.parcial !== null) {
-      presupuesto.consumir();
+      presupuesto.consumirR2();
       const objeto = await bucket.get(estado.parcial);
       if (objeto === null) {
         throw new Error(`Falta el parcial del backup de ${estado.tabla}`);
@@ -514,7 +550,7 @@ class SubidaPorPartes {
   /** Deja en `_parciales/` los bytes que no completan una parte (nombre nuevo en cada pausa). */
   async pausar(): Promise<void> {
     const clave = `${this.base}_parciales/${this.estado.tabla}-${crypto.randomUUID()}.bin`;
-    this.presupuesto.consumir();
+    this.presupuesto.consumirR2();
     await this.bucket.put(clave, this.extraer(this.enMemoria));
     this.estado.parcial = clave;
   }
@@ -523,7 +559,7 @@ class SubidaPorPartes {
   async terminar(): Promise<void> {
     const resto = this.extraer(this.enMemoria);
     if (this.estado.partes.length === 0) {
-      this.presupuesto.consumir();
+      this.presupuesto.consumirR2();
       await this.bucket.put(this.clave, resto, {
         httpMetadata: { contentType: 'application/gzip' },
       });
@@ -532,7 +568,7 @@ class SubidaPorPartes {
     if (resto.length > 0) {
       await this.subirParte(resto);
     }
-    this.presupuesto.consumir();
+    this.presupuesto.consumirR2();
     await this.multipart().complete(this.estado.partes);
   }
 
@@ -575,13 +611,13 @@ class SubidaPorPartes {
 
   private async subirParte(bytes: Uint8Array): Promise<void> {
     if (this.estado.upload_id === null) {
-      this.presupuesto.consumir();
+      this.presupuesto.consumirR2();
       this.subida = await this.bucket.createMultipartUpload(this.clave, {
         httpMetadata: { contentType: 'application/gzip' },
       });
       this.estado.upload_id = this.subida.uploadId;
     }
-    this.presupuesto.consumir();
+    this.presupuesto.consumirR2();
     const parte = await this.multipart().uploadPart(this.estado.partes.length + 1, bytes);
     this.estado.partes.push({ partNumber: parte.partNumber, etag: parte.etag });
   }
@@ -593,7 +629,7 @@ async function resumirObjeto(
   clave: string,
   presupuesto: Presupuesto,
 ): Promise<{ bytes: number; sha256: string }> {
-  presupuesto.consumir();
+  presupuesto.consumirR2();
   const objeto = await bucket.get(clave);
   if (objeto === null) {
     throw new Error(`No se encontró ${clave} recién escrito`);

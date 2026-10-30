@@ -43,14 +43,18 @@ import {
 import type { CondicionSql } from '../auditoria/auditar';
 import {
   buscarConsumo,
+  COLUMNAS_CONSUMO,
+  COLUMNAS_EVIDENCIA_PUBLICAS,
   consumoDe,
   editarConsumo,
+  evidenciaDe,
+  type FilaConsumo,
   MAX_INTENTOS,
   registrarConsumo,
 } from '../dominio/consumos';
 import type { Actor, Contexto } from '../dominio/contexto';
 import { registrarNovedad } from '../dominio/novedades';
-import { ejecutarPlan, type PlanDeEscritura } from '../dominio/plan';
+import { ejecutarPlanConResultados, type PlanDeEscritura } from '../dominio/plan';
 import { aprobarConsumo, rechazarConsumo } from '../dominio/validaciones';
 import { ErrorApi } from '../errores';
 import { registrar } from '../log';
@@ -171,10 +175,11 @@ function respuestaDeGuardada(
 }
 
 /**
- * Guarda un `rechazada`/`conflicto` en su propio batch. Si otra petición guardó la misma mutación
- * entretanto (`ON CONFLICT DO NOTHING` no inserta), devuelve la guardada.
+ * Guarda la respuesta en su propio batch: un `rechazada`/`conflicto` (con `payload_json`) o una
+ * `aplicada` reconocida por clave natural (sin payload, como las demás aplicadas). Si otra petición
+ * guardó la misma mutación entretanto (`ON CONFLICT DO NOTHING` no inserta), devuelve la guardada.
  */
-async function guardarNoAplicada(
+async function guardarRespuesta(
   sesion: SesionPush,
   mutationId: string,
   mutacion: unknown,
@@ -193,7 +198,7 @@ async function guardarNoAplicada(
       tipoDeclarado(mutacion),
       respuesta.resultado,
       JSON.stringify(respuesta),
-      payloadJson(mutacion),
+      respuesta.resultado === 'aplicada' ? null : payloadJson(mutacion),
       ahora,
       ahora,
       ahora,
@@ -285,7 +290,16 @@ async function aplicar(sesion: SesionPush, m: Mutacion): Promise<RespuestaGuarda
         ...condicion.parametros,
       );
     try {
-      await ejecutarPlan(sesion.db, plan, [fila]);
+      const { resultados } = await ejecutarPlanConResultados(sesion.db, plan, [fila]);
+      // B2: la fila `aplicada` va condicionada a la principal; si la principal aplicó y esta no,
+      // el dato de planta SÍ quedó escrito (con su auditoría), así que se responde `aplicada` igual:
+      // un reenvío lo reconoce por clave natural. Se registra para investigarlo.
+      if (resultados.at(-1)?.meta.changes !== 1) {
+        registrar('error', 'sync_mutation_no_registrada', {
+          mutation_id: m.mutation_id,
+          tipo: m.tipo,
+        });
+      }
       return respuesta;
     } catch (error) {
       if (plan.siNoAplica !== undefined && error === plan.siNoAplica) {
@@ -299,19 +313,111 @@ async function aplicar(sesion: SesionPush, m: Mutacion): Promise<RespuestaGuarda
   }
 }
 
-/** ¿El consumo no existe y su creación quedó rechazada (o en conflicto) para este usuario? */
+/**
+ * ¿El consumo no existe y su creación quedó rechazada (o en conflicto) para este usuario? Usa el
+ * índice parcial por expresión `sync_mutations_no_aplicadas_consumo` (migración 0006): la expresión
+ * y las condiciones del WHERE parcial deben quedar escritas exactamente así.
+ */
+export const CONSULTA_CREACION_NO_APLICADA = `SELECT 1 AS x FROM sync_mutations
+  WHERE user_id = ? AND tipo = 'consumo.crear' AND resultado <> 'aplicada'
+    AND json_extract(payload_json, '$.payload.id') = ?
+    AND NOT EXISTS (SELECT 1 FROM consumptions WHERE id = ?)
+  LIMIT 1`;
+
 async function creacionRechazadaGuardada(sesion: SesionPush, consumoId: string): Promise<boolean> {
   const fila = await sesion.db
-    .prepare(
-      `SELECT 1 AS x FROM sync_mutations
-       WHERE user_id = ? AND tipo = 'consumo.crear' AND resultado <> 'aplicada'
-         AND json_extract(payload_json, '$.payload.id') = ?
-         AND NOT EXISTS (SELECT 1 FROM consumptions WHERE id = ?)
-       LIMIT 1`,
-    )
+    .prepare(CONSULTA_CREACION_NO_APLICADA)
     .bind(sesion.actor.id, consumoId, consumoId)
     .first();
   return fila !== null;
+}
+
+/**
+ * Idempotencia por clave natural (ADR 0016, M2): tras una restauración desde el backup de R2 (que
+ * no es una foto de un instante) puede existir la entidad sin su fila de `sync_mutations`. Si la
+ * fila existente es la MISMA que la mutación describe (mismo autor y mismos datos de identidad),
+ * la mutación ya está aplicada: se responde `aplicada` con el estado actual.
+ * - `consumo.crear`: mismo id, `registrado_por` (= actor), `order_id`, `material_id` y
+ *   `client_created_at`.
+ * - `novedad.crear`: mismo id, `registrado_por`, `consumption_id` y `client_created_at`.
+ * - `consumo.aprobar`/`consumo.rechazar`: mismo id, `validado_por`, `consumption_id` y decisión.
+ */
+async function aplicadaPorClaveNatural(
+  sesion: SesionPush,
+  m: Mutacion,
+): Promise<RespuestaGuardada | null> {
+  const { db } = sesion;
+  const yo = sesion.actor.id;
+  const aplicada = (servidor: Record<string, unknown>): RespuestaGuardada => ({
+    resultado: 'aplicada',
+    servidor: JSON.parse(JSON.stringify(servidor)) as Record<string, unknown>,
+  });
+  switch (m.tipo) {
+    case 'consumo.crear': {
+      const p = m.payload;
+      const fila = await db
+        .prepare(
+          `SELECT ${COLUMNAS_CONSUMO} FROM consumptions
+           WHERE id = ? AND registrado_por = ? AND order_id = ? AND material_id = ?
+             AND client_created_at = ?`,
+        )
+        .bind(p.id, yo, p.order_id, p.material_id, p.client_created_at)
+        .first<FilaConsumo>();
+      return fila === null ? null : aplicada({ ...consumoDe(fila) });
+    }
+    case 'novedad.crear': {
+      const p = m.payload;
+      const [novedad, evidencias] = await db.batch([
+        db
+          .prepare(
+            `SELECT id, consumption_id, tipo, descripcion, registrado_por, client_created_at,
+               server_received_at, created_at, updated_at
+             FROM incidents
+             WHERE id = ? AND registrado_por = ? AND consumption_id = ? AND client_created_at = ?`,
+          )
+          .bind(p.id, yo, p.consumption_id, p.client_created_at),
+        db
+          .prepare(
+            `SELECT ${COLUMNAS_EVIDENCIA_PUBLICAS} FROM evidences WHERE incident_id = ? ORDER BY id`,
+          )
+          .bind(p.id),
+      ]);
+      const fila = novedad?.results[0] as Record<string, unknown> | undefined;
+      return fila === undefined
+        ? null
+        : aplicada({
+            ...fila,
+            evidencias: ((evidencias?.results ?? []) as Parameters<typeof evidenciaDe>[0][]).map(
+              evidenciaDe,
+            ),
+          });
+    }
+    case 'consumo.aprobar':
+    case 'consumo.rechazar': {
+      const p = m.payload;
+      const decision = m.tipo === 'consumo.aprobar' ? 'aprobado' : 'rechazado';
+      const [validacion, consumo] = await db.batch([
+        db
+          .prepare(
+            `SELECT id, consumption_id, decision, motivo, validado_por, client_created_at,
+               server_received_at, created_at, updated_at
+             FROM validations
+             WHERE id = ? AND validado_por = ? AND consumption_id = ? AND decision = ?`,
+          )
+          .bind(p.id, yo, p.consumption_id, decision),
+        db
+          .prepare(`SELECT ${COLUMNAS_CONSUMO} FROM consumptions WHERE id = ?`)
+          .bind(p.consumption_id),
+      ]);
+      const filaValidacion = validacion?.results[0] as Record<string, unknown> | undefined;
+      const filaConsumo = consumo?.results[0] as FilaConsumo | undefined;
+      return filaValidacion === undefined || filaConsumo === undefined
+        ? null
+        : aplicada({ consumo: consumoDe(filaConsumo), validacion: filaValidacion });
+    }
+    case 'consumo.editar':
+      return null;
+  }
 }
 
 /** Clasifica un error de negocio en `rechazada` o `conflicto` (con la versión del servidor). */
@@ -320,6 +426,12 @@ async function clasificar(
   m: Mutacion,
   error: ErrorApi,
 ): Promise<RespuestaGuardada> {
+  if (error.code === 'ID_DUPLICADO') {
+    const yaAplicada = await aplicadaPorClaveNatural(sesion, m);
+    if (yaAplicada !== null) {
+      return yaAplicada;
+    }
+  }
   const dependeDe = consumoDelQueDepende(m);
   if (
     error.code === 'NO_ENCONTRADO' &&
@@ -360,7 +472,7 @@ async function procesar(
     return respuestaDeGuardada(sesion, guardada);
   }
   if (tamanoSerializado(mutacion) > MAX_PAYLOAD_MUTACION_BYTES) {
-    return guardarNoAplicada(
+    return guardarRespuesta(
       sesion,
       mutationId,
       mutacion,
@@ -374,12 +486,12 @@ async function procesar(
       primero === undefined
         ? MENSAJES_ERROR.VALIDACION
         : `${MENSAJES_ERROR.VALIDACION} ${primero.campo === '' ? '' : `${primero.campo}: `}${primero.mensaje}`;
-    return guardarNoAplicada(sesion, mutationId, mutacion, rechazo('VALIDACION', mensaje));
+    return guardarRespuesta(sesion, mutationId, mutacion, rechazo('VALIDACION', mensaje));
   }
   const m = parseada.data;
   const dependeDe = consumoDelQueDepende(m);
   if (dependeDe !== null && lote.creacionesNoAplicadas.has(dependeDe)) {
-    return guardarNoAplicada(sesion, mutationId, mutacion, rechazo('DEPENDENCIA_RECHAZADA'));
+    return guardarRespuesta(sesion, mutationId, mutacion, rechazo('DEPENDENCIA_RECHAZADA'));
   }
   try {
     return await aplicar(sesion, m);
@@ -395,7 +507,7 @@ async function procesar(
     if (!(error instanceof ErrorApi) || error.code === 'ERROR_INTERNO') {
       throw new ErrorTransitorio(error);
     }
-    return guardarNoAplicada(sesion, mutationId, mutacion, await clasificar(sesion, m, error));
+    return guardarRespuesta(sesion, mutationId, mutacion, await clasificar(sesion, m, error));
   }
 }
 

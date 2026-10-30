@@ -4,8 +4,14 @@
 // Para pasar de 5 MiB comprimidos con pocas filas se usan datos aleatorios (no se comprimen).
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { ejecutarBackup, TAMANO_PARTE_BYTES, type ResultadoBackup } from '../src/cron/backup';
+import {
+  ejecutarBackup,
+  TAMANO_PAGINA,
+  TAMANO_PARTE_BYTES,
+  type ResultadoBackup,
+} from '../src/cron/backup';
 import { Presupuesto } from '../src/cron/presupuesto';
+import { TABLAS_BACKUP } from '../src/cron/tablas';
 import { leerProgreso, sembrarAuditoria, verificarBackupCompleto } from './fase6-cron-helpers';
 
 const dia = (fecha: string) => new Date(`${fecha}T08:00:00.000Z`);
@@ -16,10 +22,21 @@ beforeAll(async () => {
 }, 120_000);
 
 describe('multipart upload', () => {
+  // ADR 0016: con la página por defecto (TAMANO_PAGINA = 2000) las ~1500 filas de ~6 KB de
+  // audit_log (~9 MB de NDJSON, mucho más que una fila real) llegan en UNA consulta: es el peor caso
+  // de memoria por página. Se mide el tiempo y que la página no se partió.
   it('una tabla de más de 5 MiB comprimidos se sube por partes en una invocación', async () => {
     const fecha = '2026-12-01';
-    const resultado = await ejecutarBackup(env, dia(fecha));
+    const presupuesto = new Presupuesto();
+    const inicio = performance.now();
+    const resultado = await ejecutarBackup(env, dia(fecha), { presupuesto });
+    const ms = performance.now() - inicio;
     expect(resultado.estado).toBe('completo');
+    expect(TAMANO_PAGINA).toBe(2000);
+    // Una página por tabla (todas caben en 2000 filas) + MAX(seq) inicial y final.
+    expect(presupuesto.usadasD1).toBe(TABLAS_BACKUP.length + 2);
+    // Holgado: localmente tarda ~1–3 s; el tope de una invocación es de 10 min.
+    expect(ms).toBeLessThan(60_000);
     const manifest = await verificarBackupCompleto(fecha);
     const auditoria = manifest.tablas.find((t) => t.tabla === 'audit_log');
     expect(auditoria?.filas).toBeGreaterThanOrEqual(1500);

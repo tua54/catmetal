@@ -185,6 +185,8 @@ export const refresh_tokens = sqliteTable(
     index('refresh_tokens_vigentes_usuario')
       .on(t.user_id, t.device_id)
       .where(sql`revocado_at IS NULL`),
+    // Purga del cron (revisión de la Fase 3, B5): `DELETE … WHERE expira_at < ?` sin recorrer la tabla.
+    index('refresh_tokens_expira_at').on(t.expira_at),
     check('refresh_tokens_token_hash_hex', sql`length(token_hash) = 64`),
     check('refresh_tokens_fechas_iso', fechas([...MARCAS, 'expira_at'], ['revocado_at'])),
   ],
@@ -482,6 +484,10 @@ export const sync_mutations = sqliteTable(
   },
   (t) => [
     index('sync_mutations_user_id_procesada_at').on(t.user_id, t.procesada_at),
+    // `sync_mutations_no_aplicadas_consumo` (índice por expresión sobre `json_extract`, revisión de
+    // la Fase 3, B1) NO se declara aquí: drizzle-kit 0.31 no sabe generar índices por expresión (parte
+    // la expresión en columnas entre comillas). Vive solo en migrations/0006 (custom) y la prueba
+    // esquema-vs-migraciones lo excluye de la comparación.
     check('sync_mutations_resultado_valido', enLista('resultado', RESULTADOS_MUTACION)),
     check('sync_mutations_respuesta_json', json('respuesta_json')),
     check(

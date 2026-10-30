@@ -58,14 +58,24 @@ async function usuarioConDispositivo() {
 }
 
 describe('purga de refresh_tokens', () => {
-  it('borra solo los revocados o vencidos hace más de 90 días', async () => {
+  // Revisión de la Fase 3 (B5): la purga es `expira_at < umbral` (con índice). Los casos usan
+  // fechas coherentes con la vida de 30 días de un refresh token (nace 30 días antes de vencer, y
+  // se revoca entre su creación y su vencimiento); antes había revocados de hace 100 días que
+  // vencían en el futuro, imposibles con REFRESH_TOKEN_TTL_S. Un revocado se purga cuando lleva 90
+  // días VENCIDO (a lo sumo 30 días más tarde que con la condición anterior por `revocado_at`).
+  it('borra solo los vencidos hace más de 90 días (también los revocados)', async () => {
     const { usuario, dispositivo } = await usuarioConDispositivo();
     const casos = {
-      revocadoHace100: { expira_at: haceDias(-20), revocado_at: haceDias(100), purgar: true },
-      revocadoHace91: { expira_at: haceDias(85), revocado_at: haceDias(91), purgar: true },
+      revocadoHace100: { expira_at: haceDias(95), revocado_at: haceDias(100), purgar: true },
       vencidoHace100: { expira_at: haceDias(100), purgar: true },
       vencidoHace91: { expira_at: haceDias(91), purgar: true },
-      revocadoHace89: { expira_at: haceDias(-20), revocado_at: haceDias(89), purgar: false },
+      // Revocado hace 91 días pero vencido hace solo 85: se conserva hasta cumplir 90 vencido.
+      revocadoHace91VencidoHace85: {
+        expira_at: haceDias(85),
+        revocado_at: haceDias(91),
+        purgar: false,
+      },
+      revocadoHace89: { expira_at: haceDias(80), revocado_at: haceDias(89), purgar: false },
       vencidoHace89: { expira_at: haceDias(89), purgar: false },
       revocadoAyer: { expira_at: haceDias(-20), revocado_at: haceDias(1), purgar: false },
       vigente: { expira_at: haceDias(-29), purgar: false },
@@ -76,7 +86,6 @@ describe('purga de refresh_tokens', () => {
       const { id, sentencia } = sentenciaRefresh(usuario, dispositivo, {
         expira_at: caso.expira_at,
         revocado_at: 'revocado_at' in caso ? caso.revocado_at : null,
-        created_at: haceDias(130),
       });
       ids[nombre] = id;
       sentencias.push(sentencia);
@@ -86,7 +95,7 @@ describe('purga de refresh_tokens', () => {
     const logs = espiarLogs();
     const resultado = await ejecutarMantenimiento(env, AHORA);
 
-    expect(resultado.refresh_tokens_purgados).toBe(4);
+    expect(resultado.refresh_tokens_purgados).toBe(3);
     expect(resultado.purga_completa).toBe(true);
     expect(resultado.umbral_purga).toBe(haceDias(DIAS_RETENCION_REFRESH_TOKENS));
     for (const [nombre, caso] of Object.entries(casos)) {
@@ -96,7 +105,7 @@ describe('purga de refresh_tokens', () => {
       expect.objectContaining({
         nivel: 'info',
         evento: 'purga_refresh_tokens',
-        purgados: 4,
+        purgados: 3,
         completa: true,
       }),
     );

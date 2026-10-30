@@ -9,6 +9,14 @@ import { schema } from '../src/db/schema';
 
 const tablas = Object.values(schema);
 
+/**
+ * Índices que existen solo en las migraciones, a propósito: drizzle-kit 0.31 no sabe declarar un
+ * índice por expresión (parte `json_extract(...)` en columnas). `sync_mutations_no_aplicadas_consumo`
+ * (revisión de la Fase 3, B1) vive en migrations/0006 (custom); integridad-esquema.test.ts verifica
+ * su definición y que la consulta de /sync/push lo usa.
+ */
+const SOLO_EN_MIGRACIONES = new Set(['sync_mutations_no_aplicadas_consumo']);
+
 async function todas<T>(sql: string, ...parametros: string[]): Promise<T[]> {
   const { results } = await env.DB.prepare(sql)
     .bind(...parametros)
@@ -68,7 +76,7 @@ describe.each(tablas.map((tabla) => [getTableName(tabla), tabla] as const))(
         `SELECT name, "unique" AS "unique" FROM pragma_index_list(?)
          WHERE name NOT LIKE 'sqlite_autoindex_%' ORDER BY name`,
         nombre,
-      );
+      ).then((indices) => indices.filter((i) => !SOLO_EN_MIGRACIONES.has(i.name)));
       const indicesEsquema = config.indexes
         .map((i) => ({ name: i.config.name, unique: i.config.unique ? 1 : 0 }))
         .sort((a, b) => a.name.localeCompare(b.name));

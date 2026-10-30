@@ -323,6 +323,47 @@ export async function llamarConDb(
 }
 
 // ---------------------------------------------------------------------------------------------
+// Interferencia: otra escritura REAL justo antes de cada batch de escritura (no es un mock)
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * `env.DB` envuelto: antes de cada `batch` que contenga `marca`, ejecuta `interferir()` (que
+ * escribe de verdad en la D1 local, como otra petición concurrente) y luego delega el batch.
+ * Sirve para provocar que la sentencia principal de un plan no aplique en todos los intentos.
+ */
+export function dbConInterferencia(marca: string, interferir: () => Promise<void>): D1Database {
+  const real = env.DB;
+  const sqlDe = new WeakMap<object, string>();
+  const instrumentar = (sentencia: D1PreparedStatement, sql: string): D1PreparedStatement => {
+    sqlDe.set(sentencia, sql);
+    const bind = sentencia.bind.bind(sentencia);
+    Object.defineProperty(sentencia, 'bind', {
+      value: (...valores: unknown[]) => instrumentar(bind(...valores), sql),
+    });
+    return sentencia;
+  };
+  return new Proxy(real, {
+    get(objetivo, propiedad) {
+      if (propiedad === 'prepare') {
+        return (sql: string) => instrumentar(objetivo.prepare(sql), sql);
+      }
+      if (propiedad === 'batch') {
+        return async (sentencias: D1PreparedStatement[]) => {
+          if (sentencias.some((s) => (sqlDe.get(s) ?? '').includes(marca))) {
+            await interferir();
+          }
+          return objetivo.batch(sentencias);
+        };
+      }
+      const valor: unknown = Reflect.get(objetivo, propiedad);
+      return typeof valor === 'function'
+        ? (valor as (...a: unknown[]) => unknown).bind(objetivo)
+        : valor;
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------------------------
 // Barrera para carreras deterministas (delega en la D1 REAL: no es un mock)
 // ---------------------------------------------------------------------------------------------
 

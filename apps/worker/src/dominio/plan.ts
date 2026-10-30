@@ -53,9 +53,22 @@ export async function ejecutarPlan<R>(
   plan: PlanDeEscritura<R>,
   adicionales: readonly D1PreparedStatement[] = [],
 ): Promise<R> {
+  return (await ejecutarPlanConResultados(db, plan, adicionales)).respuesta;
+}
+
+/**
+ * Igual que `ejecutarPlan`, pero devuelve también los resultados del batch (uno por sentencia, en
+ * orden: las del plan y luego las adicionales). `/sync/push` lo usa para comprobar que su fila de
+ * `sync_mutations` se insertó (revisión de la Fase 3, B2).
+ */
+export async function ejecutarPlanConResultados<R>(
+  db: D1Database,
+  plan: PlanDeEscritura<R>,
+  adicionales: readonly D1PreparedStatement[] = [],
+): Promise<{ respuesta: R; resultados: D1Result[] }> {
   const sentencias = [...plan.sentencias, ...adicionales];
   if (sentencias.length === 0) {
-    return plan.respuesta;
+    return { respuesta: plan.respuesta, resultados: [] };
   }
   let resultados: D1Result[];
   try {
@@ -69,5 +82,5 @@ export async function ejecutarPlan<R>(
       throw plan.siNoAplica ?? new ErrorApi('CONFLICTO');
     }
   }
-  return plan.respuesta;
+  return { respuesta: plan.respuesta, resultados };
 }
