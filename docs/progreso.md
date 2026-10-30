@@ -90,3 +90,6 @@ No se usan `mvc-dotnet-developer`, `angular-developer` ni `orchestrator`.
 - Adelantadas y confirmadas: 3.3 (Dexie + outbox), 3.4 (cliente de auth), contrato `/sync/snapshot` (orquestador), 3.5 (motor de sync del cliente, `react-developer`).
 - Decisión menor (3.5): sin conexión y sin pendientes, el indicador dice "Sin conexión · Todo sincronizado" (en vez de "0 por sincronizar").
 - En curso: 3.1–3.2 servidor de sync (`general-purpose`), y **tarea adelantada 4.2** (shell PWA, login, layout, estado de sync; `react-developer`; plan de la Fase 4 ya confirmado).
+- 3.1–3.2 servidor de sync confirmado (`8388341`); ADR 0015 (visibilidad de usuarios, revocación, errores).
+- Adelantadas confirmadas: 4.2 (shell PWA, login, layout, estado de sync) y 6.1 (cron de backup, ADR 0014). Planes de las Fases 4, 5 y 6 confirmados por adelantado.
+- En curso: 3.6 (revisión de protocolo y esquema, `database-specialist`), 4.3 (pantallas del supervisor) y 4.4a (infraestructura E2E, `test-engineer`).
