@@ -11,7 +11,13 @@ import {
   uuidv7,
 } from '@catmetal/shared';
 import { type Context, Hono } from 'hono';
-import { derivacionFicticia, verificarContrasena } from '../auth/contrasenas';
+import {
+  derivacionFicticia,
+  hashearContrasena,
+  necesitaRehash,
+  sentenciasRehash,
+  verificarContrasena,
+} from '../auth/contrasenas';
 import { borrarCookieRefresh, leerCookieRefresh, ponerCookieRefresh } from '../auth/cookie';
 import {
   origenDeDispositivo,
@@ -203,6 +209,10 @@ async function intentarLogin(c: Context<AppEnv>, datos: LoginValidado): Promise<
     // El fallo ya quedó contado (y, si tocaba, el cupo bloqueado y auditado) en la reserva.
     throw new ErrorApi('CREDENCIALES_INVALIDAS');
   }
+  // B6 (ADR 0007): un hash heredado con menos iteraciones se recalcula en este login correcto.
+  const hashRecalculado = necesitaRehash(usuario.password_hash)
+    ? await hashearContrasena(datos.password)
+    : null;
 
   // Dispositivo: el id lo propone el cliente; si pertenece a otro usuario se asigna uno nuevo.
   const existente = await db
@@ -213,7 +223,8 @@ async function intentarLogin(c: Context<AppEnv>, datos: LoginValidado): Promise<
   const deviceId = ajeno ? uuidv7() : datos.device_id;
   const userAgent = c.req.header('User-Agent')?.slice(0, MAX_USER_AGENT) ?? null;
 
-  // El batch del login reinicia el cupo usado (la reserva lo dejó en ≥ 1).
+  // El batch del login reinicia el cupo usado (la reserva lo dejó en ≥ 1) y, si toca, guarda el hash
+  // recalculado (B6) con su auditoría.
   const emitido = await iniciarSesion(db, secreto, {
     userId: usuario.id,
     deviceId,
@@ -221,13 +232,27 @@ async function intentarLogin(c: Context<AppEnv>, datos: LoginValidado): Promise<
     instalacionId: datos.instalacion_id ?? null,
     nombreDispositivo: datos.device_nombre ?? null,
     userAgent,
-    adicionales: (ahora) =>
-      sentenciasReinicioTrasLogin(
+    adicionales: (ahora) => [
+      ...sentenciasReinicioTrasLogin(
         db,
         reserva,
         { userId: usuario.id, deviceId, alertaReloj },
         ahora,
       ),
+      ...(hashRecalculado === null
+        ? []
+        : sentenciasRehash(
+            db,
+            {
+              userId: usuario.id,
+              deviceId,
+              anterior: usuario.password_hash,
+              nuevo: hashRecalculado,
+              alertaReloj,
+            },
+            ahora,
+          )),
+    ],
     alertaReloj,
   });
   // Cookie del dispositivo conocido: entrada nueva primero y las válidas de otros usuarios. Se pone
