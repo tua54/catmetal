@@ -76,3 +76,8 @@ No se usan `mvc-dotnet-developer`, `angular-developer` ni `orchestrator`.
 - **Tarea adelantada 4.1** (sistema visual y componentes base, `ui-ux-designer`, ADR 0011): se ejecuta en paralelo con la Fase 2 porque solo toca `apps/web/src/components/ui` y no depende del backend. Su commit lleva `Fase: 4`.
 - 2.1 confirmada. 4.1 (adelantada) confirmada: 76 pruebas de componentes.
 - En paralelo: 2.2 (consumos, novedades, evidencias), 2.4 (auditoría y reportes) y **tarea adelantada 3.3** (capa Dexie + outbox, `react-developer`, ADR 0012; solo toca `apps/web/src/datos`).
+- 2.2, 2.3, 2.4 confirmadas (consumos/novedades/evidencias, validaciones, auditoría/reportes). 2.5 (test-engineer): 421 pruebas transversales, sin defectos.
+- 2.6 revisión de seguridad: 0 críticos, 0 altos, 1 medio. `docs/auditoria/seguridad-fase-2.md`. ADR 0013 (auditoría de identidades solo para admin; sin correo en la auditoría). Correcciones en la tarea 2.8 (en curso).
+- Tareas adelantadas confirmadas: 3.3 (Dexie + outbox) y 3.4 (cliente de auth, Dexie v2 con tabla `candados`).
+- Decisión menor (3.4): el login cae al verificador offline solo ante error de red o 5xx del servidor; un rechazo del servidor (credenciales, bloqueo, origen) nunca abre la sesión offline. Se revisará en la seguridad de la Fase 4.
+- `pnpm audit --prod`: sin vulnerabilidades conocidas.
