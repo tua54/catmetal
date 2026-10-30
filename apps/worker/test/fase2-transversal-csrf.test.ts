@@ -66,7 +66,7 @@ describe('la lista de rutas que cambian estado', () => {
   it('coincide con las rutas no-GET que Hono tiene registradas bajo /api/v1', () => {
     const registradas = rutasRegistradas().filter((r) => !r.startsWith('GET '));
     expect(ESCRITURAS.map((f) => `${f.metodo} ${f.ruta}`).sort()).toEqual(registradas);
-    expect(ESCRITURAS.length).toBe(18);
+    expect(ESCRITURAS.length).toBe(19);
   });
 });
 

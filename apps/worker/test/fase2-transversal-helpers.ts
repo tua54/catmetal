@@ -1004,6 +1004,54 @@ export const FILAS: readonly FilaDeRuta[] = [
     preparar: (m) => peticionDecidir(m, 'reject', 'supervisor'),
   },
 
+  // --- Sincronización offline (Fase 3) ----------------------------------------------------------
+  {
+    metodo: 'POST',
+    ruta: '/sync/push',
+    regla:
+      '§6 + ADR 0008 punto 8: cualquier rol con sesión; el sobre es del supervisor del escenario, así que otro usuario recibe 403 AUTOR_NO_COINCIDE',
+    esperado: {
+      sin_token: SIN_TOKEN,
+      supervisor: 200,
+      supervisor_ajeno: { estado: 403, code: 'AUTOR_NO_COINCIDE' },
+      jefe: { estado: 403, code: 'AUTOR_NO_COINCIDE' },
+      admin: { estado: 403, code: 'AUTOR_NO_COINCIDE' },
+    },
+    preparar: async (m) => {
+      const e = await escena(m);
+      return {
+        metodo: 'POST',
+        ruta: '/sync/push',
+        json: {
+          user_id: m.supervisor.usuario.id,
+          mutaciones: [
+            {
+              mutation_id: uuidv7(),
+              tipo: 'consumo.crear',
+              client_created_at: ahoraIso(),
+              payload: cuerpoConsumo(e.orden, e.material),
+            },
+          ],
+        },
+        orderId: e.orden,
+      };
+    },
+  },
+  {
+    metodo: 'GET',
+    ruta: '/sync/pull',
+    regla: '§6: cualquier rol con sesión; la visibilidad filtra los cambios, no deniega',
+    esperado: { sin_token: SIN_TOKEN, ...conTokenTodos(200) },
+    preparar: () => Promise.resolve({ metodo: 'GET', ruta: '/sync/pull?cursor=0' }),
+  },
+  {
+    metodo: 'GET',
+    ruta: '/sync/snapshot',
+    regla: 'ADR 0005 regla 7: cualquier rol con sesión; el alcance inicial filtra por visibilidad',
+    esperado: { sin_token: SIN_TOKEN, ...conTokenTodos(200) },
+    preparar: () => Promise.resolve({ metodo: 'GET', ruta: '/sync/snapshot?alcance=inicial' }),
+  },
+
   // --- Auditoría y reportes ---------------------------------------------------------------------
   {
     metodo: 'GET',
@@ -1184,6 +1232,22 @@ export const FILAS: readonly FilaDeRuta[] = [
         .bind(ahoraIso(), e.orden, m.supervisor.usuario.id)
         .run();
       return { metodo: 'GET', ruta: `/evidences/${datos.evidencia}`, orderId: e.orden };
+    },
+  },
+  {
+    metodo: 'GET',
+    ruta: '/sync/snapshot',
+    variante: 'alcance orden',
+    regla:
+      'plan de la Fase 3: el snapshot de una orden exige verla; supervisor no asignado → 404 (no se revela)',
+    esperado: { supervisor: 200, supervisor_ajeno: OCULTO, jefe: 200, admin: 200 },
+    preparar: async (m) => {
+      const e = await escena(m);
+      return {
+        metodo: 'GET',
+        ruta: `/sync/snapshot?alcance=orden&order_id=${e.orden}`,
+        orderId: e.orden,
+      };
     },
   },
 ];

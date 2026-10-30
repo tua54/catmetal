@@ -586,6 +586,7 @@ describe('JSON mal formado: 400 VALIDACION en cada ruta que recibe un cuerpo JSO
     'POST /consumptions/:id/incident',
     'POST /consumptions/:id/approve',
     'POST /consumptions/:id/reject',
+    'POST /sync/push',
   ];
   const SIN_JSON = [
     'POST /auth/refresh',
