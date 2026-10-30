@@ -29,7 +29,7 @@ try {
 
 const herramienta = entrada.tool_name || '';
 const input = entrada.tool_input || {};
-const esSubagente = Boolean(entrada.agent_id || entrada.agent_type);
+const esSubagente = Boolean(entrada.agent_id);
 
 // ---------- Escrituras de archivos ----------
 if (['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(herramienta)) {

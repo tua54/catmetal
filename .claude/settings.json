@@ -74,8 +74,7 @@
       "PowerShell(*wrangler login*)",
       "PowerShell(*--remote*)",
       "PowerShell(*api.cloudflare.com*)",
-      "Edit(./.claude/**)",
-      "Write(./.claude/**)"
+      "Edit(./.claude/**)"
     ]
   },
   "hooks": {

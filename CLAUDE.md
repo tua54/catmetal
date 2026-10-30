@@ -1,19 +1,22 @@
 # CLAUDE.md — Control de Materia Prima · Catmetal S.A.S. (100% Cloudflare)
 
-## Misión de esta sesión
+## Misión de esta sesión: correcciones v1.1
 
-Construye el sistema completo descrito en `docs/spec.md`, **Fases 0 a 6, en una sola sesión continua, sin detenerte entre fases**. Eres el **arquitecto y orquestador**: planificas, delegas en subagentes, revisas, integras y verificas.
+La construcción de la v1 (Fases 0 a 6) ya terminó, en la rama `build/v1` con los tags `fase-0` a `fase-6`, y el equipo hizo una auditoría externa. **Esta sesión corrige los hallazgos de la auditoría** listados en `docs/correcciones-v1.1.md`, en este orden: **P0, luego P1, luego P2**. Todo en una sola sesión continua.
 
-Cuando aparezca una decisión, **la tomas tú** con criterio de arquitecto, la registras como ADR y sigues. No esperes confirmación humana salvo en los casos de "Cuándo sí detenerse". El equipo humano auditará todo al final, revisará los commits y hará el push él mismo. Por eso **todo debe quedar trazable**: cada decisión, cada desviación, cada prueba ejecutada y cada commit.
+Eres el **arquitecto y orquestador**: planificas, delegas en subagentes, revisas, integras y verificas. Las decisiones las tomas tú, las registras como ADR y sigues. El equipo humano auditará el resultado y hará el push. **Todo debe quedar trazable**: cada ítem cerrado tiene su prueba de regresión, su commit y su línea en el informe.
+
+No reabras ni rediseñes lo que la auditoría dio por correcto. Si al corregir algo encuentras otro defecto real, regístralo en `docs/correcciones-v1.1.md` con el id `N1`, `N2`, etc., en una sección "Nuevos". Corrígelo si es de P0 o P1 y está dentro del área que ya estás tocando. Si no, déjalo documentado.
 
 ## Fuentes de verdad
 
 | Archivo | Para qué |
 |---|---|
-| `docs/spec.md` | Requisitos del sistema. Léelo completo al empezar y relee la sección de cada fase antes de planificarla. |
+| `docs/correcciones-v1.1.md` | **Alcance de esta sesión**: ítems, ubicación, escenario y criterio de aceptación. |
+| `docs/spec.md` | Requisitos del sistema (v2.1). Lee en especial §5, §6 y §14, que cambiaron en esta ronda. |
 | `docs/diseno/README.md` | Guía visual: estructura del Figma + identidad de Catmetal. Obligatoria para todo trabajo de UI. |
 | `docs/progreso.md` | Estado actual. **Después de una compactación de contexto o de un reinicio, lee este archivo primero** y retoma desde "Siguiente paso". |
-| `docs/adr/` | Decisiones de arquitectura tomadas durante la sesión. |
+| `docs/adr/` | Decisiones de arquitectura de la v1 (0001–0017) y las nuevas de esta sesión (0018 en adelante). Una ADR nueva puede reemplazar a una anterior: indícalo en ambas. |
 
 Orden de precedencia: `docs/spec.md` > ADR aceptados > código existente. Si te apartas de la spec, escribe un ADR y una entrada en `docs/desviaciones.md`.
 
@@ -38,7 +41,8 @@ Ante dudas sobre APIs o configuración de Cloudflare, Drizzle, Hono, Vite PWA, D
    - Un hook bloquea estos comandos. **Si te bloquea, no intentes rodearlo**: ni con `npx` o `pnpm exec`, ni con scripts, ni con otra sintaxis. Anota el comando en `docs/pendientes-humanos.md` y sigue.
 2. **Git: commits sí, push nunca.**
    - **Nunca ejecutes `git push`** en ninguna forma, ni comandos `gh`. Tampoco cambies los remotos. El equipo humano audita y hace el push.
-   - **Línea base**: el primer commit va en `main` e incluye solo los archivos que ya existen en el repo (este archivo, `docs/`, `.claude/`, `.gitignore`, `.gitattributes`). Mensaje: `chore: línea base de orquestación y especificación`. Inmediatamente después, crea la rama `build/v1` y trabaja ahí. No vuelvas a hacer commit en `main`.
+   - **Rama**: parte de `build/v1` y crea `fix/auditoria-v1`. Trabaja solo ahí. No hagas commits en `main` ni en `build/v1`.
+   - **Primer commit de la sesión** (tarea C1): registra lo que el equipo dejó preparado. Son la configuración movida a `.claude/` (y la eliminación de `_mover-a-claude/`), este `CLAUDE.md`, `docs/spec.md` v2.1, `docs/correcciones-v1.1.md` y `docs/ARRANQUE-CORRECCIONES.md`. Mensaje: `chore: instalar configuración de claude code y alcance de correcciones v1.1`, con `Agente: equipo`.
    - **Historial solo se agrega**: prohibido `commit --amend`, `rebase`, `reset --hard`, `filter-branch`, `push --force`, borrar ramas o tags. Si un commit tiene un error, corrígelo con un commit nuevo (`fix:` o `revert:`).
    - **Solo tú, el orquestador, ejecutas `git add`, `git commit` y `git tag`.** Los subagentes no hacen commits; el hook se lo impide.
    - Haz un commit por cada tarea terminada, después de que pasen los gates de esa tarea. Ningún commit puede dejar el repo sin compilar.
@@ -49,15 +53,16 @@ Ante dudas sobre APIs o configuración de Cloudflare, Drizzle, Hono, Vite PWA, D
 
      <cuerpo opcional: qué y por qué>
 
-     Fase: <N>
-     Tarea: <N.x>
+     Fase: correcciones-v1.1
+     Tarea: <id del ítem: C1, M3, B7, N1…>
      Agente: <nombre del subagente que hizo el trabajo, u orquestador>
      ```
 
      - Tipos: `feat`, `fix`, `docs`, `test`, `refactor`, `perf`, `build`, `ci`, `chore`, `style`, `revert`.
      - Alcances sugeridos: `shared`, `db`, `auth`, `api`, `sync`, `web`, `pwa`, `ui`, `infra`, `ci`, `seguridad`, `docs`.
      - Ejemplos: `feat(api): agregar aprobación y rechazo de consumos` · `test(sync): cubrir idempotencia de /sync/push` · `docs(adr): registrar decisión de formato de hash` · `fix(seguridad): validar mime de evidencias en el servidor`.
-   - Al cerrar cada fase crea un tag anotado **local**: `git tag -a fase-N -m "Fase N completa"`.
+   - Al terminar, crea un tag anotado **local**: `git tag -a correcciones-v1.1 -m "Correcciones de la auditoría externa"`. No toques los tags `fase-*`.
+   - Cada commit de código cita el ítem en el cuerpo: `Corrige: M3`.
    - Antes de cada commit, revisa `git diff --cached --stat`. Confirma que no van secretos, `.dev.vars`, `node_modules`, `.wrangler` ni bases locales.
 3. **Secretos.**
    - Ningún secreto en el código ni en git.
@@ -78,58 +83,55 @@ Ante dudas sobre APIs o configuración de Cloudflare, Drizzle, Hono, Vite PWA, D
 - **Criterio de prioridad**: integridad y no pérdida de datos de planta > seguridad > simplicidad y mantenibilidad > rendimiento > estética.
 - **Decisiones no triviales**: van a `docs/adr/NNNN-titulo-corto.md`. Son no triviales las de arquitectura, librerías, formatos, protocolos, seguridad, interpretación de la spec, cambios de esquema y diseño visual. Cada ADR tiene estas secciones: Contexto, Opciones consideradas, Decisión, Consecuencias, Cómo revertir. Cada ADR va en su propio commit `docs(adr): …`.
 - **Decisiones menores**: basta una línea en `docs/progreso.md`.
-- **Elección de versiones**: usa versiones estables actuales al momento de instalar y fíjalas en el lockfile. Registra las versiones principales en un ADR de la Fase 0.
+- **Versiones**: no actualices dependencias salvo que un ítem lo requiera. Si agregas o actualizas una, fíjala en el lockfile y regístrala en un ADR.
 - **Entorno**: el equipo trabaja en **Windows**. Los scripts de `package.json` deben funcionar en Windows y en Linux (CI). Usa Node para scripts auxiliares, no bash ni PowerShell. Si algo de la plataforma se comporta distinto en Windows, anótalo en `docs/notas-plataforma.md`.
 
 ## Cuándo sí detenerse
 
-Un hook no te deja terminar la sesión mientras no exista uno de estos archivos: `docs/INFORME-FINAL.md`, `docs/BLOQUEO.md` o `docs/PAUSA.md`.
+Un hook no te deja terminar la sesión mientras no exista uno de estos archivos: `docs/INFORME-CORRECCIONES.md`, `docs/BLOQUEO.md` o `docs/PAUSA.md`. El `docs/INFORME-FINAL.md` de la v1 ya existe y **no** cuenta para esta sesión.
 
-- **Terminaste la Fase 6**: escribe `docs/INFORME-FINAL.md` (ver al final) y termina.
-- **Bloqueo total**: el siguiente paso requiere un recurso remoto, credenciales o una cuenta que no tienes, o el entorno impide continuar (por ejemplo, no puedes instalar dependencias). Antes de rendirte, avanza todo lo que no dependa del bloqueo. Luego escribe `docs/BLOQUEO.md` con: qué intentaste, el error exacto, qué necesitas del equipo y el estado en que queda el repo. Haz commit y termina.
-- **El humano te pide pausar** durante la sesión: escribe `docs/PAUSA.md` con el estado y el siguiente paso, haz commit y termina.
+- **Terminaste P0, P1 y P2**: escribe `docs/INFORME-CORRECCIONES.md` (ver al final) y termina.
+- **Bloqueo total**: el siguiente paso requiere un recurso remoto, credenciales o una cuenta que no tienes, o el entorno impide continuar. Antes de rendirte, avanza todo lo que no dependa del bloqueo. Luego escribe `docs/BLOQUEO.md` con: qué intentaste, el error exacto, qué necesitas del equipo y el estado en que queda el repo. Haz commit y termina.
+- **El humano te pide pausar**: escribe `docs/PAUSA.md` con el estado y el siguiente paso, haz commit y termina.
 
-Si solo una tarea queda bloqueada, **no detengas la sesión**: regístrala en `docs/desviaciones.md` y avanza con lo que no dependa de ella. Si el humano te escribe durante la sesión, respóndele brevemente y continúa con el trabajo.
+Si solo un ítem queda bloqueado, **no detengas la sesión**: márcalo como no resuelto en `docs/correcciones-v1.1.md` y en `docs/desviaciones.md`, y sigue con el siguiente. Si el humano te escribe durante la sesión, respóndele brevemente y continúa con el trabajo.
 
-## Bucle de trabajo por fase
+## Bucle de trabajo
 
-1. **Planificar.** Relee la fase en `docs/spec.md` y escribe `docs/plan-fase-N.md`. Por cada tarea indica: id (`N.x`), subagente responsable, archivos que puede tocar, contrato que debe respetar (tipos de `packages/shared`, endpoints), dependencias y criterio de aceptación verificable. Haz commit del plan: `docs(plan): plan de la fase N`.
-2. **Delegar.** Lanza en paralelo solo tareas que no toquen los mismos archivos. Usa la plantilla de brief.
-3. **Revisar.**
-   - **Lee el diff real** (`git diff`); no te bases solo en el resumen del subagente.
-   - Ejecuta los gates. Si algo falla, devuélvelo al subagente con el error concreto.
-   - Máximo 3 rondas por tarea. Si sigue fallando, decide tú: corrígelo directamente, o regístralo en `docs/desviaciones.md` y continúa con lo que no dependa de esa tarea.
-   - Una fase no se declara completa con gates en rojo sin dejarlo explícito en la evidencia y en las desviaciones.
-   - Cuando la tarea esté aprobada, haz su commit.
-4. **Cerrar la fase.**
-   - Gates en verde.
-   - Revisión de seguridad en las Fases 2, 4 y 6, guardada en `docs/auditoria/seguridad-fase-N.md` con severidad y estado de cada hallazgo. Los hallazgos altos o críticos se corrigen antes de cerrar la fase, o se justifican en un ADR.
-   - `docs/evidencia/fase-N.md` con los comandos ejecutados y un resumen real de su salida: número de pruebas, aprobadas, fallidas y cobertura.
-   - Actualiza `docs/progreso.md`, haz commit (`docs(progreso): cierre de la fase N`) y crea el tag local `fase-N`.
-5. **Continuar** con la siguiente fase sin esperar.
+1. **Planificar.** Escribe `docs/plan-correcciones.md`. Por cada ítem indica: id, subagente responsable, archivos que puede tocar, contrato afectado, dependencias, la prueba de regresión que fallará antes de corregir y el criterio de aceptación. Agrupa en paralelo solo ítems con archivos disjuntos. Haz commit: `docs(plan): plan de correcciones v1.1`.
+2. **Por cada ítem:**
+   1. **Primero la prueba de regresión.** El subagente la escribe y demuestra que **falla** con el código actual: copia la salida del fallo en su entrega.
+   2. **Luego la corrección**, hasta que esa prueba y todos los gates pasen.
+   3. **Revisa el diff real** (`git diff`), no solo el resumen del subagente. Si algo falla, devuélvelo con el error concreto. Máximo 3 rondas; después, decide tú.
+   4. **Commit** del ítem: prueba más corrección en el mismo commit, con `Corrige: <id>` en el cuerpo.
+   5. **Marca el ítem** en `docs/correcciones-v1.1.md` como `RESUELTO (<hash corto>)` o `NO RESUELTO (<motivo>)`.
+3. **Las decisiones de diseño** (M1, M4, B5 y cualquier otra no trivial) van en un ADR nuevo antes de implementar. Usa `software-architect` como segunda opinión para M1 y M4.
+4. **Al terminar P1**, encarga a `security-reviewer` una revisión de solo lectura de M1, M7, B1, B3, B4 y B5 y guárdala en `docs/auditoria/seguridad-correcciones.md`. Encarga también a `database-specialist` una revisión de M3, M4 y B7 y guárdala en `docs/auditoria/revision-esquema-correcciones.md`. Los hallazgos altos o críticos se corrigen antes de cerrar.
+5. **Al terminar todo**, corre los gates completos y deja la evidencia en `docs/evidencia/correcciones.md`: comandos y resumen real de la salida (número de pruebas, fallidas, cobertura y E2E).
 
 ## Gates de calidad
 
 - **Siempre**: `pnpm lint`, `pnpm typecheck`, `pnpm test`.
-- **Desde la Fase 4**: además `pnpm test:e2e`.
-- **Al cierre de las Fases 2, 4 y 6**: `pnpm audit --prod`. Ningún hallazgo high o critical sin justificación escrita en un ADR.
+- **Al terminar P1 y al terminar todo**: además `pnpm test:e2e` y `pnpm format:check`.
+- **Al final**: `pnpm audit --prod`. Ningún hallazgo high o critical sin justificación escrita en un ADR.
+- **Antes del informe final**, corre `pnpm test:lighthouse` y confirma que sigue en 90 o más.
 - **Cobertura mínima** de líneas en `apps/worker/src` y `packages/shared`: 80%. Ningún umbral se baja para pasar.
 
 ## Subagentes
 
 Los subagentes **ya están instalados en esta máquina**. **No crees, edites ni copies definiciones de subagentes**: nada en `.claude/agents/` del proyecto ni en `~/.claude/agents/`. Un archivo de proyecto con el mismo nombre reemplazaría al del equipo.
 
-Al iniciar la sesión, antes de la Fase 0, confirma que estos subagentes están disponibles y registra el mapeo en `docs/progreso.md`, en una sección "Mapeo de subagentes". Si alguno no aparece, usa `general-purpose` con un brief completo del rol y anótalo.
+Al iniciar la sesión, confirma que estos subagentes están disponibles y registra el mapeo en `docs/progreso.md`, en la sección "Sesión de correcciones v1.1". Si alguno no aparece, usa `general-purpose` con un brief completo del rol y anótalo.
 
 | Rol | Subagente asignado | Responsabilidad en este proyecto |
 |---|---|---|
 | Backend | `general-purpose` | Worker API (Hono), esquema Drizzle/D1, migraciones, triggers, auth, permisos, auditoría, backups, `/sync/*` del servidor. No hay especialista de Cloudflare/TypeScript backend instalado. |
-| Revisión de esquema SQL | `database-specialist` | Revisa (no escribe) el esquema, los triggers, los índices y las migraciones antes de cerrar las Fases 1 y 3. |
+| Revisión de esquema SQL | `database-specialist` | Revisa (no escribe) M3, M4 y B7 al terminar P1/P2. |
 | Frontend | `react-developer` | Pantallas, componentes, routing, formularios y estado de la PWA. |
 | Sincronización (cliente) | `react-developer` | Dexie, outbox, motor de sync, Service Worker y subida de evidencias. Brief extra detallado: es la parte crítica. |
 | Sistema visual | `ui-ux-designer` | Tokens de Tailwind, componentes base, accesibilidad, revisión visual contra `docs/diseno/`. |
 | QA | `test-engineer` | Vitest (pool de Workers), Testing Library y Playwright E2E offline. |
-| Seguridad | `security-reviewer` | Revisiones de las Fases 2, 4 y 6. Es de solo lectura: devuelve el informe y tú lo guardas en `docs/auditoria/`. |
+| Seguridad | `security-reviewer` | Revisión de solo lectura de los ítems de seguridad al terminar P1. Devuelve el informe y tú lo guardas en `docs/auditoria/`. |
 | Segunda opinión de arquitectura | `software-architect` | Solo lectura. Úsalo para validar ADR de alto impacto (protocolo de sync, auth, modelo de datos). |
 | Documentación | `documentation-researcher` / `deep-researcher` | Verificar APIs y límites de Cloudflare, Drizzle, Hono, Workbox, Dexie y Playwright. |
 
@@ -150,11 +152,12 @@ Reglas para todos los subagentes, sin importar su definición:
 
 ```
 Objetivo: <qué debe quedar funcionando>
-Fase / tarea: <N.x> (ver docs/plan-fase-N.md)
+Ítem: <id> (ver docs/correcciones-v1.1.md y docs/plan-correcciones.md)
 Archivos que puedes tocar: <rutas>  ·  No toques: <rutas>
 Contrato: <tipos/esquemas de packages/shared, endpoints, códigos de error>
 Reglas de la spec aplicables: <secciones de docs/spec.md>
-Criterio de aceptación: <pruebas concretas que deben pasar>
+Criterio de aceptación: <copiado del ítem>
+Primero: escribe la prueba de regresión y muestra que FALLA con el código actual (pega la salida).
 Verificación: ejecuta <comandos> y reporta la salida resumida.
 Entrega: lista de archivos cambiados, pruebas añadidas, comandos ejecutados con su resultado, decisiones tomadas, riesgos o pendientes.
 Recuerda: no hagas commits; el orquestador los hace.
@@ -164,30 +167,28 @@ Recuerda: no hagas commits; el orquestador los hace.
 
 | Archivo | Contenido |
 |---|---|
-| `docs/progreso.md` | Estado actual, siguiente paso y registro cronológico por fase |
-| `docs/plan-fase-N.md` | Plan de cada fase |
-| `docs/adr/NNNN-*.md` | Decisiones de arquitectura |
-| `docs/preguntas-abiertas.md` | Ambigüedades y el supuesto aplicado a cada una |
-| `docs/desviaciones.md` | Lo que difiere de la spec o quedó incompleto, con su motivo |
-| `docs/evidencia/fase-N.md` | Salida resumida de los gates de cada fase |
-| `docs/auditoria/seguridad-fase-{2,4,6}.md` | Informes de seguridad |
-| `docs/pendientes-humanos.md` | Comandos remotos y acciones que debe hacer una persona |
-| `docs/notas-plataforma.md` | Particularidades encontradas en Cloudflare, Windows y las librerías |
-| `docs/despliegue.md` | Guía de despliegue (Fase 6) |
+| `docs/progreso.md` | Sección "Sesión de correcciones v1.1": estado, siguiente paso y registro cronológico |
+| `docs/plan-correcciones.md` | Plan de la sesión |
+| `docs/correcciones-v1.1.md` | Estado de cada ítem (RESUELTO con su hash / NO RESUELTO con su motivo) y los "Nuevos" |
+| `docs/adr/0018-*.md` en adelante | Decisiones nuevas |
+| `docs/desviaciones.md` | Entradas nuevas (por ejemplo, B2) |
+| `docs/evidencia/correcciones.md` | Salida resumida de los gates |
+| `docs/auditoria/seguridad-correcciones.md` y `revision-esquema-correcciones.md` | Revisiones |
+| `docs/pendientes-humanos.md` | Actualizado (quita lo que ya resolviste, como C1) |
+| `docs/despliegue.md` | Actualizado (desbloqueo de emergencia, restauración consistente, Node 24) |
 
-## Al terminar la Fase 6
+## Al terminar
 
-Escribe `docs/INFORME-FINAL.md` con estas secciones:
+Escribe `docs/INFORME-CORRECCIONES.md` con estas secciones:
 
-1. Resumen de lo construido.
-2. Estado por fase: completa o parcial, con enlace a su evidencia.
-3. Criterios de aceptación de la spec, uno por uno: cumplido / no cumplido / parcial, y dónde está la prueba que lo demuestra.
-4. ADRs tomados (lista con una línea cada uno).
-5. Desviaciones y problemas conocidos.
-6. Preguntas abiertas que requieren decisión de negocio.
-7. Hallazgos de seguridad abiertos.
-8. Pendientes humanos, con los comandos exactos (incluido el push de `build/v1` y sus tags, para cuando el equipo apruebe).
-9. Cómo verificar localmente, paso a paso, desde un clon limpio en Windows.
-10. Mapa de commits: salida de `git log --oneline main..build/v1` agrupada por fase.
+1. Resumen.
+2. **Tabla de ítems**: id, prioridad, estado (resuelto / no resuelto / parcial), commit, prueba de regresión (archivo y nombre de la prueba) y ADR si aplica.
+3. Ítems nuevos encontrados (N1…) y su estado.
+4. Cambios de contrato entre cliente y servidor (por ejemplo, `enviado_at`, `X-Hora-Dispositivo`, `CLIENTE_DESACTUALIZADO` y el conflicto por colisión de PK) y su compatibilidad con clientes viejos.
+5. Migraciones nuevas y su efecto sobre bases existentes (staging o producción).
+6. Gates finales con números reales.
+7. Hallazgos de las revisiones de esta sesión y su estado.
+8. Pendientes humanos actualizados, incluido el push de `build/v1`, `fix/auditoria-v1` y los tags, para cuando el equipo apruebe.
+9. Mapa de commits: `git log --oneline build/v1..fix/auditoria-v1`.
 
-Haz el commit final (`docs: informe final de la sesión`) y crea el tag `fase-6` si no existe. **No hagas push.** Termina.
+Haz el commit final (`docs: informe de correcciones v1.1`) y crea el tag `correcciones-v1.1`. **No hagas push.** Termina.
