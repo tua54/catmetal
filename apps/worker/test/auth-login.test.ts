@@ -276,7 +276,8 @@ describe('rate limiting (IP + email, 5 por 60 s)', () => {
     });
     // Otra IP con el mismo correo no está limitada por esa clave.
     expect((await intentar(email, 'x')).status).toBe(401);
-  });
+    // Tiempo máximo propio: la espera al minuto siguiente puede durar hasta ~10 s.
+  }, 20_000);
 
   it('sin cf-connecting-ip usa la clave "local"', async () => {
     const email = `local-${uuidv7()}@catmetal.test`;
