@@ -30,7 +30,9 @@ function llamar(request: Request, assets: Fetcher): Promise<Response> {
 }
 
 describe('scheduled', () => {
-  it('se ejecuta sin error y deja un log estructurado', async () => {
+  // Desde la tarea 6.1 el cron hace backup y mantenimiento (detalle en fase6-cron-*.test.ts): ya no
+  // deja un único log, sino inicio (`cron_ejecutado`), resúmenes y cierre (`cron_fin`).
+  it('se ejecuta sin error y deja logs estructurados de inicio y fin', async () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     const controller = createScheduledController({
       scheduledTime: new Date('2026-10-30T08:00:00.000Z'),
@@ -39,12 +41,18 @@ describe('scheduled', () => {
     const ctx = createExecutionContext();
     await worker.scheduled(controller, env, ctx);
     await waitOnExecutionContext(ctx);
-    expect(log).toHaveBeenCalledTimes(1);
-    expect(JSON.parse(String(log.mock.calls[0]?.[0]))).toMatchObject({
+    const eventos = log.mock.calls.map((c) => JSON.parse(String(c[0])) as Record<string, unknown>);
+    expect(eventos[0]).toMatchObject({
       nivel: 'info',
       evento: 'cron_ejecutado',
       cron: '0 8 * * *',
       programado_para: '2026-10-30T08:00:00.000Z',
+    });
+    expect(eventos.at(-1)).toMatchObject({
+      nivel: 'info',
+      evento: 'cron_fin',
+      backup: 'completo',
+      mantenimiento: 'hecho',
     });
   });
 });
