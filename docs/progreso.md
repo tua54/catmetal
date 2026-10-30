@@ -11,7 +11,7 @@
 
 ## Siguiente paso
 
-Sesión v1.2: ADR 0028 (A1) con la segunda opinión de `software-architect`; después implementar A1 (backend) en paralelo con A2 (cliente).
+Sesión v1.2: P1 cerrado (A1+N1 `6fbad17`, A2 `8206366`), A9 y A10 confirmados. En curso: revisión de esquema de A1 (database-specialist), backend P2 (A3 → A5 → A8 → A6-servidor) y cliente P2 (A4; luego A7 y A6-cliente, uno a uno). Al recibir cada entrega: revisar diff, gates, commit por ítem.
 
 ## Sesión de correcciones v1.2
 
@@ -36,6 +36,11 @@ No se usan `mvc-dotnet-developer`, `angular-developer` ni `orchestrator`.
 
 - 2026-10-30. Estado verificado: rama `fix/auditoria-v1`, archivos del equipo sin confirmar (`CLAUDE.md`, `.claude/sesion.json` apuntando a `docs/INFORME-CORRECCIONES-V1.2.md`, `docs/correcciones-v1.2.md`, `docs/ARRANQUE-CORRECCIONES-V1.2.md`). C0 en `a749532`.
 - Plan escrito en `docs/plan-correcciones-v1.2.md`. Borrador del ADR 0028 (A1, opción (b): marca `escritura_id` por plan, que generaliza el `reserva_id` de la ADR 0018) enviado a `software-architect`.
+- Enmienda 1 del ADR 0023 (A2) en `c122104`. A2 delegado a `react-developer`.
+- Segunda opinión de `software-architect` sobre el ADR 0028: aprobar con cambios (marca general, tipo opaco, columna fuera del backup, no fuga, auditorías con estado previo convertidas). Incorporada; ADR aceptado en `5632b44`. A1 delegado a `general-purpose`. Posible N1 (concurrencia optimista de materiales por `updated_at`) encargado para verificar.
+- A10 y A9 preparados por el orquestador (prueba estática de runners: falla con `ubuntu-latest`, pasa con `ubuntu-24.04`). Se confirman después de A1 y A2.
+- A2 entregado (646 pruebas web, E2E 3/3). A1 entregado (1411 pruebas worker, 98,41 %; N1 confirmado y corregido). Gates del orquestador sobre el árbol combinado: lint, typecheck, format:check OK; `pnpm test` 2322 pruebas sin fallos; `pnpm test:e2e` 36 passed. Commits: ADR 0028 notas `d2ee8af`, A1+N1 `6fbad17`, ADR 0023 notas `233015c`, A2 `8206366`, estados `a47bff0`.
+- Enmiendas de ADR para P2: 0026 (`8cd866b`), 0018 (`b0647aa`), ADR 0029 nuevo para A6 (`8129096`), 0022 enmienda 1 para A7 (`b5d9b9f`). A10 `f57c03f`, A9 `81aa189`.
 
 ## Sesión de correcciones v1.1
 

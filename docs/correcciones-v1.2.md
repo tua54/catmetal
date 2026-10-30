@@ -105,10 +105,14 @@ Este documento es **el alcance de la sesión v1.2**. Cada ítem trae:
 
 ### A9. Documentación incorrecta
 
+- **Estado**: RESUELTO (`81aa189`).
+
 - El ADR 0021 dice "ninguna migración borra triggers", pero `migrations/0008_settings_insert_validos.sql:16` hace `DROP TRIGGER` y lo recrea más fuerte. Hay que corregir la frase y explicar el caso.
 - `docs/despliegue.md` §9.2, paso 1, todavía admite `login_cupos` como tabla incompleta, aunque ya no se exporta (S-06). Hay que corregirlo.
 
 ### A10. Fijar la imagen de los runners de CI
+
+- **Estado**: RESUELTO (`f57c03f`).
 
 - **Dónde**: `.github/workflows/ci.yml:29,75` y `deploy-staging.yml:26,43` usan `ubuntu-latest`. GitHub avisa que esa etiqueta pasa a Ubuntu 26.
 - **Aceptación**:
