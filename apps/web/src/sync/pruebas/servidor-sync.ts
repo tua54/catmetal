@@ -62,6 +62,10 @@ export interface ServidorSync {
   errorEvidencia: CodigoError | null;
   /** Gancho antes de responder una petición (para cambiar la sesión a mitad de camino). */
   alRecibir: ((p: PeticionSync) => void) | null;
+  /** Órdenes cuyo snapshot de alcance `orden` responde 404 (desasignadas). */
+  ordenesNoVisibles: Set<string>;
+  /** `epoca` recibida en cada push (`null` si no vino). */
+  epocasRecibidas: (string | null)[];
   seq(): number;
   entidades(entidad: string): Datos[];
   pushes(): PeticionSync[];
@@ -166,11 +170,20 @@ export function crearServidorSync(): ServidorSync {
         if (actual === undefined) {
           return { mutation_id: m.mutation_id, resultado: 'rechazada', code: 'NO_ENCONTRADO' };
         }
+        if (actual.estado !== 'pendiente') {
+          return {
+            mutation_id: m.mutation_id,
+            resultado: 'rechazada',
+            code: 'CONSUMO_NO_PENDIENTE',
+            servidor: { ...actual },
+          };
+        }
         if (actual.version !== m.payload.version) {
           return {
             mutation_id: m.mutation_id,
             resultado: 'conflicto',
-            servidor: { consumo: actual, version_servidor: actual.version },
+            code: 'CONFLICTO',
+            servidor: { ...actual },
           };
         }
         const p = m.payload;
@@ -223,6 +236,14 @@ export function crearServidorSync(): ServidorSync {
         if (actual === undefined) {
           return { mutation_id: m.mutation_id, resultado: 'rechazada', code: 'NO_ENCONTRADO' };
         }
+        if (actual.estado !== 'pendiente') {
+          return {
+            mutation_id: m.mutation_id,
+            resultado: 'rechazada',
+            code: 'CONSUMO_NO_PENDIENTE',
+            servidor: { ...actual },
+          };
+        }
         const decision = m.tipo === 'consumo.aprobar' ? 'aprobado' : 'rechazado';
         const v: Validacion = {
           id: m.payload.id,
@@ -248,9 +269,14 @@ export function crearServidorSync(): ServidorSync {
   }
 
   function push(userId: string, cuerpo: unknown): Response {
-    const sobre = cuerpo as { user_id?: unknown; mutaciones?: unknown };
+    const sobre = cuerpo as { user_id?: unknown; epoca?: unknown; mutaciones?: unknown };
     if (sobre.user_id !== userId) {
       return error('AUTOR_NO_COINCIDE');
+    }
+    servidor.epocasRecibidas.push(typeof sobre.epoca === 'string' ? sobre.epoca : null);
+    // ADR 0016 (A1): época vieja → 409 sin procesar ni guardar nada. Sin época se procesa.
+    if (sobre.epoca !== undefined && sobre.epoca !== servidor.epoca) {
+      return error('EPOCA_CAMBIADA');
     }
     if (!Array.isArray(sobre.mutaciones) || sobre.mutaciones.length > 25) {
       return error('VALIDACION');
@@ -312,6 +338,10 @@ export function crearServidorSync(): ServidorSync {
   function snapshot(query: URLSearchParams): Response {
     const alcance = query.get('alcance');
     const orderId = query.get('order_id');
+    if (alcance === 'orden' && servidor.ordenesNoVisibles.has(orderId ?? '')) {
+      // Como el real: la orden ya no es visible para quien pide (desasignada) → 404.
+      return error('NO_ENCONTRADO');
+    }
     const token = query.get('pagina');
     const [desde, cursor] = token === null ? [0, seq] : token.slice(1).split('_').map(Number);
     const todas = [...estado.values()].filter(
@@ -365,6 +395,8 @@ export function crearServidorSync(): ServidorSync {
     evidenciaDesconocida: 0,
     errorEvidencia: null,
     alRecibir: null,
+    ordenesNoVisibles: new Set(),
+    epocasRecibidas: [],
     seq: () => seq,
     entidades: (entidad) =>
       [...estado.values()].filter((e) => e.entidad === entidad).map((e) => e.datos),

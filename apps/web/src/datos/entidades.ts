@@ -61,18 +61,47 @@ export async function upsertConsumo(
   ahora: string,
 ): Promise<EntidadAfectada> {
   const c = await db.consumos.get([userId, s.id]);
+  // El servidor lo tiene: deja de estar por verificar o perdido tras una restauración.
+  const confirmado = { verificar_en_snapshot: false, perdido_en_restauracion: false };
   if (c === undefined) {
     await db.consumos.add(consumoDesdeServidor(userId, s, ahora));
   } else if (modo === 'pull' && (await entidadTieneCola(userId, 'consumos', s.id))) {
     await db.consumos.put({
       ...c,
+      ...confirmado,
       servidor_diferido: masReciente(c.servidor_diferido, s),
       actualizado_at: ahora,
     });
   } else {
-    await db.consumos.put({ ...c, servidor: masReciente(c.servidor, s), actualizado_at: ahora });
+    await db.consumos.put({
+      ...c,
+      ...confirmado,
+      servidor: masReciente(c.servidor, s),
+      actualizado_at: ahora,
+    });
   }
   return { tabla: 'consumos', id: s.id };
+}
+
+/**
+ * Tras un snapshot COMPLETO: los consumos propios que siguen por verificar (el servidor no los
+ * devolvió) y no tienen mutaciones en cola se marcan `perdido_en_restauracion`. Devuelve sus ids.
+ */
+export async function marcarPerdidosTrasSnapshot(userId: string): Promise<string[]> {
+  const consumos = await db.consumos
+    .where(':id')
+    .between(...rangoDe(userId))
+    .filter((c) => c.verificar_en_snapshot === true)
+    .toArray();
+  const perdidos: string[] = [];
+  for (const c of consumos) {
+    const enCola = await entidadTieneCola(userId, 'consumos', c.id);
+    await db.consumos.put({ ...c, verificar_en_snapshot: false, perdido_en_restauracion: !enCola });
+    if (!enCola) {
+      perdidos.push(c.id);
+    }
+  }
+  return perdidos;
 }
 
 export async function upsertNovedad(
@@ -362,8 +391,10 @@ export async function revocarEntidad(
 
 /**
  * Borra el estado sincronizado del usuario antes de un snapshot completo (`reiniciar` o cambio de
- * época). Conserva todo lo protegido (cola, rechazos y conflictos, fotos sin subir). Lo propio ya
- * sincronizado se borra porque el snapshot lo vuelve a traer. No toca `meta` ni `outbox`.
+ * época). Conserva todo lo protegido (cola, rechazos y conflictos, fotos sin subir) y TODOS los
+ * consumos propios: los que no están en cola se marcan `verificar_en_snapshot` y, si el snapshot
+ * completo no los devuelve, `marcarPerdidosTrasSnapshot` los marca `perdido_en_restauracion`
+ * (ADR 0016, M1). No toca `meta` ni `outbox`.
  */
 export async function reiniciarEstadoSincronizado(userId: string): Promise<void> {
   const rango = rangoDe(userId);
@@ -385,7 +416,13 @@ export async function reiniciarEstadoSincronizado(userId: string): Promise<void>
     .between(...rango)
     .toArray();
   for (const c of consumos) {
-    if (!(await consumoProtegido(userId, c, false))) {
+    if (c.registrado_por === userId) {
+      // Lo propio NUNCA se borra aquí (ADR 0016, M1): si no está en cola, queda por verificar y el
+      // snapshot completo decide si sigue en el servidor o se perdió en una restauración.
+      if (!(await entidadTieneCola(userId, 'consumos', c.id))) {
+        await db.consumos.put({ ...c, verificar_en_snapshot: true });
+      }
+    } else if (!(await consumoProtegido(userId, c, false))) {
       await borrarConsumoConHijos(userId, c.id);
     }
   }

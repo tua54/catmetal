@@ -2,7 +2,7 @@
 // aviso de almacenamiento no persistente. Solo datos; la lógica está en el motor y los disparadores.
 
 import { create, type StoreApi, type UseBoundStore } from 'zustand';
-import { contarEvidenciasPendientes, contarPendientes } from '../datos/outbox';
+import { contarEvidenciasPendientes, contarPendientes, mutacionesAtascadas } from '../datos/outbox';
 import { mutacionesConProblema } from '../datos/consultas';
 import type { ErrorSync } from '../datos/tipos';
 
@@ -19,6 +19,11 @@ export interface EstadoSync {
   /** Mutaciones rechazadas por el servidor (se conservan). */
   rechazados: number;
   conflictos: number;
+  /**
+   * Mutaciones en cola con 10 o más intentos fallidos por errores transitorios (B4): no se rechazan
+   * solas; la UI las muestra como "atascadas" para que alguien revise.
+   */
+  atascadas: number;
   /** Fin de la última sincronización completa sin error (ISO). */
   ultimoSync: string | null;
   error: ErrorSync | null;
@@ -36,6 +41,7 @@ export function estadoSyncInicial(): EstadoSync {
     fotosPendientes: 0,
     rechazados: 0,
     conflictos: 0,
+    atascadas: 0,
     ultimoSync: null,
     error: null,
     persistencia: 'desconocida',
@@ -85,13 +91,20 @@ export async function actualizarContadores(
   const generacion = (generaciones.get(store) ?? 0) + 1;
   generaciones.set(store, generacion);
   if (userId === null) {
-    store.setState({ pendientes: 0, fotosPendientes: 0, rechazados: 0, conflictos: 0 });
+    store.setState({
+      pendientes: 0,
+      fotosPendientes: 0,
+      rechazados: 0,
+      conflictos: 0,
+      atascadas: 0,
+    });
     return;
   }
-  const [pendientes, fotosPendientes, problemas] = await Promise.all([
+  const [pendientes, fotosPendientes, problemas, atascadas] = await Promise.all([
     contarPendientes(userId),
     contarEvidenciasPendientes(userId),
     mutacionesConProblema(userId),
+    mutacionesAtascadas(userId),
   ]);
   if (generaciones.get(store) !== generacion) {
     return;
@@ -101,5 +114,6 @@ export async function actualizarContadores(
     fotosPendientes,
     rechazados: problemas.filter((m) => m.estado === 'rechazada').length,
     conflictos: problemas.filter((m) => m.estado === 'conflicto').length,
+    atascadas: atascadas.length,
   });
 }

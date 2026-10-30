@@ -931,6 +931,17 @@ export async function aplicarResultados(
           siguiente_intento_at: null,
           actualizada_at: iso,
         });
+        if (conflictoSobreEntidadExistente(m) && r.servidor !== undefined) {
+          // `CONSUMO_NO_PENDIENTE` trae el consumo actual (ya validado): la vista lo refleja.
+          afectadas.push(
+            ...(await guardarEntidadesServidor(
+              userId,
+              extraerEntidades(r.servidor),
+              'propio',
+              iso,
+            )),
+          );
+        }
         await marcarUltimoResultado(userId, m, 'rechazada', error);
         await bloquearFotos(userId, m, error, iso);
         if (m.tipo === 'consumo.crear') {
@@ -1096,15 +1107,30 @@ export async function puedeBorrarDatosDeUsuario(userId: string): Promise<EstadoB
 }
 
 /**
- * Borra los datos locales del usuario. Falla con `PENDIENTES_LOCALES` si tiene pendientes (la UI
- * debe advertirle antes). Conserva las mutaciones `rechazada`/`conflicto` y las entidades que
- * afectan (incluidas sus fotos): son datos de planta que nunca se borran solos (ADR 0012).
- * `conservarPerfil` mantiene el perfil y el verificador del login offline.
+ * Cierra la sesión del usuario en el dispositivo: falla con `PENDIENTES_LOCALES` si tiene pendientes
+ * (la UI debe advertirle antes).
+ *
+ * SE CONSERVAN (ADR 0012 y 0016):
+ * - las mutaciones `rechazada` y `conflicto` (nunca se borran solas);
+ * - las mutaciones `aplicada` dentro de la retención (`RETENCION_MUTACIONES_APLICADAS_DIAS`, 30
+ *   días): tras una restauración del servidor se reenvían aunque el usuario haya cerrado sesión;
+ * - las entidades locales que esas mutaciones afectan (consumos, novedades, fotos con sus bytes,
+ *   validaciones);
+ * - `meta.epoca` (con el cursor en 0 y snapshot pendiente): así, al volver, se detecta una
+ *   restauración ocurrida mientras tanto y se reencolan las aplicadas conservadas;
+ * - el perfil y el verificador si `conservarPerfil`.
+ *
+ * SE BORRAN: las aplicadas más viejas que la retención, las demás entidades del usuario (lo ajeno
+ * y lo propio ya fuera de la retención: el snapshot lo vuelve a traer), los catálogos (órdenes,
+ * planes, asignaciones, materiales, settings, usuarios) y la trazabilidad del usuario.
  */
 export async function borrarDatosDeUsuario(
   userId: string,
-  opciones: { conservarPerfil?: boolean } = {},
+  opciones: { conservarPerfil?: boolean; ahora?: Date } = {},
 ): Promise<{ conservadas: number }> {
+  const limite = new Date(
+    (opciones.ahora ?? new Date()).getTime() - RETENCION_MUTACIONES_APLICADAS_DIAS * MS_POR_DIA,
+  ).toISOString();
   return db.transaction('rw', tablasDeDatos(), async () => {
     const estado = await puedeBorrarDatosDeUsuario(userId);
     if (!estado.puede) {
@@ -1117,7 +1143,9 @@ export async function borrarDatosDeUsuario(
     const conservar = new Set<string>();
     let conservadas = 0;
     for (const m of outbox) {
-      if (m.estado === 'rechazada' || m.estado === 'conflicto') {
+      const enRetencion =
+        m.estado === 'aplicada' && m.aplicada_at !== null && m.aplicada_at >= limite;
+      if (m.estado === 'rechazada' || m.estado === 'conflicto' || enRetencion) {
         conservadas += 1;
         m.claves.forEach((clave) => conservar.add(clave));
       } else {
@@ -1156,7 +1184,18 @@ export async function borrarDatosDeUsuario(
       .where('[user_id+ts]')
       .between(...rango)
       .delete();
-    await db.meta.delete(userId);
+    const meta = await db.meta.get(userId);
+    if (meta !== undefined) {
+      // Se conserva la época (para detectar una restauración al volver); el estado sincronizado se
+      // borró, así que el próximo inicio de sesión pide un snapshot completo.
+      await db.meta.put({
+        ...meta,
+        cursor: 0,
+        requiere_snapshot: true,
+        motivo_snapshot: 'reiniciar',
+        hidrataciones: [],
+      });
+    }
     if (opciones.conservarPerfil !== true) {
       await db.perfiles.delete(userId);
     }
@@ -1255,5 +1294,126 @@ export async function bloquearEvidencia(
     error_subida: error,
     siguiente_intento_at: null,
     actualizado_at: ahora.toISOString(),
+  });
+}
+
+// ---------------------------------------------------------------------------------------------
+// Época cambiada, mutaciones atascadas y consumos perdidos en una restauración (ADR 0016)
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * 409 `EPOCA_CAMBIADA`: el servidor no procesó NI guardó el lote. Vuelve a `pendiente` sin backoff
+ * ni rechazo, y sin contar el intento (no fue un fallo de la mutación). El motor hace pull
+ * (detecta la época y reencola) y repite el push.
+ */
+export async function devolverAPendiente(
+  userId: string,
+  lote: readonly Pick<MutacionOutbox, 'mutation_id'>[],
+  ahora: Date = new Date(),
+): Promise<number> {
+  return db.transaction('rw', db.outbox, async () => {
+    let devueltas = 0;
+    for (const { mutation_id } of lote) {
+      const m = await db.outbox.get(mutation_id);
+      if (m === undefined || m.user_id !== userId || m.estado !== 'enviando') {
+        continue;
+      }
+      await db.outbox.put({
+        ...m,
+        estado: 'pendiente',
+        intentos: Math.max(0, m.intentos - 1),
+        siguiente_intento_at: null,
+        actualizada_at: ahora.toISOString(),
+      });
+      devueltas += 1;
+    }
+    return devueltas;
+  });
+}
+
+/** Intentos a partir de los cuales una mutación en cola se muestra como "atascada" (B4). */
+export const UMBRAL_INTENTOS_ATASCADA = 10;
+
+/**
+ * Mutaciones en cola del usuario que fallan una y otra vez con errores transitorios. No se rechazan
+ * solas (podría ser una caída larga del servidor): la UI las muestra para que alguien revise.
+ */
+export async function mutacionesAtascadas(userId: string): Promise<MutacionOutbox[]> {
+  return db.transaction('r', db.outbox, async () =>
+    (await mutacionesEnColaDeUsuario(userId)).filter((m) => m.intentos >= UMBRAL_INTENTOS_ATASCADA),
+  );
+}
+
+/**
+ * Reenvía un consumo propio que el servidor perdió en una restauración (`perdido_en_restauracion`):
+ * crea una mutación `consumo.crear` NUEVA (nuevo `mutation_id`, mismo id de entidad y los mismos
+ * datos, incluida la hora original). Así no choca con la respuesta guardada de la mutación vieja.
+ */
+export async function reenviarPerdido(
+  userId: string,
+  consumoId: string,
+): Promise<AccionRegistrada> {
+  const ahora = ahoraIso();
+  return db.transaction('rw', tablasDeDatos(), async () => {
+    const c = await db.consumos.get([userId, consumoId]);
+    if (c === undefined) {
+      throw new ErrorDatosLocales('NO_ENCONTRADO');
+    }
+    if (c.registrado_por !== userId) {
+      throw new ErrorDatosLocales('PERMISO_DENEGADO');
+    }
+    if (c.perdido_en_restauracion !== true) {
+      throw new ErrorDatosLocales(
+        'CONFLICTO',
+        'Este consumo no figura como perdido en el servidor.',
+      );
+    }
+    const campos = camposDe(c);
+    const mutacion = construirMutacion(
+      'consumo.crear',
+      {
+        id: c.id,
+        order_id: c.order_id,
+        ...campos,
+        client_created_at: c.client_created_at,
+        corrige_a: c.corrige_a,
+      },
+      ahora,
+    );
+    await db.consumos.put({
+      ...c,
+      ...campos,
+      base_local: campos,
+      servidor: null,
+      servidor_diferido: null,
+      version: null,
+      ultimo_resultado: null,
+      error_sync: null,
+      conflicto_servidor: null,
+      verificar_en_snapshot: false,
+      perdido_en_restauracion: false,
+      actualizado_at: ahora,
+    });
+    await encolar(
+      userId,
+      mutacion,
+      {
+        tabla: 'consumos',
+        entidad_id: c.id,
+        consumo_id: c.id,
+        claves: [claveEntidad(userId, 'consumos', c.id)],
+      },
+      ahora,
+    );
+    await registrarEvento(
+      userId,
+      'consumo.registrado',
+      c.id,
+      c.order_id,
+      ahora,
+      'reenvió un consumo perdido en el servidor',
+    );
+    await recalcularConsumo(userId, c.id);
+    return { id: c.id, mutation_id: mutacion.mutation_id };
   });
 }

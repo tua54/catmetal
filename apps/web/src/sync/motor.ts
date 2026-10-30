@@ -14,6 +14,7 @@
 
 import {
   MAX_MUTACIONES_POR_LOTE,
+  MENSAJES_ERROR,
   snapshotResponseSchema,
   syncPullResponseSchema,
   syncPushResponseSchema,
@@ -37,6 +38,7 @@ import {
   aMutacion,
   aplicarResultados,
   bloquearEvidencia,
+  devolverAPendiente,
   evidenciasListasParaSubir,
   marcarEnviando,
   marcarEvidenciaSubida,
@@ -96,6 +98,8 @@ export interface OpcionesMotor {
   ahora?: () => number;
   aleatorio?: () => number;
   candado?: { duracionMs?: number; intervaloMs?: number };
+  /** Tope de páginas por snapshot (por defecto 2000; se cambia en pruebas). */
+  maxPaginasSnapshot?: number;
 }
 
 /** Topes por sincronización (evitan bucles si el servidor se comporta mal). */
@@ -116,12 +120,24 @@ class SesionCambiada extends Error {
   override readonly name = 'SesionCambiada';
 }
 
+/** El snapshot no terminó dentro del tope de páginas: error reintentable (M4). */
+class SnapshotIncompleto extends Error {
+  override readonly name = 'SnapshotIncompleto';
+
+  constructor() {
+    super('La descarga de datos del servidor no terminó. Se reintentará.');
+  }
+}
+
 function errorSyncDe(error: unknown): ErrorSync {
   if (error instanceof ErrorApi) {
     return { code: error.code, message: error.message };
   }
   if (error instanceof ErrorRed) {
     return { code: null, message: error.message };
+  }
+  if (error instanceof SnapshotIncompleto) {
+    return { code: 'ERROR_INTERNO', message: error.message };
   }
   if (error instanceof SesionCambiada) {
     return { code: 'AUTOR_NO_COINCIDE', message: error.message };
@@ -138,6 +154,7 @@ function esErrorEsperado(error: unknown): boolean {
     error instanceof ErrorApi ||
     error instanceof ErrorRed ||
     error instanceof SesionCambiada ||
+    error instanceof SnapshotIncompleto ||
     error instanceof ZodError ||
     error instanceof SyntaxError
   );
@@ -291,13 +308,18 @@ export class MotorSync {
     this.#estado.setState({ sincronizando: true });
     try {
       await recuperarEnviando(userId, this.#ahora());
-      await this.#push(userId, resumen);
+      // A1 (ADR 0016): si el servidor responde EPOCA_CAMBIADA, el lote volvió a pendiente sin
+      // procesarse; el pull detecta la época nueva, reencola en orden y hace el snapshot.
+      const epocaVieja = (await this.#push(userId, resumen)) === 'epoca_cambiada';
       if (resumen.error === null) {
         await this.#pull(userId, resumen);
       }
-      if (resumen.error === null && resumen.epoca_cambiada) {
+      if (resumen.error === null && (resumen.epoca_cambiada || epocaVieja)) {
         // Tras un cambio de época se reenvían las mutaciones aplicadas que se conservaban.
-        await this.#push(userId, resumen);
+        if ((await this.#push(userId, resumen)) === 'epoca_cambiada') {
+          // La época volvió a cambiar (otra restauración): se reintenta en la próxima sync.
+          resumen.error = { code: 'EPOCA_CAMBIADA', message: MENSAJES_ERROR.EPOCA_CAMBIADA };
+        }
       }
       if (resumen.error === null || !detieneLaRed(resumen.error)) {
         await this.#subirEvidencias(userId, resumen);
@@ -347,13 +369,14 @@ export class MotorSync {
   // Push
   // -------------------------------------------------------------------------------------------
 
-  async #push(userId: string, resumen: ResumenSync): Promise<void> {
+  async #push(userId: string, resumen: ResumenSync): Promise<'ok' | 'epoca_cambiada'> {
     for (let lotes = 0; lotes < MAX_LOTES; lotes += 1) {
       this.#verificarSesion(userId);
       const listo = await siguienteLote(userId, MAX_MUTACIONES_POR_LOTE, this.#ahora());
       if (listo.length === 0) {
-        return;
+        return 'ok';
       }
+      const { epoca } = await leerMetaSync(userId);
       const lote = await marcarEnviando(userId, listo, this.#ahora());
       resumen.lotes += 1;
       resumen.enviadas += lote.length;
@@ -362,10 +385,17 @@ export class MotorSync {
       try {
         const respuesta = await this.#api().peticion<unknown>('/sync/push', {
           metodo: 'POST',
-          cuerpo: { user_id: userId, mutaciones: lote.map(aMutacion) },
+          // La época conocida viaja en el sobre (ADR 0016, A1). Sin época (nunca hubo pull) se omite.
+          cuerpo: { user_id: userId, epoca: epoca ?? undefined, mutaciones: lote.map(aMutacion) },
         });
         resultados = syncPushResponseSchema.parse(respuesta).resultados;
       } catch (error) {
+        if (error instanceof ErrorApi && error.code === 'EPOCA_CAMBIADA') {
+          // El servidor no procesó ni guardó nada: el lote vuelve a la cola tal cual.
+          await devolverAPendiente(userId, lote, this.#ahora());
+          resumen.enviadas -= lote.length;
+          return 'epoca_cambiada';
+        }
         // Sin respuesta utilizable: todo el lote queda sin resultado (sigue pendiente, con backoff).
         const r = await aplicarResultados(userId, lote, [], {
           ahora: this.#ahora(),
@@ -377,7 +407,7 @@ export class MotorSync {
           this.#opciones.sesion.marcarRequiereContrasena();
         }
         resumen.error = errorSyncDe(error);
-        return;
+        return 'ok';
       }
 
       const r = await aplicarResultados(userId, lote, resultados, {
@@ -391,9 +421,10 @@ export class MotorSync {
       if (r.sin_resultado > 0) {
         // El servidor se detuvo por un error transitorio: las demás esperan su backoff.
         resumen.siguiente_intento_at = r.siguiente_intento_at;
-        return;
+        return 'ok';
       }
     }
+    return 'ok';
   }
 
   // -------------------------------------------------------------------------------------------
@@ -433,7 +464,15 @@ export class MotorSync {
         await this.#snapshot(userId, resumen, { alcance: 'inicial' });
         completo = true;
       } else if (!completo) {
-        await this.#snapshot(userId, resumen, { alcance: 'orden', order_id: accion.order_id });
+        try {
+          await this.#snapshot(userId, resumen, { alcance: 'orden', order_id: accion.order_id });
+        } catch (error) {
+          // A2: la orden se desasignó (o ya no existe) entre el `hidratar` y su snapshot. Se cierra
+          // la hidratación igual; el `revocar` de la orden llega en el pull.
+          if (!(error instanceof ErrorApi && error.code === 'NO_ENCONTRADO')) {
+            throw error;
+          }
+        }
         await completarHidratacion(userId, accion.order_id);
       }
     }
@@ -448,7 +487,8 @@ export class MotorSync {
   ): Promise<void> {
     let pagina: string | null = null;
     let primera: SnapshotResponse | null = null;
-    for (let n = 0; n < MAX_PAGINAS_SNAPSHOT; n += 1) {
+    const maxPaginas = this.#opciones.maxPaginasSnapshot ?? MAX_PAGINAS_SNAPSHOT;
+    for (let n = 0; n < maxPaginas; n += 1) {
       this.#verificarSesion(userId);
       const parametros = new URLSearchParams({ alcance: consulta.alcance });
       if (consulta.alcance === 'orden') {
@@ -467,6 +507,12 @@ export class MotorSync {
       if (pagina === null) {
         break;
       }
+    }
+    if (pagina !== null) {
+      // M4: se agotó el tope de páginas y el servidor aún tiene más. Nunca se completa un snapshot
+      // a medias (marcaría como perdidos consumos que no se alcanzaron a leer): la acción sigue
+      // persistida en `meta` y se reintenta en la próxima sincronización.
+      throw new SnapshotIncompleto();
     }
     if (consulta.alcance === 'inicial' && primera !== null) {
       // El cursor es el de la PRIMERA página (MAX(seq) leído antes del estado, ADR 0005 regla 7).

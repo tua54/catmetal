@@ -148,6 +148,17 @@ export interface ConsumoLocal extends CamposConsumo {
   /** En `conflicto`: la versión del servidor que devolvió el push. */
   conflicto_servidor: Record<string, unknown> | null;
   actualizado_at: string;
+  /**
+   * Consumo propio sincronizado que se conservó al reiniciar (cambio de época o `reiniciar`) y que
+   * el snapshot aún no confirmó. Si el snapshot completo no lo devuelve, pasa a
+   * `perdido_en_restauracion` (ADR 0016, M1). Opcional: las filas anteriores no lo tienen.
+   */
+  verificar_en_snapshot?: boolean;
+  /**
+   * El servidor ya no tiene este consumo propio (restauración más atrás de la retención) y no hay
+   * mutación en cola que lo recree. La UI ofrece `reenviarPerdido`; el dato nunca se borra solo.
+   */
+  perdido_en_restauracion?: boolean;
 }
 
 export interface NovedadLocal {
@@ -244,6 +255,9 @@ export interface AsignacionLocal {
   order_id: string;
   /** `order_supervisors.user_id` (renombrado: `user_id` es la partición local). */
   supervisor_id: string;
+  /** Nombre del supervisor (`order_supervisors.nombre`: el supervisor no recibe `users` ajenos).
+   * Opcional: las filas anteriores no lo tienen. */
+  nombre?: string | null;
   asignado_por: string | null;
   activo: boolean;
 }

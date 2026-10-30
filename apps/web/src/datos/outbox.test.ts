@@ -973,12 +973,22 @@ describe('retención y cierre de sesión', () => {
     await aplicarResultados(A, lote, [resultado(lote, 0, { resultado: 'aplicada' })]);
 
     expect((await puedeBorrarDatosDeUsuario(A)).puede).toBe(true);
+    // ADR 0016 (M1): la aplicada reciente (dentro de los 30 días) y su consumo se conservan.
     const { conservadas } = await borrarDatosDeUsuario(A, { conservarPerfil: true });
-    expect(conservadas).toBe(1);
+    expect(conservadas).toBe(2);
     expect(await db.consumos.get([A, rechazado.id])).toMatchObject({
       estado_local: 'rechazado_sync',
     });
+    expect(await db.consumos.get([A, sincronizado.id])).toMatchObject({
+      estado_local: 'sincronizado',
+    });
+    // Fuera de la retención, la aplicada y su consumo sí se borran.
+    await borrarDatosDeUsuario(A, {
+      conservarPerfil: true,
+      ahora: new Date(Date.now() + 31 * 86_400_000),
+    });
     expect(await db.consumos.get([A, sincronizado.id])).toBeUndefined();
+    expect(await db.consumos.get([A, rechazado.id])).toBeDefined();
     expect(await db.trazabilidad.where('[user_id+ts]').between([A, ''], [A, '￿']).count()).toBe(0);
     expect(await db.perfiles.get(A)).toBeDefined();
     expect(await contarPendientes(B)).toBe(1);

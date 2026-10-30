@@ -510,8 +510,8 @@ describe('aplicarCambios: hidratar, reiniciar y época', () => {
     const r = await aplicarCambios(A, pagina([cambio('reiniciar', 'users', A)]));
     expect(r.acciones).toEqual([{ tipo: 'snapshot', motivo: 'reiniciar' }]);
     expect(await db.consumos.get([A, ajeno.id])).toBeUndefined();
-    // Lo propio sincronizado lo vuelve a traer el snapshot.
-    expect(await db.consumos.get([A, propio.id])).toBeUndefined();
+    // ADR 0016 (M1): lo propio sincronizado NO se borra; queda por verificar contra el snapshot.
+    expect(await db.consumos.get([A, propio.id])).toMatchObject({ verificar_en_snapshot: true });
     expect(await db.consumos.get([A, pendiente.id])).toBeDefined();
     expect(await db.novedades.count()).toBe(0);
     expect(await db.validaciones.count()).toBe(0);

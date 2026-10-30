@@ -21,6 +21,7 @@ import {
 import { db, tablasDeDatos } from './db';
 import { recalcular } from './derivar';
 import {
+  marcarPerdidosTrasSnapshot,
   reencolarAplicadas,
   reiniciarEstadoSincronizado,
   revocarEntidad,
@@ -175,7 +176,7 @@ async function aplicarUpsert(
       return [];
     }
     case 'order_supervisors': {
-      const { order_id, user_id: supervisorId, asignado_por, activo } = datos;
+      const { order_id, user_id: supervisorId, nombre, asignado_por, activo } = datos;
       if (typeof order_id !== 'string' || typeof supervisorId !== 'string') {
         return null;
       }
@@ -184,6 +185,7 @@ async function aplicarUpsert(
         id,
         order_id,
         supervisor_id: supervisorId,
+        nombre: typeof nombre === 'string' ? nombre : null,
         asignado_por: typeof asignado_por === 'string' ? asignado_por : null,
         activo: activo === undefined ? true : booleano(activo),
       });
@@ -362,6 +364,8 @@ export async function aplicarEntidades(
 /**
  * Cierra un snapshot completo: guarda su cursor (`MAX(seq)` leído antes del estado, ADR 0005 regla
  * 7) y su época. Si la época cambió mientras tanto, reinicia de nuevo y pide otro snapshot.
+ * Solo se llama cuando se aplicaron TODAS las páginas: entonces los consumos propios que siguen
+ * por verificar son los que el servidor ya no tiene (`perdido_en_restauracion`).
  */
 export async function completarSnapshot(
   userId: string,
@@ -374,6 +378,7 @@ export async function completarSnapshot(
       await cambiarEpoca(userId, meta, snapshot.epoca, ahora);
       return [{ tipo: 'snapshot', motivo: 'epoca' }];
     }
+    await marcarPerdidosTrasSnapshot(userId);
     await db.meta.put({
       ...meta,
       cursor: snapshot.cursor,
