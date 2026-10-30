@@ -7,7 +7,9 @@
 //   entrada, truncado a 128 bits y en base64url, con una clave derivada de REFRESH_SECRET.
 // - La cookie NO da acceso: solo elige el cupo de login (el del dispositivo conocido). Una entrada
 //   inválida, vencida o de otro usuario se ignora y el intento cuenta como de un origen desconocido.
-// - Solo se emite tras un login con la contraseña correcta. Logout y refresh nunca la tocan.
+// - Se emite tras un login con la contraseña correcta y tras un refresh exitoso (A8, ADR 0018
+//   enmienda 2: ver `valorTrasRefresh`). El logout, los refresh fallidos y la detección de
+//   reutilización nunca la tocan.
 
 import type { Context } from 'hono';
 import { setCookie } from 'hono/cookie';
@@ -262,6 +264,27 @@ export async function valorRenovado(
     }
   }
   return textos.join(SEPARADOR_ENTRADAS);
+}
+
+/**
+ * Valor de `mp_dispositivo` tras un refresh EXITOSO de `userId` (A8, ADR 0018 enmienda 2). El
+ * refresh demuestra lo mismo que un login correcto previo en este navegador (un refresh token
+ * vigente de esa familia) y no da acceso adicional: la cookie solo elige el cupo de login.
+ * - Si la cookie presentada ya tiene una entrada válida de ese usuario, se conserva TAL CUAL (mismo
+ *   nonce: su cupo `d:` no se reinicia); al reemitir la cookie solo se renueva su Max-Age.
+ * - Si no, se agrega una entrada nueva, igual que en el login correcto.
+ * En los dos casos se arma como en el login (`valorRenovado`): la del usuario primero, después las
+ * válidas de otros usuarios, máximo 16, y las inválidas se descartan.
+ */
+export async function valorTrasRefresh(
+  secreto: string,
+  valores: readonly string[],
+  userId: string,
+  ahoraMs: number,
+): Promise<string> {
+  const conocida = await entradaDelUsuario(secreto, valores, userId, ahoraMs);
+  const propia = conocida ?? (await nuevaEntrada(secreto, userId, ahoraMs));
+  return valorRenovado(secreto, valores, propia, ahoraMs);
 }
 
 export function ponerCookieDispositivo(c: Context, valor: string): void {

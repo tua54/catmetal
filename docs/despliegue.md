@@ -53,6 +53,10 @@ npx wrangler secret list --env staging
 
 - `secret put` crea y despliega una versión nueva del Worker al instante.
 - Rotar `REFRESH_SECRET` cierra todas las sesiones (todos vuelven a iniciar sesión con conexión); rotar `JWT_SECRET` invalida los access tokens vigentes (15 min).
+- **Rotar `REFRESH_SECRET` también hace que todos los dispositivos dejen de ser conocidos** (ADR 0018, enmienda 2): la firma de la cookie `mp_dispositivo` usa una clave derivada de ese secreto. Hasta su próximo login correcto con contraseña, cada tablet cuenta como origen desconocido y queda sujeta al tope global `g` de su cuenta.
+  - **Cuándo**: ante sospecha de filtración del secreto, después de una restauración por incidente de seguridad (§9.2) o como mantenimiento planificado. **Nunca durante un ataque de adivinanza de contraseñas en curso** (muchos `login_cupos.bloqueado` en la auditoría): quitaría a los usuarios legítimos la protección de su dispositivo conocido.
+  - **Cómo mitigarlo**: avise antes a planta (todos inician sesión otra vez, con conexión, y conviene hacerlo de forma escalonada) y tenga a mano el desbloqueo del admin (`PATCH /users/:id` con `desbloquear`) y el de emergencia (§5.1).
+  - Desde la v1.2, un refresh exitoso renueva o emite la cookie, así que una tablet con sesión viva la recupera sola. Tras una rotación eso no ocurre, porque la rotación cierra las sesiones.
 - Nunca guarde los valores en archivos versionados. `SEED_PASSWORD` es solo para desarrollo local.
 
 ## 4. Migraciones de la base

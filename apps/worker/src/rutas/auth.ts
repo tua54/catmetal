@@ -33,6 +33,7 @@ import {
   ponerCookieDispositivo,
   valorRenovado,
   valoresCookieDispositivo,
+  valorTrasRefresh,
 } from '../auth/dispositivo';
 import {
   buscarRefresh,
@@ -312,6 +313,18 @@ async function refrescar(c: Context<AppEnv>): Promise<Response> {
     borrarCookieRefresh(c);
     throw new ErrorApi('SESION_REVOCADA');
   }
+  // A8 (ADR 0018, enmienda 2): solo un refresh exitoso (rotación o reintento legítimo dentro de la
+  // ventana de gracia) llega aquí; los errores y la detección de reutilización lanzan antes. Se
+  // conserva la entrada válida del usuario (mismo nonce) o se agrega una nueva.
+  ponerCookieDispositivo(
+    c,
+    await valorTrasRefresh(
+      c.env.REFRESH_SECRET,
+      valoresCookieDispositivo(c.req.header('Cookie')),
+      emitido.userId,
+      Date.now(),
+    ),
+  );
   return responderSesion(c, emitido, usuario);
 }
 

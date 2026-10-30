@@ -243,15 +243,18 @@ describe('M1 (a): dispositivo conocido', () => {
     );
   });
 
-  it('logout y refresh no borran mp_dispositivo', async () => {
+  it('logout y refresh no borran mp_dispositivo (el refresh exitoso la renueva, A8)', async () => {
     const u = await crearUsuarioConClave();
     const login = await intentar(u.email, u.password);
     const refresh = /mp_refresh=([^;]+)/.exec(login.headers.getSetCookie().join('\n'))?.[1] ?? '';
     const cuerpo = await login.json<RespuestaSesion>();
 
+    // A8 (ADR 0018, enmienda 2): el refresh exitoso pone una entrada válida de su usuario, nunca
+    // la borra (cubierto en detalle por correcciones-a8-refresh-cookie-dispositivo.test.ts).
     const rotado = await refrescar(refresh);
     expect(rotado.status).toBe(200);
-    expect(cookieDispositivo(rotado)).toBeNull();
+    expect(cookieDispositivo(rotado)?.valor.split('.')[1]).toBe(u.id);
+    expect(cookieDispositivo(rotado)?.atributos).not.toContain('Max-Age=0');
 
     // Un refresh inválido borra mp_refresh, pero no mp_dispositivo.
     const invalido = await refrescar('no-existe');
