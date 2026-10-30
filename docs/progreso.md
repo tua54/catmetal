@@ -99,3 +99,8 @@ No se usan `mvc-dotnet-developer`, `angular-developer` ni `orchestrator`.
 - Pendiente menor: que `scripts/seed.mjs` acepte `SEED_PASSWORD` por variable de entorno para retirar `scripts/e2e-precarga-seed.mjs`.
 - 3.8 (servidor) y 3.9 (cliente) corrigieron los hallazgos de la revisión 3.6. Pruebas inestables corregidas sin tocar aserciones (rate limiter y rutas lazy).
 - Cierre: shared 209, worker 1.152, web 374 pruebas; audit sin vulnerabilidades. Evidencia: `docs/evidencia/fase-3.md`.
+
+### Fase 4 — PWA del supervisor (en curso)
+
+- Adelantadas y confirmadas: 4.1, 4.2 (+4.2b), 4.3, 4.4a. En curso: 4.4b (E2E offline con foto y tablet compartida).
+- **Tareas adelantadas de la Fase 5** en paralelo: 5.1–5.2 (pantallas del jefe, `react-developer`) y 5.3 (pantallas de admin, otro `react-developer`), con archivos separados; ambos tocan solo su bloque de `src/rutas/rutas.tsx`.
