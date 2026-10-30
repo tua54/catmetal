@@ -141,7 +141,7 @@ Los cambios de la spec de esta ronda están en `docs/spec.md` §14 (v2.1).
 
 ### B3. Una colisión de PK con una fila ajena debe responder `conflicto` (spec §4)
 
-- **Estado**: PARCIAL: servidor RESUELTO (f8b5c1b); falta que el cliente lo muestre como conflicto. Prueba: `apps/worker/test/correcciones-b3-colision-pk.test.ts`.
+- **Estado**: RESUELTO: servidor (f8b5c1b) y cliente (cc367e4). Pruebas: `apps/worker/test/correcciones-b3-colision-pk.test.ts` y `apps/web/src/sync/correcciones-b3-colision-pk.test.ts`.
 
 - **Dónde**: `apps/worker/src/dominio/errores-d1.ts:226` y `apps/worker/src/sync/push.ts:456` (hoy responde `rechazada` con `ID_DUPLICADO`).
 - **Aceptación**:
@@ -157,7 +157,7 @@ Los cambios de la spec de esta ronda están en `docs/spec.md` §14 (v2.1).
 
 ### B5. Versión mínima del cliente
 
-- **Estado**: PARCIAL: servidor RESUELTO (2a81cf2), ADR 0026; falta el cliente.
+- **Estado**: RESUELTO: servidor (2a81cf2) y cliente (68dc60d). ADR 0026. Pruebas: `apps/worker/test/correcciones-b5-version-cliente.test.ts`, `apps/web/src/sync/correcciones-b5-version-cliente.test.ts` y `apps/web/src/pwa/correcciones-b5-actualizacion.test.tsx`.
 
 - **Dónde**: `apps/web/src/pwa/AvisoActualizacion.tsx` y `pwa/registro.ts`.
 - **Aceptación**:
@@ -190,6 +190,8 @@ Los cambios de la spec de esta ronda están en `docs/spec.md` §14 (v2.1).
 
 ### B9. Las fotos bloqueadas se borran al cerrar sesión
 
+- **Estado**: RESUELTO (8045d1f). Pruebas: `apps/web/src/datos/correcciones-b9-fotos-bloqueadas.test.ts` y `apps/web/src/components/layout/correcciones-b9-cierre.test.tsx`.
+
 - **Dónde**: `apps/web/src/datos/outbox.ts:1101-1106`, `1162-1168` y `1283-1298`.
 - **Aceptación**:
   - `puedeBorrarDatosDeUsuario` cuenta las fotos `bloqueada` que nunca llegaron al servidor, y la UI avisa.
@@ -197,6 +199,8 @@ Los cambios de la spec de esta ronda están en `docs/spec.md` §14 (v2.1).
   - Hay una prueba.
 
 ### B10. El candado alternativo vence sin renovarse
+
+- **Estado**: RESUELTO (79f0999). Prueba: `apps/web/src/auth/correcciones-b10-candado.test.ts`.
 
 - **Dónde**: `apps/web/src/auth/candado.ts:33` y `:55-77`.
 - **Aceptación**:

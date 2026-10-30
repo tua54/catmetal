@@ -136,4 +136,17 @@ Revisión de solo lectura del mismo revisor, sobre los archivos del árbol de tr
 
 ## Estado de los hallazgos (orquestador)
 
-Se completa al corregir.
+| Id | Estado |
+|---|---|
+| S-01 | ACEPTADO como riesgo residual: se mantiene "todo bloqueo se audita" (spec §5 d), con un volumen acotado por `g` (≤ 5 filas por cuenta y ventana). Lo fija una prueba en `correcciones-m1-seguridad.test.ts` (53487c8). La alerta de crecimiento queda como pendiente humano. Enmienda de la ADR 0018. |
+| S-02 | RESUELTO (53487c8): los fallos con la cookie de dispositivo cuentan en `g` sin que `g` los condicione. |
+| S-03 | RESUELTO (2c29a5d): purga de lo ajeno sin pendientes al perder visibilidad. ADR 0027. |
+| S-04 | DOCUMENTADO (5ad5b39): `docs/despliegue.md` §9.2, paso 12 (reaplicar acciones de seguridad y rotar secretos). |
+| S-05 | RESUELTO (53487c8): claves derivadas con HKDF. |
+| S-06 | RESUELTO (53487c8): `login_cupos` fuera del backup. |
+| S-07 | DOCUMENTADO (5ad5b39): `docs/despliegue.md` §5.1. |
+| S-08 | PENDIENTE HUMANO (anterior a la v1.1): `docs/pendientes-humanos.md`. |
+| S-09 | RESUELTO (d14566f): bloqueo con desbloqueo solo en línea tras una revocación. ADR 0027. |
+| S-10 | RESUELTO (d4b6d21): texto de la ADR 0023 corregido. |
+| S-11 | ACEPTADO (informativo). |
+| S-12 | RESUELTO (68dc60d): el cliente envía `X-Version-Cliente`. La advertencia sigue en `docs/despliegue.md`. |
