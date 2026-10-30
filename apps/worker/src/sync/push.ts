@@ -26,6 +26,10 @@
 //      reenvía): errores que no son de negocio (red, sobrecarga de D1, desconocidos),
 //      `ERROR_INTERNO`, y la sentencia principal que no aplicó en ninguno de los `MAX_INTENTOS`
 //      (contención entre pushes concurrentes: no es un rechazo del dato de planta).
+// 7. Presupuesto de consultas (B12, `./presupuesto`): el lote usa una D1 que cuenta cada sentencia.
+//    Antes de empezar una mutación, de cada intento y de clasificar un error se exige que quede al
+//    menos `COSTO_MAXIMO_PASO`; si no, el lote se corta ahí, igual que con un error transitorio (sin
+//    nada a medias: cada escritura es un batch atómico). Así nunca llega a las 1000 de D1.
 
 import {
   type CodigoError,
@@ -59,6 +63,7 @@ import { ejecutarPlanConResultados, type PlanDeEscritura } from '../dominio/plan
 import { aprobarConsumo, rechazarConsumo } from '../dominio/validaciones';
 import { ErrorApi } from '../errores';
 import { registrar } from '../log';
+import { ErrorPresupuestoAgotado, PresupuestoConsultas } from './presupuesto';
 
 /** Parte de un resultado que se guarda en `sync_mutations.respuesta_json` (sin `indice`). */
 interface RespuestaGuardada {
@@ -305,10 +310,15 @@ function planDe(ctx: Contexto, m: Mutacion): Promise<PlanDeEscritura<unknown>> {
 /**
  * Aplica la mutación con el comando de dominio y la fila `aplicada` de `sync_mutations` en el
  * mismo batch. Reintenta (máx. `MAX_INTENTOS`) si la principal no aplicó por una carrera; si nunca
- * aplicó, es contención: `ErrorTransitorio`.
+ * aplicó, es contención: `ErrorTransitorio`. Cada intento exige su presupuesto (B12).
  */
-async function aplicar(sesion: SesionPush, m: Mutacion): Promise<RespuestaGuardada> {
+async function aplicar(
+  sesion: SesionPush,
+  m: Mutacion,
+  presupuesto: PresupuestoConsultas,
+): Promise<RespuestaGuardada> {
   for (let intento = 1; ; intento += 1) {
+    presupuesto.exigir();
     const ctx: Contexto = {
       db: sesion.db,
       actor: sesion.actor,
@@ -506,6 +516,8 @@ async function clasificar(
 interface EstadoLote {
   /** Consumos cuya creación no se aplicó en este lote (sus dependientes se rechazan). */
   creacionesNoAplicadas: Set<string>;
+  /** Consultas a D1 del lote (B12): cuenta las de `sesion.db`. */
+  presupuesto: PresupuestoConsultas;
 }
 
 async function procesar(
@@ -514,6 +526,7 @@ async function procesar(
   mutationId: string,
   lote: EstadoLote,
 ): Promise<RespuestaGuardada> {
+  lote.presupuesto.exigir();
   const guardada = await leerGuardada(sesion.db, mutationId);
   if (guardada !== null) {
     return respuestaDeGuardada(sesion, guardada);
@@ -541,11 +554,13 @@ async function procesar(
     return guardarRespuesta(sesion, mutationId, mutacion, rechazo('DEPENDENCIA_RECHAZADA'));
   }
   try {
-    return await aplicar(sesion, m);
+    return await aplicar(sesion, m, lote.presupuesto);
   } catch (error) {
-    if (error instanceof ErrorTransitorio) {
+    if (error instanceof ErrorTransitorio || error instanceof ErrorPresupuestoAgotado) {
       throw error;
     }
+    // Nada quedó escrito (la principal no aplicó o el batch se revirtió): se puede cortar aquí.
+    lote.presupuesto.exigir();
     // Reintento concurrente: otra petición pudo escribir esta mutación mientras tanto.
     const escrita = await leerGuardada(sesion.db, mutationId);
     if (escrita !== null) {
@@ -560,14 +575,17 @@ async function procesar(
 
 /**
  * Procesa el lote en orden. Devuelve un resultado por mutación procesada; si un error transitorio
- * detiene el lote, las restantes no tienen resultado (siguen pendientes en el cliente).
+ * o el presupuesto de consultas (B12) detiene el lote, las restantes no tienen resultado (siguen
+ * pendientes en el cliente, que las reenvía).
  */
 export async function procesarLote(
-  sesion: SesionPush,
+  sesionPush: SesionPush,
   mutaciones: readonly unknown[],
 ): Promise<ResultadoMutacion[]> {
   const resultados: ResultadoMutacion[] = [];
-  const lote: EstadoLote = { creacionesNoAplicadas: new Set() };
+  const presupuesto = new PresupuestoConsultas();
+  const sesion: SesionPush = { ...sesionPush, db: presupuesto.envolver(sesionPush.db) };
+  const lote: EstadoLote = { creacionesNoAplicadas: new Set(), presupuesto };
   for (const [indice, mutacion] of mutaciones.entries()) {
     const mutationId = leerMutationId(mutacion);
     if (mutationId === null) {
@@ -585,6 +603,15 @@ export async function procesarLote(
     try {
       respuesta = await procesar(sesion, mutacion, mutationId, lote);
     } catch (error) {
+      if (error instanceof ErrorPresupuestoAgotado) {
+        registrar('aviso', 'sync_push_presupuesto_agotado', {
+          indice,
+          mutation_id: mutationId,
+          consultas: error.usadas,
+          sin_resultado: mutaciones.length - indice,
+        });
+        break;
+      }
       const causa = error instanceof ErrorTransitorio ? error.causa : error;
       registrar('error', 'sync_push_transitorio', {
         indice,

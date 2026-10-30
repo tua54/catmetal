@@ -246,9 +246,11 @@ function marcadores(sql: string): number {
 
 const METODOS_EJECUCION = ['first', 'all', 'run', 'raw'] as const;
 
-/** `env.DB` envuelto: cuenta y delega cada llamada en la D1 local real. */
-export function dbConConteo(): { db: D1Database; conteo: Conteo } {
-  const real = env.DB;
+/**
+ * `env.DB` (o `real`, otro envoltorio que delega en ella) envuelto: cuenta y delega cada llamada
+ * en la D1 local real.
+ */
+export function dbConConteo(real: D1Database = env.DB): { db: D1Database; conteo: Conteo } {
   const conteo: Conteo = {
     preparadas: 0,
     llamadas: 0,
@@ -337,7 +339,9 @@ export function dbConInterferencia(marca: string, interferir: () => Promise<void
   const instrumentar = (sentencia: D1PreparedStatement, sql: string): D1PreparedStatement => {
     sqlDe.set(sentencia, sql);
     const bind = sentencia.bind.bind(sentencia);
+    // Redefinible: `dbConConteo(dbConInterferencia(…))` vuelve a envolver la misma sentencia.
     Object.defineProperty(sentencia, 'bind', {
+      configurable: true,
       value: (...valores: unknown[]) => instrumentar(bind(...valores), sql),
     });
     return sentencia;
