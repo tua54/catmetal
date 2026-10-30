@@ -18,6 +18,14 @@ Ninguno. `.claude/` quedó instalado y versionado (C1, `5e5cdcf`); el ajuste de 
    git push -u origin main build/v1 fix/auditoria-v1 --follow-tags
    ```
 
+   **Correcciones v1.2**: tras auditar `git log --oneline correcciones-v1.1..fix/auditoria-v1` y `docs/INFORME-CORRECCIONES-V1.2.md`, el push de la rama y del tag anotado `correcciones-v1.2` actualiza el PR #1 y vuelve a correr su CI:
+
+   ```
+   git push origin fix/auditoria-v1 --follow-tags
+   ```
+
+   En el CI del PR conviene revisar que la prueba de B4 y las nuevas de A1 pasen (fallaban al azar antes de A1), y que los jobs corran en `ubuntu-24.04` (A10).
+
 ## Verificaciones en staging (cuando exista)
 
 4. **Prueba de humo del clasificador de errores de D1** (revisión de la Fase 3, B3). Con la sesión de un supervisor asignado:

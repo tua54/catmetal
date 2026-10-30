@@ -7,11 +7,11 @@
 - Rama de trabajo: `fix/auditoria-v1`, desde `build/v1` (línea base en `main`: `bfa8975`).
 - **Fases 0 a 6 cerradas** (tags `fase-0` a `fase-6`). Sesión v1 terminada: ver `docs/INFORME-FINAL.md`.
 - **Sesión de correcciones v1.1 terminada** en la rama `fix/auditoria-v1`. Ver `docs/INFORME-CORRECCIONES.md`.
-- **Sesión de correcciones v1.2 en curso** en `fix/auditoria-v1` (alcance: `docs/correcciones-v1.2.md`, plan: `docs/plan-correcciones-v1.2.md`).
+- **Sesión de correcciones v1.2 terminada** en `fix/auditoria-v1`, tag local `correcciones-v1.2`. Ver `docs/INFORME-CORRECCIONES-V1.2.md`.
 
 ## Siguiente paso
 
-Sesión v1.2: todos los ítems resueltos (A1–A11, N1–N3) y revisiones guardadas. Gates finales, 20 repeticiones y cierre de procesos hechos (`docs/evidencia/correcciones-v1.2.md`). Falta: `docs/INFORME-CORRECCIONES-V1.2.md`, commit final y tag `correcciones-v1.2` (sin push).
+Ninguno en esta sesión. El equipo revisa `docs/INFORME-CORRECCIONES-V1.2.md`, ejecuta `docs/pendientes-humanos.md` y hace el push de `fix/auditoria-v1` con el tag `correcciones-v1.2` cuando lo apruebe (actualiza el PR #1).
 
 ## Sesión de correcciones v1.2
 
