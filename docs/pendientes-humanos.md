@@ -4,16 +4,7 @@ Acciones que el orquestador no puede o no debe ejecutar. Cada una lleva el coman
 
 ## Configuración de Claude Code
 
-1. **Instalar `.claude/`** (paso 0 de `docs/ARRANQUE.md`, no se había hecho al lanzar la sesión). Los hooks `guardia.mjs` y `no-parar.mjs` no estuvieron activos durante la sesión; el orquestador cumplió sus reglas de forma voluntaria. En PowerShell, desde `C:\catmetal`:
-
-   ```powershell
-   New-Item -ItemType Directory -Force .claude\hooks | Out-Null
-   Move-Item _mover-a-claude\settings.json .claude\settings.json -Force
-   Move-Item _mover-a-claude\hooks\*.mjs .claude\hooks\ -Force
-   Remove-Item _mover-a-claude -Recurse -Force
-   ```
-
-   Después, decidir si se versiona `.claude/` y se elimina `_mover-a-claude/` del repo con un commit.
+Ninguno. `.claude/` quedó instalado y versionado (C1, `5e5cdcf`); el ajuste de `guardia.mjs` para la sesión principal con agente global lo hizo el equipo.
 
 ## Identidad visual
 
@@ -24,7 +15,7 @@ Acciones que el orquestador no puede o no debe ejecutar. Cada una lleva el coman
 3. Push de la rama y los tags cuando el equipo apruebe:
 
    ```
-   git push -u origin main build/v1 --follow-tags
+   git push -u origin main build/v1 fix/auditoria-v1 --follow-tags
    ```
 
 ## Verificaciones en staging (cuando exista)

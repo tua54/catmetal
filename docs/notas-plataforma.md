@@ -74,3 +74,7 @@ Fuente: informe de `documentation-researcher` (URLs en cada punto).
 - `lib.webworker` choca con `lib.dom`: el Service Worker tiene su propio `tsconfig` (`apps/web/src/pwa/sw/tsconfig.json`).
 - Los comentarios XML de un SVG no pueden contener `--`: sharp/librsvg falla al rasterizarlo.
 - `browser-image-compression` descarga por defecto su código de Web Worker desde `cdn.jsdelivr.net`: rompe la CSP `'self'` y no funciona sin conexión. Usar siempre `useWebWorker: false`.
+
+## Hooks de Claude Code (sesión de correcciones v1.1)
+
+- Si la sesión principal corre con un agente (`--agent` o `"agent"` en `settings.json`), la entrada de los hooks trae `agent_type` también en la sesión principal (https://code.claude.com/docs/en/hooks, campos comunes). Para distinguir un subagente hay que usar `agent_id`, no `agent_type`. Ver `docs/BLOQUEO.md`.

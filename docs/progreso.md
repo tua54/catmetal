@@ -4,12 +4,39 @@
 
 ## Estado actual
 
-- Rama de trabajo: `build/v1` (línea base en `main`: `bfa8975`).
-- **Fases 0 a 6 cerradas** (tags `fase-0` a `fase-6`). Sesión terminada: ver `docs/INFORME-FINAL.md`.
+- Rama de trabajo: `fix/auditoria-v1`, desde `build/v1` (línea base en `main`: `bfa8975`).
+- **Fases 0 a 6 cerradas** (tags `fase-0` a `fase-6`). Sesión v1 terminada: ver `docs/INFORME-FINAL.md`.
+- **Sesión de correcciones v1.1 en curso** en la rama `fix/auditoria-v1`. Plan: `docs/plan-correcciones.md`.
 
 ## Siguiente paso
 
-Ninguno en esta sesión. El equipo humano revisa `docs/INFORME-FINAL.md`, ejecuta `docs/pendientes-humanos.md` y hace el push cuando lo apruebe.
+C2 (Node 24), luego la ola 1 de P1 (M1, M3→M4, M5→M6) según `docs/plan-correcciones.md`.
+
+## Sesión de correcciones v1.1
+
+### Mapeo de subagentes
+
+Verificado el 2026-10-30 en la lista de tipos de agente de la sesión. Todos los del mapeo de `CLAUDE.md` están disponibles; no se creó, editó ni copió ninguno.
+
+| Rol | Subagente | Disponible | Notas |
+|---|---|---|---|
+| Backend (Worker, Hono, D1, auth, sync servidor) | `general-purpose` | Sí | Brief con el rol completo y el bloque de stack. |
+| Revisión de esquema SQL | `database-specialist` | Sí | Modo revisión, sin modificar archivos. Bloque de stack. |
+| Frontend y sync del cliente | `react-developer` | Sí | Brief extra detallado para la sync. |
+| Sistema visual | `ui-ux-designer` | Sí | |
+| QA | `test-engineer` | Sí | Bloque de stack. |
+| Seguridad | `security-reviewer` | Sí | Solo lectura. |
+| Segunda opinión de arquitectura | `software-architect` | Sí | Solo lectura. M1 y M4. |
+| Documentación | `documentation-researcher` / `deep-researcher` | Sí | Solo lectura. |
+
+No se usan `mvc-dotnet-developer`, `angular-developer` ni `orchestrator`.
+
+### Registro cronológico
+
+- 2026-10-30. Se verificó el estado: rama `build/v1`, cambios del equipo sin confirmar (`CLAUDE.md`, `docs/spec.md`, `_mover-a-claude/` borrado, `.claude/` nuevo, `docs/correcciones-v1.1.md`, `docs/ARRANQUE-CORRECCIONES.md`). `.claude/` está instalado y `guardia.mjs` está activo: bloquea el push con exit 2.
+- **Bloqueo**: `guardia.mjs` trata a la sesión principal como un subagente, porque el `"agent": "orchestrator"` global hace que llegue `agent_type`. Por eso bloquea `git switch`, `add`, `commit` y `tag`. No se rodeó. Ver `docs/BLOQUEO.md`.
+- Se escribió `docs/plan-correcciones.md`.
+- El equipo corrigió `guardia.mjs` (solo `agent_id`) y borró `docs/BLOQUEO.md`. Se creó `fix/auditoria-v1`. C1 quedó en `5e5cdcf`.
 
 ## Mapeo de subagentes
 

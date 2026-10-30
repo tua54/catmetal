@@ -19,6 +19,8 @@ Los cambios de la spec de esta ronda están en `docs/spec.md` §14 (v2.1).
 
 ### C1. Instalar la configuración de Claude Code en el repo
 
+- **Estado**: RESUELTO (5e5cdcf). Evidencia en `docs/evidencia/correcciones.md`.
+
 - **Situación**: los hooks no estuvieron activos en la sesión anterior porque `_mover-a-claude/` nunca se movió a `.claude/`, y esa carpeta quedó versionada en el commit de línea base.
 - **Quién hace qué**: el equipo humano mueve la carpeta **antes** de lanzar esta sesión (`docs/ARRANQUE-CORRECCIONES.md`). Claude Code solo registra el cambio en git: `git add -A .claude _mover-a-claude`.
 - **Aceptación**:
