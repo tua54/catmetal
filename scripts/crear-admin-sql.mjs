@@ -19,6 +19,8 @@ import { pbkdf2Sync, randomBytes } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+// Misma regla que el Worker (passwordSchema): Node 22.18+/24 importa el TypeScript de shared directamente.
+import { esCaracterRepetido, esContrasenaComun } from '../packages/shared/src/contrasenas.ts';
 
 const ITERACIONES = 100_000;
 const LONGITUD_MINIMA_CONTRASENA = 10;
@@ -78,6 +80,9 @@ if (!nombre || nombre.length > 120) fallar('indique un --nombre (máximo 120 car
 const contrasena = process.env.ADMIN_PASSWORD;
 if (!contrasena || contrasena.length < LONGITUD_MINIMA_CONTRASENA) {
   fallar(`defina ADMIN_PASSWORD con al menos ${LONGITUD_MINIMA_CONTRASENA} caracteres.`);
+}
+if (esCaracterRepetido(contrasena) || esContrasenaComun(contrasena)) {
+  fallar('la contraseña es demasiado común o trivial. Elija otra.');
 }
 
 const ahora = new Date().toISOString();
