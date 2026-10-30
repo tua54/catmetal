@@ -303,7 +303,7 @@ triggersDeMigraciones(archivos: { nombre: string; contenido: string }[], hasta: 
 
 Los triggers solo se borran **dentro de este archivo**, sobre una base recién migrada y fuera de servicio (lo comprueba la guardia), y se recrean en el mismo archivo. V8 lo comprueba después.
 
-- Ningún código, ninguna migración y ninguna base en servicio borra triggers: la regla 5 se mantiene.
+- Ningún código ni ninguna base en servicio borra triggers para **desactivarlos**: la regla 5 se mantiene. La única migración que hace `DROP TRIGGER` es `migrations/0008_settings_insert_validos.sql` (B7): borra `settings_valores_validos` y lo recrea **en la misma migración**, con un criterio más estricto (agrega el tope de 100 y se suma `settings_insercion_valida` para los INSERT). Es un reemplazo que solo endurece, no deja la tabla sin protección al terminar la migración, y la prueba `correcciones-b7-settings-insert.test.ts` con la lista de `sqlite_master` de `integridad-esquema.test.ts` lo verifica. Corregido en v1.2 (A9): la frase original decía que ninguna migración borraba triggers.
 - Si la ejecución falla a mitad, se descarta la base y se crea otra.
 - Mientras tanto siguen activos los CHECK, los NOT NULL, los UNIQUE y las FK. Las invariantes entre tablas se comprueban como invariantes de estado (punto 6).
 

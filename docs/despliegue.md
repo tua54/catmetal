@@ -136,7 +136,7 @@ npx wrangler deploy --env staging
 - Workers Logs habilitado con `invocation_logs: false` (las trazas automáticas podrían incluir cabeceras sensibles); quedan los logs estructurados del Worker (`console.log(JSON.stringify(...))`) sin datos personales ni secretos. Retención de Workers Logs: 7 días (Paid).
 - Alertas a revisar en los logs: `backup_incompleto_del_dia`, `backup_fallido`, `backup_tabla_incompleta`, `backup_parcial`, `secretos_invalidos`, `sync_mutation_no_registrada`, `sync_push_transitorio`, `error_no_controlado`.
   - `backup_tabla_incompleta` (con `tabla`, `intentos` y `motivo`): una tabla falló `MAX_INTENTOS_TABLA` = 3 veces seguidas sin avanzar y el backup siguió con las demás (ADR 0020).
-  - `backup_parcial` (con `tablas_incompletas`, separadas por coma): el backup del día terminó, pero sin esas tablas. Solo es restaurable si las incompletas son `sync_mutations`, `login_cupos` o `refresh_tokens` (sección 9.2). Investigue el `motivo` el mismo día.
+  - `backup_parcial` (con `tablas_incompletas`, separadas por coma): el backup del día terminó, pero sin esas tablas. Solo es restaurable si las incompletas son `sync_mutations` o `refresh_tokens` (sección 9.2). `login_cupos` nunca aparece: no se exporta (S-06). Investigue el `motivo` el mismo día.
   - `backup_no_restaurable` (con `tablas`): un backup `parcial` con alguna tabla incompleta que la restauración no admite. Ese día solo se puede restaurar con Time Travel. Es urgente (revisión de esquema R-03).
   - `backup_sin_octet_length` (aviso): D1 no tiene `octet_length`. El backup midió las filas con `length(CAST(col AS BLOB))` y siguió normalmente; anótelo en `docs/notas-plataforma.md`.
 
@@ -178,7 +178,7 @@ npx wrangler d1 execute mp-prod --env production --remote --command "UPDATE sett
 
 Procedimiento (ADR 0021, que reemplaza el de la revisión de esquema H9). La base restaurada queda **exactamente como estaba en el corte** del backup (`manifest.corte`): lo que se escribió durante la ventana del backup se pierde en el servidor, igual que todo lo posterior. Las tablets lo reenvían tras el cambio de época, y lo hecho por REST queda listado en el informe para rehacerlo.
 
-1. **Elija la fecha.** El `manifest.json` debe tener `formato: 2` y `estado: 'completo'`, o `estado: 'parcial'` con solo `sync_mutations`, `login_cupos` o `refresh_tokens` incompletas. Sin manifest, el backup está sin terminar. Los backups de `formato: 1` no se restauran con el script.
+1. **Elija la fecha.** El `manifest.json` debe tener `formato: 2` y `estado: 'completo'`, o `estado: 'parcial'` con solo `sync_mutations` o `refresh_tokens` incompletas (`INCOMPLETAS_ADMITIDAS` de `scripts/restauracion-nucleo.mjs`). `login_cupos` no se exporta desde S-06, así que nunca figura entre las incompletas. Sin manifest, el backup está sin terminar. Los backups de `formato: 1` no se restauran con el script.
 2. **Descargue** el manifest y cada archivo que lista en una carpeta **fuera del repositorio**, porque el backup contiene hashes y datos personales (F6-03). Por ejemplo, `$env:TEMP\catmetal-restaurar\<fecha>`; bórrela al terminar. Son comandos remotos: los ejecuta el equipo humano.
    ```powershell
    New-Item -ItemType Directory -Force "$env:TEMP\catmetal-restaurar\2026-11-02" | Out-Null
