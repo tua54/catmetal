@@ -87,7 +87,7 @@ Este documento es **el alcance de la sesión v1.2**. Cada ítem trae:
 
 ### A6. Un snapshot reanudado vuelve a meter datos ajenos que la purga de S-03 ya había borrado
 
-- **Estado**: PARCIAL: servidor RESUELTO (`77f0612`, ADR 0029); cliente en curso.
+- **Estado**: RESUELTO: servidor `77f0612`, cliente `27de118`. ADR 0029.
 
 - **Dónde**: `apps/web/src/auth/sesion.ts:531` (`purgarAjenosSinVisibilidad`), `apps/web/src/datos/snapshot-temporal.ts:272` y `apps/worker/src/sync/snapshot.ts:195`.
 - **Aceptación**:
