@@ -31,6 +31,8 @@ export interface DatosConsumo {
   registroTardio?: boolean;
   corrigeA?: string | null;
   clientAt?: string;
+  /** Alerta de reloj de la petición (ADR 0019); ya no se deduce de `clientAt`. */
+  alertaReloj?: boolean;
 }
 
 export type FilaConsumo = Record<string, string | number | null>;
@@ -70,6 +72,7 @@ export async function registrarConsumo(datos: DatosConsumo): Promise<FilaConsumo
       despues: completa,
       client_at: String(fila.client_created_at),
       server_at: ahora,
+      alerta_reloj: datos.alertaReloj === true,
     }),
   ]);
   return completa;

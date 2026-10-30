@@ -71,6 +71,11 @@ export interface SesionPush {
   db: D1Database;
   actor: Actor;
   deviceId: string;
+  /**
+   * Alerta de reloj de la petición (ADR 0019): `enviado_at` frente a la hora de recepción, calculada
+   * una sola vez. La llevan todas las filas de auditoría de todas las mutaciones del lote.
+   */
+  alertaReloj: boolean;
 }
 
 /** Error que detiene el lote: la mutación y las siguientes quedan pendientes en el cliente. */
@@ -265,7 +270,7 @@ async function aplicar(sesion: SesionPush, m: Mutacion): Promise<RespuestaGuarda
       actor: sesion.actor,
       deviceId: sesion.deviceId,
       ahora: ahoraIso(),
-      clientAt: m.client_created_at,
+      alertaReloj: sesion.alertaReloj,
     };
     const plan = await planDe(ctx, m);
     const respuesta: RespuestaGuardada = {

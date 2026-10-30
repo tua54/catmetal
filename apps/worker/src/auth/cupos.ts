@@ -188,6 +188,10 @@ function bloqueadaPorReserva(userId: string, origen: string, reservaId: string):
   };
 }
 
+/**
+ * Auditoría del bloqueo de un cupo. Es una acción del SISTEMA (sin actor ni dispositivo) que
+ * dispara un intento anónimo: no lleva alerta de reloj (ADR 0019 la mide por dispositivo), queda 0.
+ */
 function auditoriaBloqueo(
   db: D1Database,
   tipo: TipoCupo,
@@ -331,6 +335,8 @@ export async function reservarOrigenDesconocido(
 interface Actor {
   userId: string;
   deviceId: string | null;
+  /** Alerta de reloj de la petición del actor (ADR 0019); ausente → 0. */
+  alertaReloj?: boolean;
 }
 
 function auditoriaDesbloqueo(
@@ -351,6 +357,7 @@ function auditoriaDesbloqueo(
       device_id: actor.deviceId,
       despues: { user_id: userId, tipo, fallos: 0, bloqueado_hasta: null },
       server_at: ahora,
+      alerta_reloj: actor.alertaReloj === true,
     },
     condicion,
   );

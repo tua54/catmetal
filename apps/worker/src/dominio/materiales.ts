@@ -98,6 +98,7 @@ export function crearMaterial(ctx: Contexto, entrada: CrearMaterial): PlanDeEscr
         device_id: ctx.deviceId,
         despues: { ...fila },
         server_at: ctx.ahora,
+        alerta_reloj: ctx.alertaReloj,
       }),
     ],
     principal: { indice: 0, cambiosEsperados: 1 },
@@ -151,6 +152,7 @@ export async function editarMaterial(
           antes: { ...actual },
           despues: { ...nuevo },
           server_at: ctx.ahora,
+          alerta_reloj: ctx.alertaReloj,
         },
         {
           sql: 'EXISTS (SELECT 1 FROM materials WHERE id = ? AND updated_at = ? AND nombre = ? AND costo_unitario_cop = ? AND activo = ?)',

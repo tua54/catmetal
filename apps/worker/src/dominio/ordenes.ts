@@ -208,6 +208,7 @@ function auditarOrden(
       antes: antes === null ? null : { ...antes },
       despues: { ...despues },
       server_at: ctx.ahora,
+      alerta_reloj: ctx.alertaReloj,
     },
     aplicada,
   );
@@ -340,6 +341,7 @@ export async function crearOrden(
           device_id: ctx.deviceId,
           despues: { ...planeado, created_at: ctx.ahora, updated_at: ctx.ahora },
           server_at: ctx.ahora,
+          alerta_reloj: ctx.alertaReloj,
         },
         aplicada,
       ),

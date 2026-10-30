@@ -5,6 +5,7 @@ import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { escenarioOrden } from './fase2-consumos-helpers';
 import {
+  api,
   esperarError,
   nuevaOrden,
   nuevoMaterial,
@@ -202,7 +203,30 @@ describe('reglas de conflicto (§6)', () => {
     expect(fila?.requiere_novedad).toBe(1);
   });
 
-  it('marca alerta_reloj en la auditoría si el reloj del dispositivo difiere más de 10 min', async () => {
+  // M2 (ADR 0019): la alerta compara la hora del dispositivo AL ENVIAR (`enviado_at`), no
+  // `client_created_at`. Antes esta prueba esperaba 1 por un registro de hace 1 h sin hora de envío.
+  it('marca alerta_reloj si el reloj del dispositivo al enviar difiere más de 10 min', async () => {
+    const { orden, material } = await escenarioOrden(jefe, supervisor);
+    const hace1h = new Date(Date.now() - 3_600_000).toISOString();
+    const m = crearConsumo(orden, material, { client_created_at: hace1h });
+    const respuesta = await api('/sync/push', {
+      token: supervisor.token,
+      body: {
+        user_id: supervisor.usuario.id,
+        enviado_at: new Date(Date.now() - 3_600_000).toISOString(),
+        mutaciones: [m],
+      },
+    });
+    expect(respuesta.status, await respuesta.clone().text()).toBe(200);
+    const auditoria = await env.DB.prepare(
+      "SELECT alerta_reloj, client_at FROM audit_log WHERE entidad = 'consumptions' AND entidad_id = ?",
+    )
+      .bind(m.payload.id)
+      .first<{ alerta_reloj: number; client_at: string }>();
+    expect(auditoria).toEqual({ alerta_reloj: 1, client_at: hace1h });
+  });
+
+  it('no marca alerta_reloj por un registro offline viejo si no llega la hora de envío', async () => {
     const { orden, material } = await escenarioOrden(jefe, supervisor);
     const hace1h = new Date(Date.now() - 3_600_000).toISOString();
     const m = crearConsumo(orden, material, { client_created_at: hace1h });
@@ -212,7 +236,7 @@ describe('reglas de conflicto (§6)', () => {
     )
       .bind(m.payload.id)
       .first<{ alerta_reloj: number; client_at: string }>();
-    expect(auditoria).toEqual({ alerta_reloj: 1, client_at: hace1h });
+    expect(auditoria).toEqual({ alerta_reloj: 0, client_at: hace1h });
   });
 });
 

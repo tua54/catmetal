@@ -365,6 +365,7 @@ export async function registrarConsumo(
           despues: { ...fila },
           client_at: entrada.client_created_at,
           server_at: ctx.ahora,
+          alerta_reloj: ctx.alertaReloj,
         },
         {
           sql: 'EXISTS (SELECT 1 FROM consumptions WHERE id = ? AND registrado_por = ? AND server_received_at = ?)',
@@ -490,6 +491,7 @@ export async function editarConsumo(
           despues: { ...nuevo },
           client_at: entrada.client_created_at,
           server_at: ctx.ahora,
+          alerta_reloj: ctx.alertaReloj,
         },
         {
           sql: 'EXISTS (SELECT 1 FROM consumptions WHERE id = ? AND version = ? AND updated_at = ?)',

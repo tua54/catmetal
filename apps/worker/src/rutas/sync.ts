@@ -2,8 +2,14 @@
 // Todas exigen sesión (cualquier rol): los permisos de cada mutación los revalida su comando de
 // dominio, y lo que devuelven el pull y el snapshot lo filtran las reglas de visibilidad.
 
-import { snapshotQuerySchema, syncPullQuerySchema, syncPushRequestSchema } from '@catmetal/shared';
+import {
+  ahoraIso,
+  snapshotQuerySchema,
+  syncPullQuerySchema,
+  syncPushRequestSchema,
+} from '@catmetal/shared';
 import { Hono } from 'hono';
+import { calcularAlertaReloj } from '../auditoria/auditar';
 import { contextoDesdeHono } from '../dominio/contexto';
 import { responderError } from '../errores';
 import { autenticar } from '../middleware/autenticar';
@@ -19,7 +25,9 @@ export function crearRutasSync(): Hono<AppEnv> {
   const rutas = new Hono<AppEnv>();
 
   rutas.post('/push', autenticar, validar('json', syncPushRequestSchema), async (c) => {
-    const { user_id: autor, epoca, mutaciones } = c.req.valid('json');
+    // Hora de recepción (ADR 0019): fija para toda la petición, antes de procesar el lote.
+    const recibidoAt = ahoraIso();
+    const { user_id: autor, epoca, enviado_at: enviadoAt, mutaciones } = c.req.valid('json');
     const s = c.get('sesion');
     // Tablet compartida (ADR 0008 punto 8): nunca se registra lo de A con la sesión de B.
     if (autor !== s.userId) {
@@ -34,6 +42,8 @@ export function crearRutasSync(): Hono<AppEnv> {
       db: c.env.DB,
       actor: { id: s.userId, rol: s.rol },
       deviceId: s.deviceId,
+      // Una sola alerta para todo el lote; sin `enviado_at` (cliente viejo o inválido) → false.
+      alertaReloj: calcularAlertaReloj(enviadoAt, recibidoAt),
     };
     const resultados = await procesarLote(sesion, mutaciones);
     try {

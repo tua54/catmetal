@@ -18,6 +18,7 @@ import { sentenciasReinicioAdmin } from '../auth/cupos';
 import { sentenciaRevocarTodas } from '../auth/sesiones';
 import { ErrorApi } from '../errores';
 import { autenticar, requierePermiso } from '../middleware/autenticar';
+import { alertaRelojDePeticion } from '../middleware/hora-dispositivo';
 import type { AppEnv } from '../tipos';
 import { validar } from '../validacion';
 
@@ -118,6 +119,7 @@ export function crearRutasUsuarios(): Hono<AppEnv> {
           device_id: sesion.deviceId,
           despues: { ...fila },
           server_at: ahora,
+          alerta_reloj: alertaRelojDePeticion(c, ahora),
         }),
       ]);
     } catch (error) {
@@ -145,6 +147,8 @@ export function crearRutasUsuarios(): Hono<AppEnv> {
 
       // Marca estrictamente posterior a la leída: así `updated_at = ahora` distingue esta escritura.
       const ahora = marcaPosterior(actual.updated_at);
+      // ADR 0019: una sola alerta de reloj para todas las filas de auditoría de la edición.
+      const alertaReloj = alertaRelojDePeticion(c, ahora);
       const auditoriaId = uuidv7();
       const desbloquear = datos.desbloquear === true;
       const activoNuevo = datos.activo === undefined ? null : datos.activo ? 1 : 0;
@@ -238,6 +242,7 @@ export function crearRutasUsuarios(): Hono<AppEnv> {
               ...(datos.password === undefined ? {} : { password_restablecida: true }),
             },
             server_at: ahora,
+            alerta_reloj: alertaReloj,
           },
           aplicado,
         ),
@@ -252,7 +257,7 @@ export function crearRutasUsuarios(): Hono<AppEnv> {
           ...sentenciasReinicioAdmin(
             db,
             id,
-            { userId: sesion.userId, deviceId: sesion.deviceId },
+            { userId: sesion.userId, deviceId: sesion.deviceId, alertaReloj },
             ahora,
             auditado,
           ),

@@ -206,6 +206,7 @@ export function planMarcarSubida(
           antes: { ...antes },
           despues: { ...despues },
           server_at: ctx.ahora,
+          alerta_reloj: ctx.alertaReloj,
         },
         {
           sql: 'EXISTS (SELECT 1 FROM evidences WHERE id = ? AND subido = 1 AND subido_at = ?)',

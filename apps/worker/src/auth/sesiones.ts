@@ -57,6 +57,8 @@ export interface DatosNuevaSesion {
    * el reinicio del cupo de login usado, ADR 0018). Reciben la hora del batch.
    */
   adicionales?: (ahora: string) => D1PreparedStatement[];
+  /** Alerta de reloj de la petición de login (ADR 0019), para todas sus filas de auditoría. */
+  alertaReloj?: boolean;
 }
 
 /** Acción de auditoría de una familia revocada porque otro usuario entró en el mismo navegador. */
@@ -111,7 +113,7 @@ async function familiasAjenasEnInstalacion(
 function sentenciasRevocarAjenas(
   db: D1Database,
   familias: readonly FamiliaAjena[],
-  actor: { userId: string; deviceId: string },
+  actor: { userId: string; deviceId: string; alertaReloj: boolean },
   ahora: string,
 ): D1PreparedStatement[] {
   return familias.flatMap((familia) => [
@@ -131,6 +133,7 @@ function sentenciasRevocarAjenas(
           revocado_at: ahora,
         },
         server_at: ahora,
+        alerta_reloj: actor.alertaReloj,
       },
       {
         sql: `EXISTS (SELECT 1 FROM refresh_tokens
@@ -159,6 +162,7 @@ export async function iniciarSesion(
   datos: DatosNuevaSesion,
 ): Promise<TokenEmitido> {
   const ahora = ahoraIso();
+  const alertaReloj = datos.alertaReloj === true;
   const familiasAjenas =
     datos.instalacionId === null
       ? []
@@ -205,6 +209,7 @@ export async function iniciarSesion(
           instalacion_id: datos.instalacionId,
         },
         server_at: ahora,
+        alerta_reloj: alertaReloj,
       }),
     );
   } else {
@@ -244,6 +249,7 @@ export async function iniciarSesion(
         device_id: datos.deviceId,
         despues: { id: datos.userId, intentos_fallidos: 0, bloqueado_hasta: null },
         server_at: ahora,
+        alerta_reloj: alertaReloj,
       },
       {
         sql: 'EXISTS (SELECT 1 FROM users WHERE id = ? AND bloqueado_hasta IS NOT NULL)',
@@ -263,7 +269,7 @@ export async function iniciarSesion(
     ...sentenciasRevocarAjenas(
       db,
       familiasAjenas,
-      { userId: datos.userId, deviceId: datos.deviceId },
+      { userId: datos.userId, deviceId: datos.deviceId, alertaReloj },
       ahora,
     ),
   );
@@ -305,6 +311,7 @@ export async function iniciarSesion(
         expira_at: expira,
       },
       server_at: ahora,
+      alerta_reloj: alertaReloj,
     }),
   );
 
@@ -326,6 +333,7 @@ async function emitirSucesor(
   condicionOrigen: { sql: string; parametros: (string | number)[] },
   accion: string,
   presentadoId: string,
+  alertaReloj: boolean,
 ): Promise<TokenEmitido | null> {
   const ahora = ahoraIso();
   const token = generarRefreshToken();
@@ -379,6 +387,7 @@ async function emitirSucesor(
           expira_at: expira,
         },
         server_at: ahora,
+        alerta_reloj: alertaReloj,
       },
       existeNuevo,
     ),
@@ -396,11 +405,14 @@ async function emitirSucesor(
   };
 }
 
-/** Rotación normal: el token presentado está vigente. */
+/**
+ * Rotación normal: el token presentado está vigente. `alertaReloj`: la de la petición (ADR 0019).
+ */
 export function rotar(
   db: D1Database,
   secretoRefresh: string,
   presentado: FilaRefresh,
+  alertaReloj = false,
 ): Promise<TokenEmitido | null> {
   return emitirSucesor(
     db,
@@ -409,6 +421,7 @@ export function rotar(
     { sql: '1 = 1', parametros: [] },
     'sesion.rotacion',
     presentado.id,
+    alertaReloj,
   );
 }
 
@@ -421,6 +434,7 @@ export async function reintentarDentroDeGracia(
   db: D1Database,
   secretoRefresh: string,
   presentado: FilaRefresh,
+  alertaReloj = false,
 ): Promise<TokenEmitido | null> {
   if (presentado.reemplazado_por === null) {
     return null;
@@ -445,6 +459,7 @@ export async function reintentarDentroDeGracia(
     { sql: 'r.created_at >= ?', parametros: [limite] },
     'sesion.reintento',
     presentado.id,
+    alertaReloj,
   );
 }
 
@@ -456,6 +471,7 @@ export async function revocarFamilia(
   db: D1Database,
   familia: { familiaId: string; userId: string; deviceId: string | null; tokenId: string },
   accion: 'sesion.cierre' | 'sesion.reutilizacion',
+  alertaReloj = false,
 ): Promise<void> {
   const ahora = ahoraIso();
   await db.batch([
@@ -475,6 +491,7 @@ export async function revocarFamilia(
         device_id: familia.deviceId,
         despues: { id: familia.tokenId, familia_id: familia.familiaId, revocado_at: ahora },
         server_at: ahora,
+        alerta_reloj: alertaReloj,
       },
       {
         sql: 'EXISTS (SELECT 1 FROM refresh_tokens WHERE familia_id = ? AND revocado_at = ?)',

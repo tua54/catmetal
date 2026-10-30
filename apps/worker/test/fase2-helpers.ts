@@ -48,7 +48,7 @@ export async function esperarError(
 export async function contextoDe(rol: Rol = 'admin'): Promise<Contexto> {
   const id = await crearUsuario(rol);
   const deviceId = await crearDispositivo(id);
-  return { db: env.DB, actor: { id, rol }, deviceId, ahora: ahora() };
+  return { db: env.DB, actor: { id, rol }, deviceId, ahora: ahora(), alertaReloj: false };
 }
 
 // ---------------------------------------------------------------------------------------------

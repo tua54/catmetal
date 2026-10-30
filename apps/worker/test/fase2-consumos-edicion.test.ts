@@ -245,6 +245,7 @@ describe('edición', () => {
       actor: { id: supervisor.usuario.id, rol: 'supervisor' },
       deviceId: supervisor.deviceId,
       ahora: ahora(),
+      alertaReloj: false,
     };
     const entrada = { id: consumo.id, version: 1, client_created_at: ahora(), lote: 'TARDE' };
     const viejo = await editarConsumo(ctx, entrada);

@@ -178,10 +178,19 @@ export interface EntradaAuditoria {
   order_id?: string | null;
   antes?: DatosAuditoria | null;
   despues?: DatosAuditoria | null;
-  /** Hora del dispositivo (si la acción viene de un dispositivo). */
+  /**
+   * Hora de registro en el dispositivo (`client_created_at`), solo para la trazabilidad: NO se usa
+   * para la alerta de reloj (ADR 0019).
+   */
   client_at?: string | null;
   /** Hora del servidor; por defecto, ahora. */
   server_at?: string;
+  /**
+   * Alerta de reloj de la PETICIÓN que escribe esta fila: la hora del dispositivo al enviar
+   * (`enviado_at` del push o `X-Hora-Dispositivo`) difiere de la del servidor al recibir en más de
+   * 10 min (ADR 0019). Ausente (cron, mantenimiento, petición sin hora de envío) → 0.
+   */
+  alerta_reloj?: boolean;
 }
 
 /** Condición SQL (con sus parámetros) para la variante `INSERT … SELECT … WHERE`. */
@@ -220,15 +229,19 @@ export function filtrarDatos(
   );
 }
 
-/** `alerta_reloj`: la hora del dispositivo difiere de la del servidor en más de 10 min. */
+/**
+ * `alerta_reloj` de una petición (ADR 0019): la hora del dispositivo AL ENVIAR difiere de la del
+ * servidor al recibir en más de 10 min. Sin hora de envío (cliente viejo o formato inválido) →
+ * false. Se calcula una vez por petición y se aplica a todas sus filas de auditoría.
+ */
 export function calcularAlertaReloj(
-  clientAt: string | null | undefined,
-  serverAt: string,
+  enviadoAt: string | null | undefined,
+  recibidoAt: string,
 ): boolean {
-  if (clientAt === null || clientAt === undefined) {
+  if (enviadoAt === null || enviadoAt === undefined) {
     return false;
   }
-  const diferencia = Math.abs(Date.parse(clientAt) - Date.parse(serverAt));
+  const diferencia = Math.abs(Date.parse(enviadoAt) - Date.parse(recibidoAt));
   return Number.isFinite(diferencia) && diferencia > ALERTA_RELOJ_MS;
 }
 
@@ -255,7 +268,7 @@ function valores(entrada: EntradaAuditoria): (string | number | null)[] {
     despues === null ? null : JSON.stringify(despues),
     entrada.client_at ?? null,
     serverAt,
-    calcularAlertaReloj(entrada.client_at, serverAt) ? 1 : 0,
+    entrada.alerta_reloj === true ? 1 : 0,
     serverAt,
     serverAt,
   ];

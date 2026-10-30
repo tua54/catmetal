@@ -3,6 +3,7 @@ import { z } from 'zod';
 import {
   aprobarSchema,
   asignarSupervisoresSchema,
+  CABECERA_HORA_DISPOSITIVO,
   cantidadSchema,
   crearConsumoSchema,
   crearMaterialSchema,
@@ -16,6 +17,7 @@ import {
   emailSchema,
   evidenciaMetaSchema,
   finalizarOrdenSchema,
+  horaDeEnvio,
   isoFechaSchema,
   leerMutationId,
   loginSchema,
@@ -955,6 +957,48 @@ describe('syncPushRequestSchema: época opcional (ADR 0016)', () => {
     expect(syncPushRequestSchema.safeParse({ ...base, epoca: '' }).success).toBe(false);
     expect(syncPushRequestSchema.safeParse({ ...base, epoca: 'x'.repeat(65) }).success).toBe(false);
   });
+});
+
+describe('hora del dispositivo al enviar (M2, ADR 0019)', () => {
+  const base = { user_id: '019a3000-0000-7000-8000-000000000001', mutaciones: [{}] };
+
+  it('el nombre de la cabecera REST es X-Hora-Dispositivo', () => {
+    expect(CABECERA_HORA_DISPOSITIVO).toBe('X-Hora-Dispositivo');
+  });
+
+  it('horaDeEnvio normaliza una hora ISO-8601 UTC válida', () => {
+    expect(horaDeEnvio(FECHA)).toBe(FECHA);
+    expect(horaDeEnvio('2026-10-29T20:55:00Z')).toBe(FECHA);
+  });
+
+  it.each([
+    ['ausente', undefined],
+    ['null', null],
+    ['vacía', ''],
+    ['texto libre', 'ayer a las 3'],
+    ['sin zona', '2026-10-29 20:55:00'],
+    ['con desfase horario', '2026-10-29T15:55:00-05:00'],
+    ['fecha inexistente', '2026-02-30T10:00:00.000Z'],
+    ['número', 1_761_771_300_000],
+    ['objeto', { hora: FECHA }],
+    ['lista', [FECHA]],
+  ])('horaDeEnvio ignora un valor inválido (%s) → null', (_nombre, valor) => {
+    expect(horaDeEnvio(valor)).toBeNull();
+  });
+
+  it('el sobre del push admite enviado_at y lo normaliza', () => {
+    const r = syncPushRequestSchema.safeParse({ ...base, enviado_at: '2026-10-29T20:55:00Z' });
+    expect(r.success && r.data.enviado_at).toBe(FECHA);
+  });
+
+  it.each([undefined, null, '', 'mañana', 42, {}, '2026-13-01T00:00:00.000Z'])(
+    'un enviado_at ausente o inválido (%j) no rechaza el sobre y se trata como ausente',
+    (valor) => {
+      const r = syncPushRequestSchema.safeParse({ ...base, enviado_at: valor });
+      expect(r.success).toBe(true);
+      expect(r.success ? r.data.enviado_at : 'falló').toBeUndefined();
+    },
+  );
 });
 
 describe('configuración global de Zod', () => {

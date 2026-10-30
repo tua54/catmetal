@@ -40,6 +40,7 @@ import {
 import { emitirAccessToken, hashRefreshToken, verificarAccessToken } from '../auth/tokens';
 import { ErrorApi } from '../errores';
 import { autenticar, tokenBearer } from '../middleware/autenticar';
+import { alertaRelojDePeticion } from '../middleware/hora-dispositivo';
 import type { AppEnv } from '../tipos';
 import { validar } from '../validacion';
 
@@ -163,6 +164,8 @@ async function intentarLogin(c: Context<AppEnv>, datos: LoginValidado): Promise<
   const db = c.env.DB;
   const secreto = c.env.REFRESH_SECRET;
   const ahoraMs = Date.now();
+  // ADR 0019: una sola alerta de reloj para todas las filas de auditoría del login.
+  const alertaReloj = alertaRelojDePeticion(c, new Date(ahoraMs).toISOString());
 
   const usuario = await db
     .prepare('SELECT id, nombre, email, rol, password_hash, activo FROM users WHERE email = ?')
@@ -218,7 +221,13 @@ async function intentarLogin(c: Context<AppEnv>, datos: LoginValidado): Promise<
     nombreDispositivo: datos.device_nombre ?? null,
     userAgent,
     adicionales: (ahora) =>
-      sentenciasReinicioTrasLogin(db, reserva, { userId: usuario.id, deviceId }, ahora),
+      sentenciasReinicioTrasLogin(
+        db,
+        reserva,
+        { userId: usuario.id, deviceId, alertaReloj },
+        ahora,
+      ),
+    alertaReloj,
   });
   // Cookie del dispositivo conocido: entrada nueva primero y las válidas de otros usuarios. Se pone
   // antes de construir la respuesta (Set-Cookie solo aparece tras un login correcto).
@@ -230,6 +239,7 @@ async function intentarLogin(c: Context<AppEnv>, datos: LoginValidado): Promise<
 /** Resuelve un refresh token presentado (ADR 0008 puntos 2 y 3). */
 async function refrescar(c: Context<AppEnv>): Promise<Response> {
   const db = c.env.DB;
+  const alertaReloj = alertaRelojDePeticion(c, ahoraIso());
   const token = leerCookieRefresh(c);
   if (token === undefined) {
     throw new ErrorApi('TOKEN_INVALIDO');
@@ -251,7 +261,7 @@ async function refrescar(c: Context<AppEnv>): Promise<Response> {
       borrarCookieRefresh(c);
       throw new ErrorApi('TOKEN_INVALIDO');
     }
-    emitido = await rotar(db, c.env.REFRESH_SECRET, presentado);
+    emitido = await rotar(db, c.env.REFRESH_SECRET, presentado, alertaReloj);
     if (emitido === null) {
       // Otro refresh con el mismo token ganó la carrera: se relee y se trata como reutilizado.
       presentado = (await buscarRefresh(db, tokenHash)) ?? presentado;
@@ -259,7 +269,7 @@ async function refrescar(c: Context<AppEnv>): Promise<Response> {
   }
 
   if (emitido === null) {
-    emitido = await resolverRevocado(c, presentado);
+    emitido = await resolverRevocado(c, presentado, alertaReloj);
   }
 
   const usuario = await leerPerfil(db, emitido.userId);
@@ -277,6 +287,7 @@ async function refrescar(c: Context<AppEnv>): Promise<Response> {
 async function resolverRevocado(
   c: Context<AppEnv>,
   presentado: FilaRefresh,
+  alertaReloj: boolean,
 ): Promise<TokenEmitido> {
   const db = c.env.DB;
   if (presentado.reemplazado_por === null) {
@@ -284,7 +295,12 @@ async function resolverRevocado(
     borrarCookieRefresh(c);
     throw new ErrorApi('SESION_REVOCADA');
   }
-  const reintento = await reintentarDentroDeGracia(db, c.env.REFRESH_SECRET, presentado);
+  const reintento = await reintentarDentroDeGracia(
+    db,
+    c.env.REFRESH_SECRET,
+    presentado,
+    alertaReloj,
+  );
   if (reintento !== null) {
     return reintento;
   }
@@ -297,6 +313,7 @@ async function resolverRevocado(
       tokenId: presentado.id,
     },
     'sesion.reutilizacion',
+    alertaReloj,
   );
   borrarCookieRefresh(c);
   throw new ErrorApi('SESION_REVOCADA');
@@ -319,6 +336,7 @@ interface FamiliaARevocar {
  */
 async function cerrarSesion(c: Context<AppEnv>): Promise<Response> {
   const db = c.env.DB;
+  const alertaReloj = alertaRelojDePeticion(c, ahoraIso());
   let deCookie: FamiliaARevocar | null = null;
 
   const token = leerCookieRefresh(c);
@@ -348,7 +366,7 @@ async function cerrarSesion(c: Context<AppEnv>): Promise<Response> {
     familias.push(delBearer);
   }
   for (const familia of familias) {
-    await revocarFamilia(db, familia, 'sesion.cierre');
+    await revocarFamilia(db, familia, 'sesion.cierre', alertaReloj);
   }
   borrarCookieRefresh(c);
   return c.body(null, 204);

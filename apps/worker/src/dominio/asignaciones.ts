@@ -289,6 +289,7 @@ export async function reemplazarSupervisores(
           antes: cambio.antes === null ? null : datosAuditoria(cambio.antes),
           despues: datosAuditoria(cambio.despues),
           server_at: ctx.ahora,
+          alerta_reloj: ctx.alertaReloj,
         },
         condicionAplicada(cambio.despues),
       ),

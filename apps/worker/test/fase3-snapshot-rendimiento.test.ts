@@ -88,6 +88,7 @@ function contexto(s: SesionDeRol, rol: 'supervisor' | 'jefe'): Contexto {
     actor: { id: s.usuario.id, rol },
     deviceId: s.deviceId,
     ahora: new Date().toISOString(),
+    alertaReloj: false,
   };
 }
 

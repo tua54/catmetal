@@ -141,6 +141,8 @@ beforeAll(async () => {
     requiereNovedad: true,
     registroTardio: true,
     clientAt: new Date(Date.now() - 3_600_000).toISOString(),
+    // M2 (ADR 0019): la alerta la fija la petición (hora de envío), no `clientAt`.
+    alertaReloj: true,
   });
 
   ordenPerdida = await nuevaOrden(jefe.usuario.id);
@@ -228,7 +230,7 @@ describe('GET /audit: permisos y contenido', () => {
     },
   );
 
-  it('marca alerta_reloj cuando la hora del dispositivo difiere más de 10 min', async () => {
+  it('expone alerta_reloj = true en la fila que su petición marcó (ADR 0019)', async () => {
     const lista: ListaAuditoria = await ok(
       await api(`/audit?entidad=consumptions&entidad_id=${String(c6.id)}`, { token: jefe.token }),
     );

@@ -233,6 +233,8 @@ describe('auditoría', () => {
         despues: { id: entidadId, nombre: 'Tablet', secreto: 'no' },
         client_at: cliente,
         server_at: servidor,
+        // M2 (ADR 0019): la alerta llega calculada por la petición; client_at ya no la deduce.
+        alerta_reloj: true,
       }),
       sentenciaAuditoriaCondicional(
         env.DB,
@@ -256,13 +258,23 @@ describe('auditoría', () => {
         },
         { sql: '? = ?', parametros: [1, 1] },
       ),
+      // client_at a 1 h de server_at sin alerta de la petición → 0 (antes daba 1).
+      sentenciaAuditoria(env.DB, {
+        entidad: 'devices',
+        entidad_id: entidadId,
+        accion: 'prueba.sin_alerta',
+        actor_id: null,
+        device_id: null,
+        client_at: cliente,
+        server_at: servidor,
+      }),
     ]);
     const { results } = await env.DB.prepare(
       'SELECT accion, datos_antes, datos_despues, client_at, server_at, alerta_reloj FROM audit_log WHERE entidad_id = ? ORDER BY seq',
     )
       .bind(entidadId)
       .all();
-    expect(results).toHaveLength(2);
+    expect(results).toHaveLength(3);
     expect(results[0]).toEqual({
       accion: 'prueba.simple',
       datos_antes: null,
@@ -272,6 +284,11 @@ describe('auditoría', () => {
       alerta_reloj: 1,
     });
     expect(results[1]).toMatchObject({ accion: 'prueba.si', alerta_reloj: 0, client_at: null });
+    expect(results[2]).toMatchObject({
+      accion: 'prueba.sin_alerta',
+      alerta_reloj: 0,
+      client_at: cliente,
+    });
   });
 });
 

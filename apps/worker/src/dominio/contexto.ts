@@ -6,6 +6,7 @@
 
 import { ahoraIso, type Rol } from '@catmetal/shared';
 import type { Context } from 'hono';
+import { alertaRelojDePeticion } from '../middleware/hora-dispositivo';
 import type { AppEnv } from '../tipos';
 
 export interface Actor {
@@ -21,21 +22,26 @@ export interface Contexto {
   deviceId: string;
   /** Hora del servidor de la operación, en el formato único (`ahoraIso()`). */
   ahora: string;
-  /** Hora del dispositivo, si la operación viene de una mutación offline (alerta de reloj). */
-  clientAt?: string;
+  /**
+   * Alerta de reloj de la petición (ADR 0019): la hora del dispositivo al enviar difiere de la del
+   * servidor al recibir en más de 10 min. Va en TODAS las filas de auditoría del comando. `false`
+   * sin hora de envío (cliente viejo, formato inválido, lecturas).
+   */
+  alertaReloj: boolean;
 }
 
-/** Contexto a partir de una petición autenticada (después del middleware `autenticar`). */
-export function contextoDesdeHono(
-  c: Context<AppEnv>,
-  opciones: { clientAt?: string } = {},
-): Contexto {
+/**
+ * Contexto a partir de una petición autenticada (después del middleware `autenticar`). La alerta de
+ * reloj sale de `X-Hora-Dispositivo` frente a `ahora`, la misma hora con la que se escribe.
+ */
+export function contextoDesdeHono(c: Context<AppEnv>): Contexto {
   const sesion = c.get('sesion');
+  const ahora = ahoraIso();
   return {
     db: c.env.DB,
     actor: { id: sesion.userId, rol: sesion.rol },
     deviceId: sesion.deviceId,
-    ahora: ahoraIso(),
-    ...(opciones.clientAt === undefined ? {} : { clientAt: opciones.clientAt }),
+    ahora,
+    alertaReloj: alertaRelojDePeticion(c, ahora),
   };
 }

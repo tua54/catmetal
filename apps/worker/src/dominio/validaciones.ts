@@ -131,6 +131,7 @@ async function decidir(
         despues,
         client_at: entrada.client_created_at,
         server_at: ctx.ahora,
+        alerta_reloj: ctx.alertaReloj,
       },
       aplicada,
     );

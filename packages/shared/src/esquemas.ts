@@ -49,6 +49,22 @@ export const isoFechaSchema = z.iso
   .datetime({ error: MENSAJE_FECHA })
   .transform((valor) => new Date(valor).toISOString());
 
+/**
+ * Cabecera con la hora del dispositivo AL ENVIAR, en las peticiones REST que escriben (método
+ * distinto de GET/HEAD/OPTIONS). Mismo formato que `client_created_at` (ADR 0019, spec §6 "Reloj").
+ */
+export const CABECERA_HORA_DISPOSITIVO = 'X-Hora-Dispositivo';
+
+/**
+ * Hora de envío del dispositivo (`enviado_at` del push o la cabecera `X-Hora-Dispositivo`),
+ * normalizada al formato único. Un valor ausente o con formato inválido devuelve `null`: **nunca
+ * rechaza la petición**, solo se ignora y la alerta de reloj queda en 0 (ADR 0019).
+ */
+export function horaDeEnvio(valor: unknown): string | null {
+  const resultado = isoFechaSchema.safeParse(valor);
+  return resultado.success ? resultado.data : null;
+}
+
 /** Tiene como máximo 3 decimales (el número es el double más cercano a un decimal de 3 cifras). */
 function tieneMaximo3Decimales(valor: number): boolean {
   return Number(valor.toFixed(3)) === valor;
@@ -408,6 +424,15 @@ export const syncPushRequestSchema = z.object({
    * arranque (se procesa).
    */
   epoca: z.string().min(1).max(64).optional(),
+  /**
+   * Hora del dispositivo justo antes de enviar este push (también en cada reintento), ISO-8601 UTC
+   * (ADR 0019). Con ella se calcula `alerta_reloj` de toda la petición. Ausente (cliente viejo) o
+   * inválida → `undefined`: se ignora sin rechazar el sobre.
+   */
+  enviado_at: z
+    .unknown()
+    .transform((valor) => horaDeEnvio(valor) ?? undefined)
+    .optional(),
   mutaciones: z
     .array(z.unknown(), { error: 'La lista de mutaciones es obligatoria.' })
     .min(1, { error: 'Envíe al menos una mutación.' })

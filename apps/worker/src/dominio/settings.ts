@@ -91,6 +91,7 @@ export async function cambiarTolerancia(
           antes: actual === null ? null : datosAuditoria(actual),
           despues: datosAuditoria(nueva),
           server_at: ctx.ahora,
+          alerta_reloj: ctx.alertaReloj,
         },
         {
           sql: 'EXISTS (SELECT 1 FROM settings WHERE clave = ? AND valor = ? AND actualizado_por = ? AND updated_at = ?)',

@@ -371,23 +371,35 @@ describe('visibilidad', () => {
     expect(() => filtroOrdenVisible(supervisor, 'o.id; DROP TABLE x')).toThrow(/columna/);
   });
 
-  it('contextoDesdeHono toma actor, rol y dispositivo de la sesión', () => {
+  it('contextoDesdeHono toma actor, rol y dispositivo de la sesión, y la alerta de X-Hora-Dispositivo', () => {
     const sesion = {
       userId: uuidv7(),
       rol: 'jefe' as const,
       deviceId: uuidv7(),
       familiaId: uuidv7(),
     };
-    const c = { get: () => sesion, env: { DB: env.DB } } as unknown as Parameters<
-      typeof contextoDesdeHono
-    >[0];
-    const ctx = contextoDesdeHono(c, { clientAt: '2026-10-29T20:55:00.000Z' });
+    // M2 (ADR 0019): la alerta sale de la cabecera de la petición, ya no de un `clientAt` opcional.
+    const peticion = (method: string, hora?: string) =>
+      ({
+        get: () => sesion,
+        env: { DB: env.DB },
+        req: {
+          method,
+          header: (nombre: string) => (nombre === 'X-Hora-Dispositivo' ? hora : undefined),
+        },
+      }) as unknown as Parameters<typeof contextoDesdeHono>[0];
+    const desfasada = new Date(Date.now() + 15 * 60_000).toISOString();
+    const ctx = contextoDesdeHono(peticion('POST', desfasada));
     expect(ctx).toMatchObject({
       actor: { id: sesion.userId, rol: 'jefe' },
       deviceId: sesion.deviceId,
-      clientAt: '2026-10-29T20:55:00.000Z',
+      alertaReloj: true,
     });
     expect(ctx.ahora).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
-    expect(contextoDesdeHono(c)).not.toHaveProperty('clientAt');
+    expect(contextoDesdeHono(peticion('POST', new Date().toISOString())).alertaReloj).toBe(false);
+    expect(contextoDesdeHono(peticion('POST')).alertaReloj).toBe(false);
+    expect(contextoDesdeHono(peticion('POST', 'no es una hora')).alertaReloj).toBe(false);
+    // Las lecturas nunca marcan la alerta.
+    expect(contextoDesdeHono(peticion('GET', desfasada)).alertaReloj).toBe(false);
   });
 });

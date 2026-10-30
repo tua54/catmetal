@@ -175,12 +175,11 @@ describe('registro', () => {
     )
       .bind(filas[0]?.seq ?? 0)
       .first<{ client_at: string; alerta_reloj: number }>();
-    // La hora del dispositivo queda en la auditoría; la alerta de reloj si difiere más de 10 min.
+    // La hora de registro del dispositivo queda en la auditoría solo para la trazabilidad. M2
+    // (ADR 0019): la alerta de reloj ya no se calcula con ella sino con X-Hora-Dispositivo, que
+    // esta petición no envía → 0 (casos con la cabecera en correcciones-m2-alerta-reloj.test.ts).
     expect(auditoria?.client_at).toBe('2026-10-29T15:00:00.000Z');
-    const desfase = Math.abs(
-      Date.parse(consumo.server_received_at) - Date.parse('2026-10-29T15:00:00Z'),
-    );
-    expect(auditoria?.alerta_reloj).toBe(desfase > 600_000 ? 1 : 0);
+    expect(auditoria?.alerta_reloj).toBe(0);
   });
 
   it('convierte a la unidad del plan: g → kg y l → ml', async () => {
