@@ -40,7 +40,7 @@ Acciones que el orquestador no puede o no debe ejecutar. Cada una lleva el coman
 Los comandos exactos, en orden, están en `docs/despliegue.md` (secciones 2 a 6). Resumen:
 
 6. Activar el plan **Workers Paid** en la cuenta de Cloudflare.
-7. Crear recursos por entorno (staging y producción): `npx wrangler d1 create mp-staging`, `npx wrangler r2 bucket create mp-evidencias-staging`, `npx wrangler r2 bucket lifecycle add mp-evidencias-staging backups-90d backups/ --expire-days 90`, `npx wrangler kv namespace create CONFIG_staging` (ídem `mp-prod`, `mp-evidencias-prod`, `CONFIG_production`), y copiar los IDs a `apps/worker/wrangler.jsonc` (marcadores `REEMPLAZAR_CON_…`) con un commit.
+7. Crear recursos por entorno (staging y producción): `npx wrangler d1 create mp-staging`, `npx wrangler r2 bucket create mp-evidencias-staging`, `npx wrangler r2 bucket create mp-backups-staging`, `npx wrangler r2 bucket lifecycle add mp-backups-staging backups-90d backups/ --expire-days 90`, `npx wrangler kv namespace create CONFIG_staging` (ídem `mp-prod`, `mp-evidencias-prod`, `mp-backups-prod`, `CONFIG_production`), y copiar los IDs a `apps/worker/wrangler.jsonc` (marcadores `REEMPLAZAR_CON_…`) con un commit.
 8. Dominio de producción en `env.production.routes` (y opcionalmente de staging).
 9. Secretos de 32 bytes: `npx wrangler secret put JWT_SECRET --env <entorno>` y `npx wrangler secret put REFRESH_SECRET --env <entorno>`.
 10. Migraciones: `npx wrangler d1 migrations apply mp-staging --env staging --remote` (ídem `mp-prod --env production`).
@@ -49,3 +49,5 @@ Los comandos exactos, en orden, están en `docs/despliegue.md` (secciones 2 a 6)
 13. GitHub: environment `staging` protegido con revisores y secretos `CLOUDFLARE_API_TOKEN` y `CLOUDFLARE_ACCOUNT_ID`.
 14. Política MDM de las tablets: sin depuración USB y con bloqueo de pantalla del sistema (ADR 0017).
 15. Opcional: Cloudflare Access para `/admin*` y `/api/v1/users*` (probar en staging).
+16. Revisión de seguridad final (F6-01): usar una cuenta de Cloudflare separada para staging o un token de CI sin alcance sobre producción; environment `staging` en GitHub con política de ramas (solo `main`), revisores y sin auto-aprobación.
+17. Revisar las 14 verificaciones de staging de `docs/auditoria/seguridad-fase-6.md` (sección 6) antes de producción.

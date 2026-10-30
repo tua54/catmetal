@@ -20,13 +20,15 @@ Ejemplo para **staging**; para **producción** cambie `staging` por `prod`/`prod
 npx wrangler d1 create mp-staging --location=wnam
 # → copie el "database_id" a env.staging.d1_databases[0].database_id (reemplaza REEMPLAZAR_CON_ID_D1_STAGING)
 
-# R2 (privado; evidencias en evidencias/, backups en backups/)
+# R2 privado para las evidencias (fotos)
 npx wrangler r2 bucket create mp-evidencias-staging
 
+# R2 privado y SEPARADO para los backups (contienen hashes y datos personales; F6-08)
+npx wrangler r2 bucket create mp-backups-staging
 # Regla de ciclo de vida: los backups expiran a los 90 días (spec §4). Las subidas multipart
 # incompletas ya se abortan a los 7 días por la regla por defecto del bucket.
-npx wrangler r2 bucket lifecycle add mp-evidencias-staging backups-90d backups/ --expire-days 90
-npx wrangler r2 bucket lifecycle list mp-evidencias-staging
+npx wrangler r2 bucket lifecycle add mp-backups-staging backups-90d backups/ --expire-days 90
+npx wrangler r2 bucket lifecycle list mp-backups-staging
 
 # KV (solo caché opcional)
 npx wrangler kv namespace create CONFIG_staging
@@ -41,10 +43,11 @@ npx wrangler kv namespace create CONFIG_staging
 
 Genere cada secreto con 32 bytes aleatorios (regla H-07: al menos 43 caracteres y distintos entre sí; el Worker responde 500 si no se cumple):
 
+El valor se genera y se pasa por tubería, sin mostrarlo en pantalla (revisión de seguridad F6-03):
+
 ```powershell
-node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))"
-npx wrangler secret put JWT_SECRET --env staging
-npx wrangler secret put REFRESH_SECRET --env staging
+node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('base64url'))" | npx wrangler secret put JWT_SECRET --env staging
+node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('base64url'))" | npx wrangler secret put REFRESH_SECRET --env staging
 npx wrangler secret list --env staging
 ```
 
@@ -68,14 +71,17 @@ npx wrangler d1 migrations apply mp-staging --env staging --remote
 El seed de desarrollo no se usa en staging ni producción. El primer admin se crea con un SQL generado **localmente**:
 
 ```powershell
-$env:ADMIN_PASSWORD = '<contraseña de al menos 10 caracteres>'
-node ../../scripts/crear-admin-sql.mjs --email admin@catmetal.com --nombre "Nombre Apellido" --salida .\primer-admin.sql
-Remove-Item Env:ADMIN_PASSWORD
-npx wrangler d1 execute mp-staging --env staging --remote --file=.\primer-admin.sql
-Remove-Item .\primer-admin.sql
+# Contraseña con entrada oculta: no queda en pantalla ni en el historial de PowerShell (F6-03).
+$s = Read-Host -AsSecureString 'Contraseña del primer admin (mínimo 10 caracteres)'
+$env:ADMIN_PASSWORD = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($s))
+# Sin --salida, el SQL se escribe en la carpeta temporal del sistema, FUERA del repositorio.
+node ../../scripts/crear-admin-sql.mjs --email admin@catmetal.com --nombre "Nombre Apellido"
+Remove-Item Env:ADMIN_PASSWORD; Remove-Variable s
+npx wrangler d1 execute mp-staging --env staging --remote --file="$env:TEMP\catmetal-primer-admin.sql"
+Remove-Item "$env:TEMP\catmetal-primer-admin.sql"
 ```
 
-El archivo contiene el hash de la contraseña: no lo versione y bórrelo. Desde la app, el admin crea los demás usuarios, materiales y asignaciones.
+El archivo contiene el hash de la contraseña: nunca lo guarde dentro del repositorio (por si acaso, `primer-admin.sql` y `*-primer-admin.sql` están en `.gitignore`) y bórrelo tras aplicarlo. La contraseña no puede estar en la lista de contraseñas comunes. Desde la app, el admin crea los demás usuarios, materiales y asignaciones.
 
 ## 6. Desplegar
 
@@ -84,7 +90,10 @@ pnpm --filter @catmetal/web build
 npx wrangler deploy --env staging
 ```
 
-- O desde GitHub Actions: workflow **`deploy-staging`** (solo `workflow_dispatch`, con el environment protegido `staging`). Configure en GitHub: Settings → Environments → `staging` con revisores obligatorios y los secretos `CLOUDFLARE_API_TOKEN` (permisos de cuenta: Workers Scripts, D1, Workers R2 Storage y Workers KV Storage en edición, Account Settings lectura; de zona: Workers Routes si usa `routes`) y `CLOUDFLARE_ACCOUNT_ID`.
+- O desde GitHub Actions: workflow **`deploy-staging`** (solo `workflow_dispatch`, acciones fijadas por SHA, con el environment protegido `staging`). **Revisión de seguridad F6-01**:
+  - Use una **cuenta de Cloudflare separada para staging** o, si no es posible, un token que **no alcance producción** (verifique en la consola qué recursos cubre; un token de cuenta con edición de Workers/D1/R2 alcanza todos los de la cuenta).
+  - Token mínimo y con caducidad: permisos de cuenta Workers Scripts, D1, Workers R2 Storage y Workers KV Storage (edición), Account Settings (lectura); de zona, Workers Routes solo si usa `routes`.
+  - GitHub: Settings → Environments → `staging` con revisores obligatorios, sin auto-aprobación y política de ramas de despliegue (solo `main`); secretos `CLOUDFLARE_API_TOKEN` y `CLOUDFLARE_ACCOUNT_ID` solo en ese environment.
 - **Producción** no tiene workflow automático: se despliega a mano con `npx wrangler deploy --env production` tras validar staging.
 
 ### Verificación después de desplegar
@@ -103,7 +112,7 @@ npx wrangler deploy --env staging
 ## 8. Backups
 
 - **Primera línea: Time Travel de D1** (30 días en Paid), sin configuración.
-- **Backup diario a R2** (cron `0 8 * * *` = 03:00 Bogotá, con continuaciones `0 9-13 * * *`): cada tabla en NDJSON comprimido en `backups/AAAA-MM-DD/<tabla>.ndjson.gz` + `manifest.json` (conteos, bytes, sha256, época, `seq_inicial`, `seq_final`, última migración). Un día sin `manifest.json` es un backup **incompleto** (log `backup_incompleto_del_dia`). Retención: 90 días por la regla de ciclo de vida (sección 2). ADR 0014 y 0016.
+- **Backup diario a R2**, en el bucket propio `mp-backups-*` (binding `BACKUPS`), separado de las evidencias (cron `0 8 * * *` = 03:00 Bogotá, con continuaciones `0 9-13 * * *`): cada tabla en NDJSON comprimido en `backups/AAAA-MM-DD/<tabla>.ndjson.gz` + `manifest.json` (conteos, bytes, sha256, época, `seq_inicial`, `seq_final`, última migración). Un día sin `manifest.json` es un backup **incompleto** (log `backup_incompleto_del_dia`). Retención: 90 días por la regla de ciclo de vida (sección 2). ADR 0014 y 0016.
 - El backup contiene datos personales y hashes de contraseñas: el bucket es privado y solo el Worker y las personas autorizadas acceden.
 
 ## 9. Restaurar
@@ -134,10 +143,11 @@ npx wrangler d1 execute mp-prod --env production --remote --command "UPDATE sett
 Procedimiento (revisión de esquema H9 y M2; ADR 0014):
 
 1. Elija una fecha con `manifest.json` (sin manifest, el backup está incompleto).
-2. Descargue el prefijo (por cada archivo del manifest):
+2. Descargue el prefijo (por cada archivo del manifest) en una carpeta **fuera del repositorio** (el backup contiene hashes y datos personales; F6-03), por ejemplo `$env:TEMP\catmetal-restaurar`, y bórrela al terminar:
    ```powershell
-   npx wrangler r2 object get mp-evidencias-prod/backups/2026-11-02/manifest.json --file .\restaurar\manifest.json --remote
-   npx wrangler r2 object get mp-evidencias-prod/backups/2026-11-02/consumptions.ndjson.gz --file .\restaurar\consumptions.ndjson.gz --remote
+   New-Item -ItemType Directory -Force "$env:TEMP\catmetal-restaurar" | Out-Null
+   npx wrangler r2 object get mp-backups-prod/backups/2026-11-02/manifest.json --file "$env:TEMP\catmetal-restaurar\manifest.json" --remote
+   npx wrangler r2 object get mp-backups-prod/backups/2026-11-02/consumptions.ndjson.gz --file "$env:TEMP\catmetal-restaurar\consumptions.ndjson.gz" --remote
    ```
 3. Verifique `bytes` y `sha256` de cada archivo contra el manifest. Descomprima con `gunzip`/`zcat` o `zlib` de Node (leen los archivos de varios miembros gzip; `DecompressionStream` de workerd no).
 4. Cree una D1 vacía (`wrangler d1 create`) y aplique las migraciones hasta `ultima_migracion` del manifest.
@@ -178,7 +188,7 @@ SELECT id, storage_key, sha256 FROM evidences WHERE subido = 0;
 | Nombre de dispositivo, navegador (`user_agent` truncado), `instalacion_id` | D1 `devices` | "Desde qué dispositivo" (spec §1) | Indefinida (trazabilidad) |
 | Autoría y hora de cada acción (sin correo) | D1 `audit_log` | Trazabilidad completa | Inmutable, indefinida |
 | Fotos de evidencia (JPEG recomprimido, sin EXIF/GPS) | R2 `evidencias/` | Justificar novedades | Indefinida (pregunta abierta P7) |
-| Backups (todas las tablas) | R2 `backups/` | Recuperación | 90 días |
+| Backups (todas las tablas, incluidos hashes) | R2 `mp-backups-*`, prefijo `backups/` | Recuperación | 90 días |
 | IP | No se guarda (solo clave efímera del rate limiter) | — | — |
 | En la tablet: perfil (nombre, correo, permisos, verificador), datos de la operación | IndexedDB | Trabajo sin conexión | 30 días sin acceso y sin pendientes (ADR 0017) |
 
@@ -186,12 +196,16 @@ Pendiente del cliente (P7): política de retención de evidencias y de datos per
 
 ## 11. Cloudflare Access para administración (opcional)
 
-Para añadir una capa de identidad corporativa delante de la administración: Zero Trust → Access → Applications → Self-hosted, con el dominio de producción y rutas `/admin*` y `/api/v1/users*` (y opcionalmente `/api/v1/materials`, `/api/v1/settings*`), política Allow para el grupo de administradores. Requiere dominio propio (no `workers.dev`). **Probar primero en staging**: las llamadas `fetch` de la PWA que reciban la redirección de Access fallan, por lo que conviene limitar la regla a las rutas de admin y verificar que el supervisor y el jefe no se ven afectados.
+Revisada tras la revisión de seguridad final (F6-02). La autorización real está en el servidor (`requierePermiso('admin.gestionar')`); Access es una capa adicional de identidad corporativa (Zero Trust → Access → Applications → Self-hosted, política Allow para el grupo correspondiente):
+
+- **Staging**: proteja **todo** el Worker de staging con Access (también funciona sobre `workers.dev`) mientras esté publicado, para que no sea accesible por cualquiera.
+- **Producción**: si se desea, proteja solo `/api/v1/users*` (gestión de usuarios). **No** proteja `/admin*`: la PWA instalada sirve el shell desde el Service Worker y el enrutado es del cliente, así que esa regla no protege nada. **No** proteja `/api/v1/materials` ni `/api/v1/settings*`: el supervisor y el jefe los consultan con GET y dejarían de funcionar.
+- Pruebe primero en staging: una llamada `fetch` de la PWA que reciba la redirección de Access falla.
 
 ## 12. Checklist de despliegue
 
 - [ ] Plan Workers Paid activo en la cuenta.
-- [ ] D1, R2 (con regla de 90 días en `backups/`) y KV creados para staging y producción; IDs copiados al `wrangler.jsonc` y confirmados en git.
+- [ ] D1, R2 de evidencias, R2 de backups (con regla de 90 días en `backups/`) y KV creados para staging y producción; IDs copiados al `wrangler.jsonc` y confirmados en git.
 - [ ] Dominio de producción en `env.production.routes` (y de staging, si aplica).
 - [ ] Secretos `JWT_SECRET` y `REFRESH_SECRET` de 32 bytes cargados en cada entorno.
 - [ ] Migraciones aplicadas (`migrations list` sin pendientes).
