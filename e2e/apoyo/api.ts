@@ -4,7 +4,9 @@
 // jefe se reutiliza mientras no esté por vencer, en lugar de iniciar sesión en cada consulta.
 
 import { randomBytes } from 'node:crypto';
-import type { APIRequestContext } from '@playwright/test';
+// Solo tipos del contrato de la API (raíz no depende de @catmetal/shared; no hay código de ejecución).
+import type { ConsumoDetallado, ListaConsumos } from '../../packages/shared/src/tipos';
+import type { APIRequestContext, APIResponse } from '@playwright/test';
 import { ORIGEN_E2E } from '../../scripts/e2e-config.mjs';
 import { CONTRASENA, JEFE, type UsuarioSeed } from './usuarios';
 
@@ -52,16 +54,57 @@ export async function iniciarSesionApi(
 
 let sesionJefe: SesionApi | null = null;
 
-/** GET autenticado como jefe (rol con acceso de lectura a órdenes, consumos y auditoría). */
-export async function getComoJefe<T>(request: APIRequestContext, ruta: string): Promise<T> {
+/** Variables que `global-setup.ts` deja en el entorno: el token del jefe se pide una sola vez por ejecución. */
+export const ENV_TOKEN_JEFE = 'E2E_TOKEN_JEFE';
+export const ENV_TOKEN_JEFE_RENOVAR_EN = 'E2E_TOKEN_JEFE_RENOVAR_EN';
+
+function sesionJefeDelEntorno(): SesionApi | null {
+  const accessToken = process.env[ENV_TOKEN_JEFE];
+  const renovarEn = Number(process.env[ENV_TOKEN_JEFE_RENOVAR_EN]);
+  if (!accessToken || !Number.isFinite(renovarEn)) {
+    return null;
+  }
+  return { accessToken, deviceId: '', renovarEn };
+}
+
+/** GET autenticado como jefe (rol con acceso de lectura a órdenes, consumos y evidencias). */
+export async function getCrudoComoJefe(
+  request: APIRequestContext,
+  ruta: string,
+): Promise<APIResponse> {
+  sesionJefe ??= sesionJefeDelEntorno();
   if (sesionJefe === null || Date.now() >= sesionJefe.renovarEn) {
     sesionJefe = await iniciarSesionApi(request, JEFE);
   }
-  const respuesta = await request.get(`/api/v1${ruta}`, {
+  return await request.get(`/api/v1${ruta}`, {
     headers: { Authorization: `Bearer ${sesionJefe.accessToken}` },
   });
+}
+
+/** GET como jefe que espera 200 y devuelve el JSON. */
+export async function getComoJefe<T>(request: APIRequestContext, ruta: string): Promise<T> {
+  const respuesta = await getCrudoComoJefe(request, ruta);
   if (!respuesta.ok()) {
     throw new Error(`GET ${ruta} como jefe: HTTP ${respuesta.status()}`);
   }
   return (await respuesta.json()) as T;
+}
+
+/** Consumos de una orden vistos por el jefe (todas las páginas). */
+export async function consumosDeOrden(
+  request: APIRequestContext,
+  ordenId: string,
+): Promise<ConsumoDetallado[]> {
+  const todos: ConsumoDetallado[] = [];
+  let cursor: string | null = null;
+  do {
+    const consulta: string = cursor === null ? '' : `?cursor=${cursor}`;
+    const pagina: ListaConsumos = await getComoJefe<ListaConsumos>(
+      request,
+      `/orders/${ordenId}/consumptions${consulta}`,
+    );
+    todos.push(...pagina.consumos);
+    cursor = pagina.siguiente_cursor;
+  } while (cursor !== null);
+  return todos;
 }

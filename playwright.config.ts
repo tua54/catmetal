@@ -13,6 +13,8 @@ import { ORIGEN_E2E, URL_SALUD_E2E } from './scripts/e2e-config.mjs';
  */
 export default defineConfig({
   testDir: './e2e',
+  // Inicia sesión como jefe por API una sola vez (el login admite 5 intentos por minuto y correo).
+  globalSetup: './e2e/global-setup.ts',
   outputDir: './test-results',
   fullyParallel: false,
   workers: 1,

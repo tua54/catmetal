@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { ADMIN, SUPERVISOR_1, SUPERVISOR_2 } from './apoyo/usuarios';
+import { ADMIN, JEFE, SUPERVISOR_1 } from './apoyo/usuarios';
 import {
   abrirLogin,
   botonCuenta,
@@ -62,35 +62,31 @@ test.describe('Login con conexión', () => {
 });
 
 test.describe('Sesión persistente', () => {
-  test('al recargar la página la sesión se recupera con la cookie de refresco (Chromium)', async ({
-    page,
-  }) => {
-    // La cookie `mp_refresh` es HttpOnly + Secure + SameSite=Strict (ADR 0008). Chromium la acepta y
-    // la envía en http://localhost. WebKit NO la reenvía por http: ver la prueba @humo siguiente.
-    await iniciarSesionPorUI(page, SUPERVISOR_2);
-
-    await page.reload();
-
-    await expect(page).toHaveURL(/\/supervisor$/);
-    await expect(botonCuenta(page, SUPERVISOR_2)).toBeVisible();
-    const cookies = await page.context().cookies();
-    expect(cookies.some((c) => c.name === 'mp_refresh' && c.httpOnly && c.secure)).toBe(true);
-  });
-
   test('@humo al recargar la app no queda en blanco: recupera la sesión o vuelve al login con el perfil de la tablet', async ({
     page,
+    browserName,
   }) => {
-    // En WebKit (Playwright, http://localhost) la cookie Secure de refresco no se envía: /auth/refresh
-    // responde 401 y la app vuelve al login ofreciendo el perfil del dispositivo (login offline).
-    // Se aceptan ambos desenlaces válidos; lo que no puede pasar es una pantalla vacía o con error.
-    await iniciarSesionPorUI(page, SUPERVISOR_2);
+    // La cookie `mp_refresh` es HttpOnly + Secure + SameSite=Strict (ADR 0008).
+    // - Chromium la acepta y la envía en http://localhost: la sesión se recupera.
+    // - WebKit (Playwright, http://localhost) la guarda pero NO la envía: /auth/refresh responde 401 y
+    //   la app vuelve al login ofreciendo el perfil del dispositivo (login offline).
+    // Un solo login por navegador: el login admite 5 intentos por minuto y correo.
+    await iniciarSesionPorUI(page, JEFE);
 
     await page.reload();
 
-    const sesionRecuperada = botonCuenta(page, SUPERVISOR_2);
+    const sesionRecuperada = botonCuenta(page, JEFE);
     const perfilEnLogin = page.getByRole('button', {
-      name: /Laura Gómez\s+supervisor2@catmetal\.test/,
+      name: /Roberto Martínez\s+jefe@catmetal\.test/,
     });
+    // Lo que no puede pasar en ningún navegador es una pantalla vacía o con error.
     await expect(sesionRecuperada.or(perfilEnLogin)).toBeVisible();
+
+    if (browserName === 'chromium') {
+      await expect(page).toHaveURL(/\/jefe$/);
+      await expect(sesionRecuperada).toBeVisible();
+      const cookies = await page.context().cookies();
+      expect(cookies.some((c) => c.name === 'mp_refresh' && c.httpOnly && c.secure)).toBe(true);
+    }
   });
 });
