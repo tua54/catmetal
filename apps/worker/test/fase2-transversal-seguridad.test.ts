@@ -1,9 +1,10 @@
 // Tarea 2.5 — cabeceras de seguridad (docs/spec.md §9) y ausencia de secretos en las respuestas.
 //
 // Cabeceras: una muestra de respuestas de cada router (éxitos y errores) lleva CSP, nosniff,
-// Referrer-Policy, Permissions-Policy, HSTS, X-Frame-Options y `Cache-Control: no-store`; solo
-// `GET /evidences/:id` responde `private, no-store`. (La matriz y las demás pruebas transversales
-// revisan además las cabeceras de CADA respuesta que reciben.)
+// Referrer-Policy, Permissions-Policy, HSTS, X-Frame-Options, `Cross-Origin-Opener-Policy` (F6-07)
+// y `Cache-Control: no-store`; solo `GET /evidences/:id` responde `private, no-store`. (La
+// matriz y las demás pruebas transversales revisan además las cabeceras de CADA respuesta que
+// reciben.)
 //
 // Secretos: ninguna respuesta contiene `password_hash`, `token_hash`, `storage_key`, el valor de
 // los secretos del Worker, los hashes guardados ni las claves de R2; se revisan los textos y las

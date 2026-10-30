@@ -99,6 +99,8 @@ describe('rutas fuera de /api', () => {
     expect(respuesta.headers.get('Content-Type')).toBe('text/javascript');
     expect(respuesta.headers.get('Cache-Control')).toBe('public, max-age=31536000, immutable');
     expect(respuesta.headers.get('X-Frame-Options')).toBe('DENY');
+    // F6-07: COOP también en los assets estáticos (y en la API, ver fase2-transversal-helpers.ts).
+    expect(respuesta.headers.get('Cross-Origin-Opener-Policy')).toBe('same-origin');
   });
 
   it('el shell, el Service Worker, el manifest y todo HTML llevan Cache-Control: no-cache', async () => {

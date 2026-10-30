@@ -7,6 +7,7 @@ export * from './formato';
 export * from './fechas';
 export * from './uuid';
 export * from './esquemas';
+export * from './contrasenas';
 export * from './consultas';
 export * from './reportes';
 export * from './snapshot';

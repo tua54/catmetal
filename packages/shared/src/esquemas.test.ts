@@ -34,6 +34,7 @@ import {
   toleranciaSchema,
   uuidV7Schema,
 } from './esquemas';
+import { CONTRASENAS_COMUNES, esCaracterRepetido, esContrasenaComun } from './contrasenas';
 import { uuidv7 } from './uuid';
 
 const FECHA = '2026-10-29T20:55:00.000Z';
@@ -160,12 +161,78 @@ describe('primitivos', () => {
   });
 
   it('passwordSchema exige 10–128 caracteres', () => {
-    valido(passwordSchema, 'a'.repeat(10));
-    valido(passwordSchema, 'a'.repeat(128));
+    // Desde F6-07 un mismo carácter repetido se rechaza: los límites se prueban con texto variado
+    // ('ab'.repeat(n) tiene la misma longitud que antes 'a'.repeat(2n), sin ser trivial).
+    valido(passwordSchema, 'Kx7-pLm2qZ');
+    valido(passwordSchema, 'ab'.repeat(64));
     expect(mensajes(passwordSchema, 'corta')).toEqual([
       'La contraseña debe tener al menos 10 caracteres.',
     ]);
-    invalido(passwordSchema, 'a'.repeat(129));
+    expect(mensajes(passwordSchema, 'aaaa')).toEqual([
+      'La contraseña debe tener al menos 10 caracteres.',
+    ]);
+    invalido(passwordSchema, 'ab'.repeat(64) + 'c');
+  });
+
+  it('passwordSchema rechaza contraseñas comunes, sin distinguir mayúsculas (F6-07)', () => {
+    const comun = 'La contraseña es demasiado común y fácil de adivinar. Elija otra.';
+    for (const valor of [
+      '1234567890',
+      'contraseña123',
+      'Contraseña123',
+      'contraseña123', // ñ descompuesta (n + tilde combinable)
+      'CONTRASENA123',
+      'password123',
+      'Password123',
+      'qwertyuiop',
+      'QwErTyUiOp',
+      'catmetal2026',
+      'Catmetal2026!',
+      'bienvenido123',
+      'administrador',
+    ]) {
+      expect(mensajes(passwordSchema, valor), valor).toEqual([comun]);
+    }
+  });
+
+  it('passwordSchema rechaza un mismo carácter repetido (F6-07)', () => {
+    const repetido = 'La contraseña no puede ser un mismo carácter repetido.';
+    for (const valor of [
+      'a'.repeat(10),
+      'A'.repeat(9) + 'a',
+      '0'.repeat(12),
+      'ñ'.repeat(128),
+      ' '.repeat(10),
+    ]) {
+      expect(mensajes(passwordSchema, valor), valor).toEqual([repetido]);
+    }
+  });
+
+  it('passwordSchema acepta contraseñas razonables que contienen palabras comunes', () => {
+    for (const valor of [
+      'Prueba-E2E-Catmetal-2026', // contraseña de las pruebas E2E (scripts/e2e-config.mjs)
+      'contraseña-larga',
+      'una-clave-nueva-larga',
+      'Clave-Segura-2026!',
+      'password123-de-planta',
+      'aaaaaaaaab',
+      'abcde-FGHJK-23456-mnpqr', // formato de scripts/gen-dev-vars.mjs
+    ]) {
+      valido(passwordSchema, valor);
+    }
+  });
+
+  it('la lista de comunes tiene ≥ 10 caracteres, en minúsculas y NFC', () => {
+    expect(CONTRASENAS_COMUNES.size).toBeGreaterThanOrEqual(100);
+    for (const valor of CONTRASENAS_COMUNES) {
+      expect(valor.length, valor).toBeGreaterThanOrEqual(10);
+      expect(valor, valor).toBe(valor.normalize('NFC').toLowerCase());
+      expect(esContrasenaComun(valor.toUpperCase()), valor).toBe(true);
+    }
+    expect(esContrasenaComun('Prueba-E2E-Catmetal-2026')).toBe(false);
+    expect(esCaracterRepetido('x')).toBe(false);
+    expect(esCaracterRepetido('xx')).toBe(true);
+    expect(esCaracterRepetido('xy')).toBe(false);
   });
 });
 

@@ -107,6 +107,28 @@ describe('crear', () => {
       expect(await respuesta.json()).toMatchObject({ code: 'VALIDACION' });
     }
   });
+
+  it('una contraseña común o de un carácter repetido responde 400 VALIDACION y no crea nada (F6-07)', async () => {
+    const { token } = await sesionDe('admin');
+    for (const [password, mensaje] of [
+      ['Contraseña123', 'La contraseña es demasiado común y fácil de adivinar. Elija otra.'],
+      ['catmetal2026', 'La contraseña es demasiado común y fácil de adivinar. Elija otra.'],
+      ['1234567890', 'La contraseña es demasiado común y fácil de adivinar. Elija otra.'],
+      ['zzzzzzzzzzzz', 'La contraseña no puede ser un mismo carácter repetido.'],
+    ] as const) {
+      const datos = nuevoUsuario({ password });
+      const respuesta = await peticion('/api/v1/users', { token, body: datos });
+      expect(respuesta.status, password).toBe(400);
+      expect(await respuesta.json()).toMatchObject({
+        code: 'VALIDACION',
+        details: [{ campo: 'password', mensaje }],
+      });
+      const fila = await env.DB.prepare('SELECT id FROM users WHERE email = ?')
+        .bind(datos.email)
+        .first();
+      expect(fila, password).toBeNull();
+    }
+  });
 });
 
 describe('listar', () => {
@@ -201,6 +223,29 @@ describe('editar', () => {
     expect(JSON.parse(auditoria?.datos_despues ?? '{}')).toMatchObject({
       password_restablecida: true,
     });
+  });
+
+  it('restablecer con una contraseña común responde 400 VALIDACION y conserva la anterior (F6-07)', async () => {
+    const { token } = await sesionDe('admin');
+    const otro = await sesionDe('supervisor');
+    const respuesta = await editar(token, otro.u.id, { password: 'Password123' });
+    expect(respuesta.status).toBe(400);
+    expect(await respuesta.json()).toMatchObject({
+      code: 'VALIDACION',
+      details: [{ campo: 'password' }],
+    });
+    // Nada cambió: la sesión sigue viva y la contraseña anterior sigue funcionando.
+    expect((await perfil(otro.token)).status).toBe(200);
+    await iniciarSesion({ email: otro.u.email, password: otro.u.password });
+  });
+
+  it('el login no aplica la política: una contraseña común incorrecta es CREDENCIALES_INVALIDAS', async () => {
+    const otro = await crearUsuarioConClave('supervisor');
+    const respuesta = await peticion('/api/v1/auth/login', {
+      body: { email: otro.email, password: 'password123', device_id: uuidv7() },
+    });
+    expect(respuesta.status).toBe(401);
+    expect(await respuesta.json()).toMatchObject({ code: 'CREDENCIALES_INVALIDAS' });
   });
 
   it('desbloquear reinicia intentos y bloqueado_hasta', async () => {

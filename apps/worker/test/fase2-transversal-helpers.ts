@@ -215,6 +215,8 @@ export function esperarCabecerasDeSeguridad(
   expect(Number(/^max-age=(\d+)/.exec(hsts)?.[1] ?? '0')).toBeGreaterThanOrEqual(31_536_000);
   expect(hsts).toContain('includeSubDomains');
   expect(h.get('X-Frame-Options')).toBe('DENY');
+  // F6-07 de docs/auditoria/seguridad-fase-6.md.
+  expect(h.get('Cross-Origin-Opener-Policy')).toBe('same-origin');
   expect(h.get('Cache-Control')).toBe(opciones.cacheControl ?? 'no-store');
 }
 

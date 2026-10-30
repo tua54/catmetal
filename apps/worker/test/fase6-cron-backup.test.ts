@@ -173,13 +173,13 @@ describe('idempotencia por fecha', () => {
     const fecha = '2026-11-06';
     await ejecutarBackup(env, dia(fecha));
     const base = prefijoDelDia(fecha);
-    const antes = await env.EVIDENCE.list({ prefix: base });
+    const antes = await env.BACKUPS.list({ prefix: base });
 
     const presupuesto = new Presupuesto();
     const segunda = await ejecutarBackup(env, new Date(`${fecha}T09:30:00.000Z`), { presupuesto });
     expect(segunda).toEqual({ estado: 'ya_existia', fecha });
     expect(presupuesto.usadas).toBe(1);
-    const despues = await env.EVIDENCE.list({ prefix: base });
+    const despues = await env.BACKUPS.list({ prefix: base });
     expect(despues.objects.map((o) => [o.key, o.etag, o.uploaded.getTime()])).toEqual(
       antes.objects.map((o) => [o.key, o.etag, o.uploaded.getTime()]),
     );
@@ -218,7 +218,7 @@ describe('reanudación con presupuesto agotado', () => {
     expect(progreso.en_curso.cursor).toHaveLength(1);
     expect(progreso.en_curso_hasta).toBeNull();
     expect(progreso.invocaciones).toBe(1);
-    expect(await env.EVIDENCE.head(progreso.en_curso.parcial)).not.toBeNull();
+    expect(await env.BACKUPS.head(progreso.en_curso.parcial)).not.toBeNull();
 
     const segunda = await ejecutarBackup(env, new Date(`${fecha}T08:30:00.000Z`), {
       tamanoPagina: 100,
@@ -228,7 +228,7 @@ describe('reanudación con presupuesto agotado', () => {
     // audit_log quedó en dos miembros gzip: uno por invocación.
     const auditoria = manifest.tablas.find((t) => t.tabla === 'audit_log');
     expect(auditoria?.segmentos_gzip).toHaveLength(2);
-    expect(await env.EVIDENCE.head(progreso.en_curso.parcial)).toBeNull();
+    expect(await env.BACKUPS.head(progreso.en_curso.parcial)).toBeNull();
   });
 
   it('con muchas pausas (también entre tablas) el resultado es idéntico', async () => {
@@ -274,7 +274,7 @@ describe('reanudación con presupuesto agotado', () => {
     const clave = `${prefijoDelDia(fecha)}progreso.json`;
     const progreso = (await leerProgreso(fecha)) as Fila;
     const arrendado = { ...progreso, en_curso_hasta: `${fecha}T08:20:00.000Z` };
-    await env.EVIDENCE.put(clave, JSON.stringify(arrendado));
+    await env.BACKUPS.put(clave, JSON.stringify(arrendado));
 
     const durante = await ejecutarBackup(env, new Date(`${fecha}T08:10:00.000Z`));
     expect(durante).toEqual({ estado: 'en_curso_en_otra_invocacion', fecha });
@@ -296,7 +296,7 @@ describe('reanudación con presupuesto agotado', () => {
     });
     const progreso = (await leerProgreso(fecha)) as { en_curso: { parcial: string } };
     // Se pierde el parcial (por ejemplo, borrado a mano).
-    await env.EVIDENCE.delete(progreso.en_curso.parcial);
+    await env.BACKUPS.delete(progreso.en_curso.parcial);
 
     await expect(ejecutarBackup(env, dia(fecha))).rejects.toThrow(/Falta el parcial/);
     const reiniciado = (await leerProgreso(fecha)) as Fila;
@@ -307,5 +307,54 @@ describe('reanudación con presupuesto agotado', () => {
     expect((await ejecutarBackup(env, dia(fecha))).estado).toBe('completo');
     const manifest = await verificarBackupCompleto(fecha);
     expect(manifest.tablas.find((t) => t.tabla === 'audit_log')?.segmentos_gzip).toEqual([0]);
+  });
+});
+
+describe('bucket propio de los backups (F6-08)', () => {
+  /** Todas las claves de un bucket (paginando el listado). */
+  async function clavesDe(bucket: R2Bucket): Promise<string[]> {
+    const claves: string[] = [];
+    let cursor: string | undefined;
+    for (;;) {
+      const pagina = await bucket.list(cursor === undefined ? {} : { cursor });
+      claves.push(...pagina.objects.map((o) => o.key));
+      if (!pagina.truncated) {
+        return claves;
+      }
+      cursor = pagina.cursor;
+    }
+  }
+
+  // La subida multipart se verifica igual en fase6-cron-multipart.test.ts (partes reales de 5 MiB).
+  it('tablas, manifest, progreso y parciales van a BACKUPS y nada a EVIDENCE', async () => {
+    const fecha = '2026-11-15';
+    const base = prefijoDelDia(fecha);
+    const evidenciasAntes = await clavesDe(env.EVIDENCE);
+
+    // Mismo corte que en «reanudación»: pausa a mitad de audit_log con un parcial guardado.
+    const pausada = await ejecutarBackup(env, dia(fecha), {
+      tamanoPagina: 100,
+      presupuesto: new Presupuesto({ maxOperaciones: 40 }),
+    });
+    expect(pausada.estado).toBe('pausado');
+    const progreso = (await leerProgreso(fecha)) as { en_curso: { parcial: string } };
+    expect(await env.EVIDENCE.head(`${base}progreso.json`)).toBeNull();
+    expect(progreso.en_curso.parcial.startsWith(`${base}_parciales/`)).toBe(true);
+    expect(await env.BACKUPS.head(progreso.en_curso.parcial)).not.toBeNull();
+    expect(await env.EVIDENCE.head(progreso.en_curso.parcial)).toBeNull();
+    expect(await clavesDe(env.EVIDENCE)).toEqual(evidenciasAntes);
+
+    const completa = await ejecutarBackup(env, new Date(`${fecha}T08:30:00.000Z`), {
+      tamanoPagina: 100,
+    });
+    expect(completa.estado).toBe('completo');
+    const manifest = await verificarBackupCompleto(fecha);
+    for (const entrada of manifest.tablas) {
+      expect(await env.BACKUPS.head(`${base}${entrada.archivo}`), entrada.tabla).not.toBeNull();
+    }
+    expect(await env.BACKUPS.head(`${base}manifest.json`)).not.toBeNull();
+    // Ni un objeto del backup (ni de ningún otro día) en el bucket de evidencias.
+    expect((await env.EVIDENCE.list({ prefix: 'backups/' })).objects).toEqual([]);
+    expect(await clavesDe(env.EVIDENCE)).toEqual(evidenciasAntes);
   });
 });

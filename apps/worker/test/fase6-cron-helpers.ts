@@ -34,17 +34,17 @@ export async function sha256Hex(bytes: Uint8Array): Promise<string> {
 }
 
 export async function leerManifest(fecha: string): Promise<ManifestBackup | null> {
-  const objeto = await env.EVIDENCE.get(`${prefijoDelDia(fecha)}manifest.json`);
+  const objeto = await env.BACKUPS.get(`${prefijoDelDia(fecha)}manifest.json`);
   return objeto === null ? null : objeto.json<ManifestBackup>();
 }
 
 export async function leerProgreso(fecha: string): Promise<Fila | null> {
-  const objeto = await env.EVIDENCE.get(`${prefijoDelDia(fecha)}progreso.json`);
+  const objeto = await env.BACKUPS.get(`${prefijoDelDia(fecha)}progreso.json`);
   return objeto === null ? null : objeto.json<Fila>();
 }
 
 export async function bytesDe(clave: string): Promise<Uint8Array> {
-  const objeto = await env.EVIDENCE.get(clave);
+  const objeto = await env.BACKUPS.get(clave);
   expect(objeto, clave).not.toBeNull();
   return new Uint8Array(await (objeto as R2ObjectBody).arrayBuffer());
 }
@@ -114,7 +114,7 @@ export async function verificarBackupCompleto(
     expect(enBackup, entrada.tabla).toEqual(enBase);
   }
   expect(await leerProgreso(fecha)).toBeNull();
-  const parciales = await env.EVIDENCE.list({ prefix: `${prefijoDelDia(fecha)}_parciales/` });
+  const parciales = await env.BACKUPS.list({ prefix: `${prefijoDelDia(fecha)}_parciales/` });
   expect(parciales.objects).toEqual([]);
   return m;
 }

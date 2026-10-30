@@ -27,6 +27,7 @@ describe('@catmetal/shared', () => {
       'diaBogota',
       'uuidv7',
       'esUuidV7',
+      'esContrasenaComun',
       'mutacionSchema',
       'syncPushRequestSchema',
       'syncPullQuerySchema',

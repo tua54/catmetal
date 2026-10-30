@@ -1,7 +1,9 @@
 // Backup diario paginado de D1 a R2 (spec §2 y §4 "Backups", ADR 0014 enmendada por la ADR 0016,
 // revisión del esquema H9 y revisión de la Fase 3 A3).
 //
-// Formato en R2 (bucket privado `EVIDENCE`, prefijo `backups/`, retención por regla de ciclo de vida):
+// Formato en R2 (bucket privado `BACKUPS`, propio de los backups y separado de las evidencias por la
+// F6-08 de docs/auditoria/seguridad-fase-6.md; prefijo `backups/`, retención de 90 días por regla de
+// ciclo de vida sobre ese prefijo):
 //
 //   backups/AAAA-MM-DD/<tabla>.ndjson.gz   una línea JSON por fila, todas las columnas, gzip
 //   backups/AAAA-MM-DD/manifest.json       solo existe si el backup del día está COMPLETO
@@ -188,7 +190,9 @@ export async function ejecutarBackup(
     tamanoPagina: opciones.tamanoPagina ?? TAMANO_PAGINA,
     tamanoParte: opciones.tamanoParteBytes ?? TAMANO_PARTE_BYTES,
   };
-  const bucket = env.EVIDENCE;
+  // Todo lo del backup (tablas, manifest, progreso y parciales) va al bucket BACKUPS; EVIDENCE queda
+  // solo para las fotos (F6-08).
+  const bucket = env.BACKUPS;
   const fecha = fechaBackup(ahora);
   const base = prefijoDelDia(fecha);
   const claveManifest = `${base}manifest.json`;

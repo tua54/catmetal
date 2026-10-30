@@ -17,6 +17,7 @@ import {
   TIPOS_NOVEDAD,
   UNIDADES,
 } from './dominio';
+import { esCaracterRepetido, esContrasenaComun } from './contrasenas';
 import { CODIGOS_ERROR } from './errores';
 import { esUuidV7, REGEX_UUID_V7 } from './uuid';
 
@@ -105,10 +106,22 @@ export const emailSchema = z
       .max(254, { error: 'El correo admite máximo 254 caracteres.' }),
   );
 
+/**
+ * Contraseña al crear un usuario o restablecerla (NO en el login, ver `loginSchema`): 10–128
+ * caracteres, no está en la lista de contraseñas comunes ni es un mismo carácter repetido (F6-07,
+ * ver contrasenas.ts). Las dos últimas reglas solo se evalúan con la longitud mínima cumplida, para
+ * que una contraseña corta reciba un único mensaje.
+ */
 export const passwordSchema = z
   .string({ error: 'La contraseña es obligatoria.' })
   .min(10, { error: 'La contraseña debe tener al menos 10 caracteres.' })
-  .max(128, { error: 'La contraseña admite máximo 128 caracteres.' });
+  .max(128, { error: 'La contraseña admite máximo 128 caracteres.' })
+  .refine((valor) => valor.length < 10 || !esCaracterRepetido(valor), {
+    error: 'La contraseña no puede ser un mismo carácter repetido.',
+  })
+  .refine((valor) => valor.length < 10 || !esContrasenaComun(valor), {
+    error: 'La contraseña es demasiado común y fácil de adivinar. Elija otra.',
+  });
 
 const unidadSchema = z.enum(UNIDADES, { error: 'La unidad no es válida.' });
 const rolSchema = z.enum(ROLES, { error: 'El rol no es válido.' });

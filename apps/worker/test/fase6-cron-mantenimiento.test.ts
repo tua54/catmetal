@@ -182,7 +182,7 @@ describe('ejecutarCron', () => {
   it('un error del backup no impide el mantenimiento y queda registrado', async () => {
     const fecha = '2026-12-20';
     // progreso.json corrupto: el backup falla al leerlo (R2 real, sin mocks).
-    await env.EVIDENCE.put(`${prefijoDelDia(fecha)}progreso.json`, '{no es json');
+    await env.BACKUPS.put(`${prefijoDelDia(fecha)}progreso.json`, '{no es json');
     const logs = espiarLogs();
     const resultado = await ejecutarCron(
       env,

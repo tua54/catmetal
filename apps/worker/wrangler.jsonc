@@ -68,11 +68,20 @@
     },
   ],
 
-  // R2: evidencias (fotos) y backups. El bucket nunca es público.
+  // R2: dos buckets privados (nunca públicos, sin r2.dev ni dominio propio).
+  // - EVIDENCE: solo evidencias (fotos de consumos), bajo `evidencias/`.
+  // - BACKUPS: solo los backups diarios de D1 (ADR 0014/0016), bajo `backups/AAAA-MM-DD/…`, con la
+  //   regla de ciclo de vida de 90 días sobre el prefijo `backups/`. Van aparte (F6-08 de
+  //   docs/auditoria/seguridad-fase-6.md) porque contienen hashes, correos y `payload_json`: una
+  //   credencial o un token con acceso a las fotos no debe poder leer los backups.
   "r2_buckets": [
     {
       "binding": "EVIDENCE",
       "bucket_name": "mp-evidencias-local",
+    },
+    {
+      "binding": "BACKUPS",
+      "bucket_name": "mp-backups-local",
     },
   ],
 
@@ -122,6 +131,11 @@
           "binding": "EVIDENCE",
           "bucket_name": "mp-evidencias-staging",
         },
+        {
+          // Bucket propio de los backups (F6-08); regla de ciclo de vida de 90 días en `backups/`.
+          "binding": "BACKUPS",
+          "bucket_name": "mp-backups-staging",
+        },
       ],
       "kv_namespaces": [
         {
@@ -166,6 +180,11 @@
         {
           "binding": "EVIDENCE",
           "bucket_name": "mp-evidencias-prod",
+        },
+        {
+          // Bucket propio de los backups (F6-08); regla de ciclo de vida de 90 días en `backups/`.
+          "binding": "BACKUPS",
+          "bucket_name": "mp-backups-prod",
         },
       ],
       "kv_namespaces": [

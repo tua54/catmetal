@@ -20,6 +20,11 @@ export const POLITICA_CSP = [
   "base-uri 'self'",
   "form-action 'self'",
   "frame-ancestors 'none'",
+  // Trusted Types (`require-trusted-types-for 'script'`) se difiere a propósito (F6-07 de
+  // docs/auditoria/seguridad-fase-6.md): exigirlo rompería React DOM y las librerías que asignan a
+  // sinks de DOM (innerHTML del runtime, Workbox) sin una política propia y una revisión de cada
+  // dependencia. Con `script-src 'self'` sin 'unsafe-inline'/'unsafe-eval' y sin
+  // `dangerouslySetInnerHTML` en el código, el beneficio marginal no justifica ese trabajo ahora.
 ].join('; ');
 
 export const CABECERAS_SEGURIDAD: Readonly<Record<string, string>> = {
@@ -29,6 +34,9 @@ export const CABECERAS_SEGURIDAD: Readonly<Record<string, string>> = {
   'Permissions-Policy': 'camera=(self), microphone=(), geolocation=()',
   'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
   'X-Frame-Options': 'DENY',
+  // F6-07: aísla el contexto de navegación (una ventana abierta por otro origen no conserva
+  // `window.opener` hacia la PWA). La PWA no usa popups OAuth ni comunicación entre ventanas.
+  'Cross-Origin-Opener-Policy': 'same-origin',
 };
 
 /** Respuestas de la API (`/api` y `/api/*`): nunca se cachean (datos de negocio y sesiones). */

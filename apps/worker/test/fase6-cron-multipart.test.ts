@@ -74,5 +74,7 @@ describe('multipart upload', () => {
     expect(auditoria?.filas).toBeGreaterThanOrEqual(1500);
     expect(auditoria?.bytes).toBeGreaterThan(TAMANO_PARTE_BYTES);
     expect(auditoria?.segmentos_gzip.length).toBeGreaterThan(1);
+    // F6-08: la subida multipart (partes, parciales y progreso) va al bucket BACKUPS, nunca a EVIDENCE.
+    expect((await env.EVIDENCE.list({ prefix: 'backups/' })).objects).toEqual([]);
   }, 120_000);
 });

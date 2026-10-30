@@ -77,7 +77,7 @@ describe('modo continuación', () => {
     const fecha = '2027-01-01';
     const r = await ejecutarBackup(env, a(fecha, 9), { modo: 'continuacion' });
     expect(r).toEqual({ estado: 'sin_iniciar', fecha });
-    const objetos = await env.EVIDENCE.list({ prefix: prefijoDelDia(fecha) });
+    const objetos = await env.BACKUPS.list({ prefix: prefijoDelDia(fecha) });
     expect(objetos.objects).toEqual([]);
   });
 
