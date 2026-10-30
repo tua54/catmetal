@@ -46,9 +46,13 @@
 
   // Variables no secretas del entorno local. `ORIGENES_DEV` lista los orígenes que, solo en desarrollo,
   // se aceptan además del propio en la verificación de `Origin` (proxy de Vite, ADR 0002).
+  // `VERSION_MINIMA_CLIENTE` (B5, ADR 0026): versión de contrato mínima del cliente (`X-Version-Cliente`);
+  // menor → 426 `CLIENTE_DESACTUALIZADO`. Vale "1" (no bloquea a nadie) hasta que un cambio de
+  // contrato exija actualizar las tablets; se repite en cada entorno (docs/despliegue.md).
   "vars": {
     "ENTORNO": "local",
     "ORIGENES_DEV": "http://localhost:5173,http://127.0.0.1:5173",
+    "VERSION_MINIMA_CLIENTE": "1",
   },
 
   // Secretos que el Worker exige (no se heredan: se repiten en cada entorno). Con esta lista,
@@ -113,6 +117,7 @@
         "ENTORNO": "staging",
         // Vacío: fuera de desarrollo solo se acepta el propio origen.
         "ORIGENES_DEV": "",
+        "VERSION_MINIMA_CLIENTE": "1",
       },
       "secrets": {
         "required": ["JWT_SECRET", "REFRESH_SECRET"],
@@ -163,6 +168,7 @@
       "vars": {
         "ENTORNO": "production",
         "ORIGENES_DEV": "",
+        "VERSION_MINIMA_CLIENTE": "1",
       },
       "secrets": {
         "required": ["JWT_SECRET", "REFRESH_SECRET"],

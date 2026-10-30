@@ -4,6 +4,7 @@ import {
   aprobarSchema,
   asignarSupervisoresSchema,
   CABECERA_HORA_DISPOSITIVO,
+  CABECERA_VERSION_CLIENTE,
   cantidadSchema,
   crearConsumoSchema,
   crearMaterialSchema,
@@ -35,6 +36,8 @@ import {
   TIPOS_CAMBIO_SYNC,
   toleranciaSchema,
   uuidV7Schema,
+  VERSION_CLIENTE,
+  versionClienteDe,
 } from './esquemas';
 import { CONTRASENAS_COMUNES, esCaracterRepetido, esContrasenaComun } from './contrasenas';
 import { uuidv7 } from './uuid';
@@ -1006,5 +1009,52 @@ describe('configuración global de Zod', () => {
     expect(z.config().jitless).toBe(true);
     const r = loginSchema.safeParse({ email: 1 });
     expect(r.success).toBe(false);
+  });
+});
+
+describe('versión del cliente (B5, ADR 0026)', () => {
+  it('la versión de contrato de la v1.1 es el entero 2 y viaja en X-Version-Cliente', () => {
+    expect(VERSION_CLIENTE).toBe(2);
+    expect(Number.isSafeInteger(VERSION_CLIENTE)).toBe(true);
+    expect(CABECERA_VERSION_CLIENTE).toBe('X-Version-Cliente');
+  });
+
+  it.each([
+    ['1', 1],
+    ['2', 2],
+    ['37', 37],
+    [String(VERSION_CLIENTE), VERSION_CLIENTE],
+    ['999999', 999_999],
+    [3, 3],
+  ])('versionClienteDe(%j) → %i', (valor, esperado) => {
+    expect(versionClienteDe(valor)).toBe(esperado);
+  });
+
+  it.each([
+    ['ausente', undefined],
+    ['null', null],
+    ['vacía', ''],
+    ['espacios', '   '],
+    ['texto', 'dos'],
+    ['decimal', '2.5'],
+    ['negativa', '-3'],
+    ['cero', '0'],
+    ['con ceros a la izquierda', '02'],
+    ['semver', '1.1.0'],
+    ['con signo', '+2'],
+    ['notación científica', '1e3'],
+    ['hexadecimal', '0x2'],
+    ['fuera de rango', '1000000'],
+    ['muy larga', '99999999999999999999'],
+    ['número decimal', 2.5],
+    ['número infinito', Number.POSITIVE_INFINITY],
+    ['NaN', Number.NaN],
+    ['número cero', 0],
+    ['número negativo', -1],
+    ['booleano', true],
+    ['objeto', { version: 2 }],
+    ['lista', ['2']],
+  ])('un valor ausente o inválido (%s) cuenta como versión 1, sin rechazar', (_nombre, valor) => {
+    expect(versionClienteDe(valor)).toBe(1);
   });
 });

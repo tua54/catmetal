@@ -65,6 +65,37 @@ export function horaDeEnvio(valor: unknown): string | null {
   return resultado.success ? resultado.data : null;
 }
 
+/**
+ * Versión de contrato del cliente (B5, ADR 0026). Es un entero que se sube solo cuando un cambio
+ * del contrato exige que los clientes viejos se actualicen. La v1.0 no mandaba la cabecera y cuenta
+ * como 1; la v1.1 es la 2.
+ */
+export const VERSION_CLIENTE = 2;
+
+/** Cabecera con `VERSION_CLIENTE` en toda petición del cliente a `/api/v1` (REST y `/sync/*`). */
+export const CABECERA_VERSION_CLIENTE = 'X-Version-Cliente';
+
+/** Mayor versión aceptada; un valor más grande es inválido y cuenta como 1. */
+const MAX_VERSION_CLIENTE = 999_999;
+
+/** Entero positivo en decimal, sin signo, sin ceros a la izquierda y con hasta 6 cifras. */
+const VERSION_DECIMAL = /^[1-9]\d{0,5}$/;
+
+/**
+ * Versión de la cabecera `X-Version-Cliente` o de la variable `VERSION_MINIMA_CLIENTE`. Un valor
+ * ausente o inválido (no entero, cero, negativo o fuera de rango) cuenta como **1**: nunca rechaza
+ * la petición por formato (ADR 0026).
+ */
+export function versionClienteDe(valor: unknown): number {
+  if (typeof valor === 'number') {
+    return Number.isSafeInteger(valor) && valor >= 1 && valor <= MAX_VERSION_CLIENTE ? valor : 1;
+  }
+  if (typeof valor === 'string' && VERSION_DECIMAL.test(valor)) {
+    return Number(valor);
+  }
+  return 1;
+}
+
 /** Tiene como máximo 3 decimales (el número es el double más cercano a un decimal de 3 cifras). */
 function tieneMaximo3Decimales(valor: number): boolean {
   return Number(valor.toFixed(3)) === valor;

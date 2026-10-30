@@ -35,6 +35,7 @@ const LISTA_CODIGOS_ERROR = [
   'AUTOR_NO_COINCIDE',
   'EPOCA_CAMBIADA',
   'ULTIMO_ADMIN',
+  'CLIENTE_DESACTUALIZADO',
   'ERROR_INTERNO',
 ] as const;
 
@@ -97,6 +98,10 @@ export const MENSAJES_ERROR: Readonly<Record<CodigoError, string>> = {
   // /sync/push con una época distinta de la del servidor (restauración, ADR 0009): no se procesa nada.
   EPOCA_CAMBIADA: 'El servidor fue restaurado. Se están sincronizando de nuevo sus registros.',
   ULTIMO_ADMIN: 'No se puede desactivar ni cambiar el rol del último administrador activo.',
+  // Versión del cliente menor que la mínima del servidor (B5, ADR 0026): no se procesó nada y la
+  // app se actualiza sola, sin perder lo pendiente. El aviso bloqueante de la PWA tiene su propio texto.
+  CLIENTE_DESACTUALIZADO:
+    'Hay una versión nueva de la app. Se actualizará sin perder sus registros pendientes.',
   ERROR_INTERNO: 'Ocurrió un error inesperado en el servidor. Intente de nuevo más tarde.',
 };
 
@@ -134,6 +139,8 @@ export const ESTADO_HTTP_POR_CODIGO: Readonly<Record<CodigoError, number>> = {
   AUTOR_NO_COINCIDE: 403,
   EPOCA_CAMBIADA: 409,
   ULTIMO_ADMIN: 422,
+  // 426 Upgrade Required: la petición entera se rechaza antes de procesarla (ADR 0026).
+  CLIENTE_DESACTUALIZADO: 426,
   ERROR_INTERNO: 500,
 };
 

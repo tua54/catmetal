@@ -33,6 +33,9 @@ describe('@catmetal/shared', () => {
       'syncPullQuerySchema',
       'listarOrdenesQuerySchema',
       'idParamSchema',
+      'VERSION_CLIENTE',
+      'CABECERA_VERSION_CLIENTE',
+      'versionClienteDe',
     ];
     for (const nombre of esperados) {
       expect(shared, nombre).toHaveProperty(nombre);

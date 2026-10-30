@@ -9,6 +9,7 @@ import { manejarError, manejarNoEncontrado } from './errores';
 import { limitarCuerpo } from './middleware/limite-cuerpo';
 import { verificarOrigen } from './middleware/origen';
 import { verificarSecretos } from './middleware/secretos';
+import { verificarVersionCliente } from './middleware/version-cliente';
 import { crearRutasAuditoria } from './rutas/auditoria';
 import { crearRutasAuth } from './rutas/auth';
 import { crearRutasConsumos } from './rutas/consumos';
@@ -68,6 +69,8 @@ export function crearApp(): Hono<AppEnv> {
   // CSRF por Origin en toda la API, antes de cualquier ruta (también en /auth/login y /auth/refresh).
   app.use('/api', verificarOrigen);
   app.use('/api/*', verificarOrigen);
+  // Versión mínima del cliente (B5, ADR 0026): 426 antes de leer el cuerpo, autenticar o tocar D1.
+  app.use('/api/v1/*', verificarVersionCliente);
   // Tamaño máximo del cuerpo (H-05), antes de autenticar, validar o tocar D1.
   app.use('/api/v1/*', limitarCuerpo);
 

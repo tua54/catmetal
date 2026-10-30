@@ -41,6 +41,7 @@ const MINIMOS = [
   'AUTOR_NO_COINCIDE',
   'EPOCA_CAMBIADA',
   'ULTIMO_ADMIN',
+  'CLIENTE_DESACTUALIZADO',
   'ERROR_INTERNO',
 ];
 
@@ -134,6 +135,13 @@ describe('errores', () => {
     expect(ESTADO_HTTP_POR_CODIGO.EPOCA_CAMBIADA).toBe(409);
     expect(MENSAJES_ERROR.ULTIMO_ADMIN).toBe(
       'No se puede desactivar ni cambiar el rol del último administrador activo.',
+    );
+  });
+
+  it('CLIENTE_DESACTUALIZADO responde 426 con un mensaje para el operario (B5, ADR 0026)', () => {
+    expect(ESTADO_HTTP_POR_CODIGO.CLIENTE_DESACTUALIZADO).toBe(426);
+    expect(MENSAJES_ERROR.CLIENTE_DESACTUALIZADO).toBe(
+      'Hay una versión nueva de la app. Se actualizará sin perder sus registros pendientes.',
     );
   });
 
