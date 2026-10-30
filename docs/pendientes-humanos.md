@@ -42,3 +42,7 @@ Los comandos exactos, en orden, están en `docs/despliegue.md` (secciones 2 a 6)
 15. Opcional: Cloudflare Access para `/admin*` y `/api/v1/users*` (probar en staging).
 16. Revisión de seguridad final (F6-01): usar una cuenta de Cloudflare separada para staging o un token de CI sin alcance sobre producción; environment `staging` en GitHub con política de ramas (solo `main`), revisores y sin auto-aprobación.
 17. Revisar las 14 verificaciones de staging de `docs/auditoria/seguridad-fase-6.md` (sección 6) antes de producción.
+
+## Verificaciones en tablet real (correcciones v1.1)
+
+- **Duración del reemplazo del snapshot (M5, ADR 0022).** Medir en la tablet de planta, en Chromium y en Safari, cuánto tarda `completarSnapshot` con la partición de un jefe (decenas de miles de consumos). En fake-indexeddb, 10.000 consumos tardan 3,3-4,9 s, pero esa implementación es O(n) por actualización y no representa al navegador. Si supera unos 3 s, hay que optimizar el recálculo.

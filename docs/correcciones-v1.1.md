@@ -56,6 +56,8 @@ Los cambios de la spec de esta ronda están en `docs/spec.md` §14 (v2.1).
 
 ### M2. `alerta_reloj` marca casi todo lo registrado offline (spec §6, v2.1)
 
+- **Estado**: PARCIAL: servidor RESUELTO (d498af3); falta el cliente (`enviado_at`, `X-Hora-Dispositivo`) y la E2E. ADR 0019.
+
 - **Dónde**: `apps/worker/src/auditoria/auditar.ts:220-229` (`calcularAlertaReloj`), alimentado con `client_created_at` en `dominio/consumos.ts:366` y otros sitios.
 - **Aceptación**:
   - El cliente envía `enviado_at` en `/sync/push` y `X-Hora-Dispositivo` en el REST que escribe. Ambos se validan con Zod; ante un formato inválido, se ignoran.
@@ -85,6 +87,8 @@ Los cambios de la spec de esta ronda están en `docs/spec.md` §14 (v2.1).
 
 ### M5. Al resincronizar, la tablet borra órdenes y catálogos antes de volver a bajarlos
 
+- **Estado**: RESUELTO (bf91c2f). ADR 0022. Pruebas: `apps/web/src/sync/motor.test.ts` (describe "snapshot en un área temporal (M5)…") y `apps/web/src/datos/snapshot-temporal.test.ts`.
+
 - **Dónde**: `apps/web/src/datos/entidades.ts:399-413` (`reiniciarEstadoSincronizado`) y `apps/web/src/datos/aplicar-cambios.ts:239-250` y `306-310`.
 - **Escenario**: la red se cae a mitad del snapshot y el supervisor queda sin órdenes ni materiales en la tablet. Ya no puede registrar sin conexión.
 - **Aceptación**:
@@ -93,6 +97,8 @@ Los cambios de la spec de esta ronda están en `docs/spec.md` §14 (v2.1).
   - Prueba: si el snapshot se completa, el estado queda reemplazado.
 
 ### M6. Después de una restauración del servidor, la tablet conserva estados que el servidor ya no tiene
+
+- **Estado**: RESUELTO (bf91c2f). ADR 0022. Pruebas: `motor.test.ts` (M6) y `apps/web/src/datos/outbox.test.ts` ("M6: un conflicto adopta la copia del servidor…").
 
 - **Dónde**: `apps/web/src/datos/servidor.ts:179-195` y `apps/web/src/datos/entidades.ts:76-81` y `:419-424` (`masReciente` se queda con la versión más alta).
 - **Escenario**: el jefe aprueba en línea por REST, y después se restaura un punto anterior. La tablet sigue mostrando "Validado por jefe" mientras el servidor tiene `pendiente`, y editar ese consumo falla o entra en conflicto.
