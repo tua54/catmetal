@@ -3,14 +3,17 @@
 
 import { MENSAJES_ERROR } from '@catmetal/shared';
 import type { EstadoChip } from '../../components/ui';
-import type { ConsumoLocal, ErrorSync } from '../../datos';
+import { creacionNoAceptada, type ConsumoLocal, type ErrorSync } from '../../datos';
 
 export interface AccionesConsumo {
   /** S4: editar un consumo propio mientras está pendiente de validación. */
   editar: boolean;
   /** S3: crear un consumo corregido (`corrige_a`) de uno rechazado por el jefe. */
   corregir: boolean;
-  /** El servidor rechazó la CREACIÓN (nunca existió allí): registrarlo de nuevo, sin `corrige_a`. */
+  /**
+   * El servidor no aceptó la CREACIÓN (la rechazó o el id choca con un registro ajeno, B3): nunca
+   * existió allí como suyo. Registrarlo de nuevo, con otro id y sin `corrige_a`.
+   */
   registrarDeNuevo: boolean;
   /** El servidor marcó `requiere_novedad` y no hay novedad: justificarla. */
   justificar: boolean;
@@ -25,7 +28,7 @@ function rechazadoPorJefe(c: ConsumoLocal): boolean {
 
 export function accionesDeConsumo(c: ConsumoLocal, userId: string): AccionesConsumo {
   const propio = c.registrado_por === userId;
-  const creacionRechazada = c.servidor === null && c.estado_local === 'rechazado_sync';
+  const creacionRechazada = creacionNoAceptada(c);
   const validado = c.estado_local === 'aprobado' || c.servidor?.estado === 'aprobado';
   const rechazado = rechazadoPorJefe(c);
   const perdido = c.perdido_en_restauracion === true;
@@ -114,6 +117,12 @@ export function explicacionEstado(c: ConsumoLocal): string {
         ? 'El servidor no aceptó este registro. Sus datos siguen en esta tablet: puede registrarlo de nuevo con los datos corregidos.'
         : 'El servidor no aceptó el último cambio. Se muestra la versión que tiene el servidor.';
     case 'conflicto':
+      if (c.error_sync?.code === 'ID_DUPLICADO') {
+        // B3: colisión de id con un registro ajeno. El servidor no envía la fila de la otra persona.
+        return c.servidor === null
+          ? 'Ya existe un registro con este identificador en el servidor. Sus datos siguen en esta tablet: regístrelo de nuevo para enviarlo con otro identificador.'
+          : 'Ya existe un registro con este identificador en el servidor. Su último cambio no se aplicó; revise el registro y, si hace falta, edítelo de nuevo.';
+      }
       return 'Este registro cambió en el servidor mientras usted trabajaba sin conexión. Se muestra la versión del servidor; revísela y, si hace falta, edítela de nuevo.';
   }
 }

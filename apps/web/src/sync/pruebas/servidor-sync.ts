@@ -2,7 +2,9 @@
 // fake-indexeddb). Implementa el contrato de shared:
 // - `POST /sync/push`: sobre `{ user_id, mutaciones }`; 403 `AUTOR_NO_COINCIDE` si `user_id ≠ sub`;
 //   resultados por `indice`; idempotencia por `mutation_id` ligada al usuario; dependencia rechazada;
-//   un error transitorio detiene el lote y las siguientes quedan sin resultado.
+//   un error transitorio detiene el lote y las siguientes quedan sin resultado; una colisión de id
+//   (mutation_id de otro usuario o entidad que ya existe) responde `conflicto` `ID_DUPLICADO` sin
+//   `servidor` (B3).
 // - `GET /sync/pull?cursor=`: `audit_log` por `seq`, estado actual, `hay_mas`, cursor = último revisado.
 // - `GET /sync/snapshot`: estado actual paginado; cursor = `MAX(seq)` al pedir la primera página.
 // - `PUT /evidences/:id`: sha256 del cuerpo; 404 `EVIDENCIA_DESCONOCIDA`; 409 si ya se subió otra.
@@ -12,6 +14,7 @@ import {
   crearError,
   ESTADO_HTTP_POR_CODIGO,
   leerMutationId,
+  MENSAJES_ERROR,
   mutacionSchema,
   type CambioSync,
   type CodigoError,
@@ -97,6 +100,11 @@ function error(code: CodigoError): Response {
   return json(crearError(code), ESTADO_HTTP_POR_CODIGO[code]);
 }
 
+/** Colisión de clave primaria (B3): conflicto SIN `servidor` (no se filtra la fila ajena). */
+function colisionDeId(): Omit<ResultadoMutacion, 'indice' | 'mutation_id'> {
+  return { resultado: 'conflicto', code: 'ID_DUPLICADO', message: MENSAJES_ERROR.ID_DUPLICADO };
+}
+
 async function sha256(datos: ArrayBuffer): Promise<string> {
   const hash = await crypto.subtle.digest('SHA-256', datos);
   return Array.from(new Uint8Array(hash), (b) => b.toString(16).padStart(2, '0')).join('');
@@ -146,6 +154,9 @@ export function crearServidorSync(): ServidorSync {
       };
     }
     const actual = estado.get(clave('consumptions', consumoId))?.datos as Consumo | undefined;
+    if (colisiona(m)) {
+      return { mutation_id: m.mutation_id, ...colisionDeId() };
+    }
     switch (m.tipo) {
       case 'consumo.crear': {
         const p = m.payload;
@@ -275,6 +286,28 @@ export function crearServidorSync(): ServidorSync {
     }
   }
 
+  /**
+   * Como el real (B3, commit f8b5c1b): el id que crea la mutación ya existe en el servidor (de otra
+   * persona, o propio con otra clave natural). El reintento propio de la MISMA mutación no llega
+   * aquí: lo responde la idempotencia por `mutation_id`.
+   */
+  function colisiona(m: Mutacion): boolean {
+    switch (m.tipo) {
+      case 'consumo.crear':
+        return estado.has(clave('consumptions', m.payload.id));
+      case 'novedad.crear':
+        return (
+          estado.has(clave('incidents', m.payload.id)) ||
+          m.payload.evidencias.some((e) => estado.has(clave('evidences', e.id)))
+        );
+      case 'consumo.aprobar':
+      case 'consumo.rechazar':
+        return estado.has(clave('validations', m.payload.id));
+      default:
+        return false;
+    }
+  }
+
   function push(userId: string, cuerpo: unknown): Response {
     const sobre = cuerpo as { user_id?: unknown; epoca?: unknown; mutaciones?: unknown };
     if (sobre.user_id !== userId) {
@@ -309,7 +342,7 @@ export function crearServidorSync(): ServidorSync {
         resultados.push(
           guardada.user_id === userId
             ? { ...guardada.resultado, indice }
-            : { indice, mutation_id: id, resultado: 'rechazada', code: 'ID_DUPLICADO' },
+            : { indice, mutation_id: id, ...colisionDeId() },
         );
         continue;
       }

@@ -212,6 +212,17 @@ async function prepararFotos(fotos: readonly Blob[]): Promise<FotoPreparada[]> {
   return preparadas;
 }
 
+/**
+ * La creación del consumo nunca existió en el servidor como suya: el servidor la rechazó o respondió
+ * conflicto por una colisión de id con una fila ajena (`ID_DUPLICADO`, B3). No se le puede colgar
+ * nada (edición, novedad); la UI ofrece registrarlo de nuevo.
+ */
+export function creacionNoAceptada(c: Pick<ConsumoLocal, 'servidor' | 'estado_local'>): boolean {
+  return (
+    c.servidor === null && (c.estado_local === 'rechazado_sync' || c.estado_local === 'conflicto')
+  );
+}
+
 // ---------------------------------------------------------------------------------------------
 // Acciones locales (cada una en una sola transacción)
 // ---------------------------------------------------------------------------------------------
@@ -271,7 +282,7 @@ async function crearNovedadEnTx(
   if (consumo === undefined) {
     throw new ErrorDatosLocales('NO_ENCONTRADO');
   }
-  if (consumo.servidor === null && consumo.estado_local === 'rechazado_sync') {
+  if (creacionNoAceptada(consumo)) {
     throw new ErrorDatosLocales('DEPENDENCIA_RECHAZADA');
   }
   await db.novedades.add({
@@ -456,7 +467,7 @@ export async function editarConsumoLocal(
     if (c.registrado_por !== userId) {
       throw new ErrorDatosLocales('PERMISO_DENEGADO');
     }
-    if (c.servidor === null && c.estado_local === 'rechazado_sync') {
+    if (creacionNoAceptada(c)) {
       throw new ErrorDatosLocales('DEPENDENCIA_RECHAZADA');
     }
     const validaciones = await db.validaciones
@@ -953,9 +964,10 @@ export async function aplicarResultados(
           siguiente_intento_at: null,
           actualizada_at: iso,
         });
-        if (conflictoSobreEntidadExistente(m)) {
+        if (conflictoSobreEntidadExistente(m) && r.servidor !== undefined) {
           // El conflicto trae la versión ACTUAL del servidor: se adopta aunque sea menor que la local
-          // (tras una restauración las versiones de antes no son comparables; ADR 0022, M6).
+          // (tras una restauración las versiones de antes no son comparables; ADR 0022, M6). Una
+          // colisión de id (`ID_DUPLICADO`, B3) no trae `servidor`: no hay nada que adoptar.
           afectadas.push(
             ...(await guardarEntidadesServidor(
               userId,
@@ -971,6 +983,21 @@ export async function aplicarResultados(
           });
         }
         await marcarUltimoResultado(userId, m, 'conflicto', error);
+        if (!conflictoSobreEntidadExistente(m)) {
+          // B3: una creación en conflicto (colisión de id con una fila ajena) NO existe en el
+          // servidor como suya. Lo que dependía de ella no debe salir contra la fila de otra persona:
+          // se rechaza localmente, como tras una creación rechazada. Las fotos quedan bloqueadas con
+          // sus bytes (dato de planta). La mutación se conserva en `conflicto`.
+          await bloquearFotos(userId, m, error, iso);
+          if (m.tipo === 'consumo.crear') {
+            resumen.dependientes_rechazadas += await rechazarDependientes(
+              userId,
+              m,
+              iso,
+              afectadas,
+            );
+          }
+        }
         resumen.conflictos += 1;
       }
     }
