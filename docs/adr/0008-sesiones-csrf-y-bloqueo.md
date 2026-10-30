@@ -3,6 +3,7 @@
 - Estado: aceptado
 - Fecha: 2026-10-29
 - Fase: 1
+- Reemplazado en parte por: ADR 0018 (punto 6: el bloqueo duro por cuenta se sustituye por cupos por dispositivo conocido y por origen desconocido).
 
 ## Contexto
 
