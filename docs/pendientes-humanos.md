@@ -60,6 +60,11 @@ Los comandos exactos, en orden, están en `docs/despliegue.md` (secciones 2 a 6)
   3. Ejecutar las consultas de detección de `docs/despliegue.md` §9.5 sobre la base de staging (creada con la v1.0/v1.1) y registrar el resultado.
   4. Confirmar que los batches de D1 remota son atómicos y serializables (premisa de las ADR 0010 y 0028), con el punto 2.
 
+## Seguridad (revisión de las correcciones v1.2)
+
+- **S-v12-04 (informativo)**: `guardarPagina` del cliente (`apps/web/src/datos/snapshot-temporal.ts`) acepta una página de continuación aunque no haya progreso guardado. No parece alcanzable (un cambio de rol revoca las familias y la purga exige un login nuevo), pero como defensa en profundidad conviene rechazar esa página en una versión futura.
+- **S-02 sigue abierto**: las entradas de `mp_dispositivo` sobreviven al cambio de contraseña. S-v12-01 acotó su emisión por refresh a una por familia.
+
 ## Seguridad (revisión de las correcciones v1.1)
 
 - **S-08 (anterior a la v1.1)**: `mp_refresh` se lee con `getCookie` (una sola aparición) y solo se borra la del host. Un subdominio hermano de `catmetal.com` podría plantar otra con `Domain=` para forzar un cierre de sesión o fijar una sesión. Mitigación recomendada: no delegar subdominios de `catmetal.com` a terceros, o servir la app desde un dominio propio. Si no, aplicar la misma lectura robusta de `mp_dispositivo` (ADR 0018) a `mp_refresh` en una versión futura.
