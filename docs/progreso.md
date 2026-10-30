@@ -5,12 +5,12 @@
 ## Estado actual
 
 - Rama de trabajo: `build/v1` (línea base en `main`: `bfa8975`).
-- Fases 0, 1, 2 y 3 cerradas (tags `fase-0` a `fase-3`). Fase en curso: **Fase 4 — PWA del supervisor**.
-- Ya confirmadas de la Fase 4 (adelantadas): 4.1 componentes, 4.2 shell PWA/login/estado de sync (más 4.2b perdidos y atascados), 4.3 pantallas del supervisor, 4.4a infraestructura E2E. Adelantada de la Fase 6: 6.1 cron de backup.
+- Fases 0 a 5 cerradas (tags `fase-0` a `fase-5`). Fase en curso: **Fase 6 — Endurecimiento y despliegue**.
+- Ya hechas de la Fase 6 (adelantadas): 6.1 cron de backup (con continuaciones, ADR 0014/0016) y 6.4 guía de despliegue, workflow manual de staging y generador del primer admin.
 
 ## Siguiente paso
 
-Terminar la 4.4b (E2E de 3 consumos offline con foto y tablet compartida, `test-engineer` en curso), luego la revisión de seguridad 4.5 y el cierre de la Fase 4.
+Fase 6: 6.2 endurecimiento de la UI (errores, estados vacíos, accesibilidad, rendimiento en tablet), 6.3 instalabilidad y Lighthouse automatizados (≥ 90), 6.5 revisión de seguridad final, 6.6 evidencia e informe final (`docs/INFORME-FINAL.md`).
 
 ## Mapeo de subagentes
 
@@ -106,3 +106,8 @@ No se usan `mvc-dotnet-developer`, `angular-developer` ni `orchestrator`.
 - **Tareas adelantadas de la Fase 5** en paralelo: 5.1–5.2 (pantallas del jefe, `react-developer`) y 5.3 (pantallas de admin, otro `react-developer`), con archivos separados; ambos tocan solo su bloque de `src/rutas/rutas.tsx`.
 - 4.4b E2E offline con foto y tablet compartida; 4.5 revisión de seguridad (2 medios); ADR 0017; 4.7 correcciones (cliente `c6b442b`, servidor `c7b855e`); `wrangler.jsonc` sin invocation logs ni URLs públicas en producción.
 - Cierre: 1.859 pruebas unitarias/integración y 25 E2E en verde; audit sin vulnerabilidades. Evidencia: `docs/evidencia/fase-4.md`.
+
+### Fase 5 — PWA del jefe y del admin (cerrada)
+
+- Ejecutada adelantada en paralelo con la Fase 4: 5.1–5.2 pantallas del jefe (`react-developer`), 5.3 administración (`react-developer`), 5.4 E2E (`test-engineer`).
+- Cierre: mismos gates que la Fase 4. Evidencia: `docs/evidencia/fase-5.md`.
