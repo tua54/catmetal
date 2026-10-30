@@ -20,6 +20,7 @@ export {
 } from './candado';
 export {
   EVENTOS_ACTIVIDAD,
+  INTERVALO_AVISO_ACTIVIDAD_MS,
   vigilarInactividad,
   type DocumentoVigilado,
   type OpcionesVigilante,

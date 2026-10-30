@@ -38,7 +38,7 @@ export function busDifusion(): {
 /** `localStorage` compartido y ventanas: `setItem` dispara `storage` en las DEMÁS ventanas. */
 export function almacenCompartido(): {
   datos: Map<string, string>;
-  pestana: () => { almacen: Pick<Storage, 'setItem'>; ventana: VentanaAlmacen };
+  pestana: () => { almacen: Pick<Storage, 'getItem' | 'setItem'>; ventana: VentanaAlmacen };
 } {
   const datos = new Map<string, string>();
   type Oyente = (e: { key: string | null; newValue: string | null }) => void;
@@ -50,6 +50,7 @@ export function almacenCompartido(): {
       ventanas.add(oyentes);
       return {
         almacen: {
+          getItem: (clave) => datos.get(clave) ?? null,
           setItem(clave, valor) {
             const previo = datos.get(clave);
             datos.set(clave, valor);

@@ -86,6 +86,8 @@ function sesionFalsa(inicial: EstadoSesion = ESTADO_SIN_SESION) {
     },
     bloquear: vi.fn(() => publicar({ ...estado, bloqueada: true })),
     registrarActividad: vi.fn(() => Promise.resolve()),
+    ultimaActividadCompartida: vi.fn(() => Number.NEGATIVE_INFINITY),
+    avisarActividad: vi.fn(),
     entrar: () =>
       publicar({
         modo: 'online',

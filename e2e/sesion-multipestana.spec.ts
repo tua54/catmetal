@@ -1,8 +1,12 @@
 // Ítem M7 (ADR 0023): cerrar sesión o bloquearse por inactividad en una pestaña se propaga a las
 // demás pestañas del mismo navegador en menos de 2 s. Chromium.
 //
-// Las dos páginas comparten el contexto (cookies, IndexedDB y BroadcastChannel), como dos pestañas
-// de la misma tablet.
+// Ítem A2 (ADR 0023, enmienda 1): la inactividad es del USUARIO, no de la pestaña. Con actividad en
+// una pestaña, la otra (sin interacción propia) no se bloquea; sin actividad en ninguna, se
+// bloquean las dos en menos de 2 s.
+//
+// Las dos páginas comparten el contexto (cookies, IndexedDB, localStorage y BroadcastChannel), como
+// dos pestañas de la misma tablet. `page.clock` es el reloj del CONTEXTO: lo comparten las dos.
 
 import { expect, test, type Page } from '@playwright/test';
 import { abrirDialogoCerrarSesion, botonCuenta, iniciarSesionPorUI } from './apoyo/ui';
@@ -18,6 +22,11 @@ async function segundaPestana(page: Page, usuario: UsuarioSeed): Promise<Page> {
   await expect(botonCuenta(otra, usuario)).toBeVisible();
   await expect(otra).toHaveURL(new RegExp(`${usuario.inicio}$`));
   return otra;
+}
+
+/** Pantalla de bloqueo "Confirme que es <nombre>" de una pestaña. */
+function pantallaBloqueo(page: Page, usuario: UsuarioSeed) {
+  return page.getByRole('heading', { name: `Confirme que es ${usuario.nombre}` });
 }
 
 test.describe('Sesión entre pestañas', () => {
@@ -37,24 +46,43 @@ test.describe('Sesión entre pestañas', () => {
     await expect(botonCuenta(otra, SUPERVISOR_2)).toHaveCount(0);
   });
 
-  test('el bloqueo por inactividad en una pestaña bloquea la otra en menos de 2 s', async ({
+  test('con actividad en la otra pestaña, la primera no se bloquea por inactividad', async ({
     page,
   }) => {
-    // El reloj controlado es del CONTEXTO (las dos pestañas). Se adelanta de a un minuto y la otra
-    // pestaña se usa en cada paso: así solo la primera llega a 10 minutos sin interacción, y el
-    // bloqueo de la otra solo puede venir del aviso entre pestañas.
+    // Se adelanta el reloj de a un minuto durante 15 minutos y solo se usa la otra pestaña: la
+    // primera pasa 15 minutos sin interacción propia, pero el usuario sigue trabajando.
     await page.clock.install();
     await iniciarSesionPorUI(page, SUPERVISOR_1);
     const otra = await segundaPestana(page, SUPERVISOR_1);
-    const titulo = `Confirme que es ${SUPERVISOR_1.nombre}`;
-    const bloqueoOtra = otra.getByRole('heading', { name: titulo });
-    await expect(bloqueoOtra).toHaveCount(0);
 
-    for (let minuto = 1; minuto <= 11; minuto += 1) {
+    for (let minuto = 1; minuto <= 15; minuto += 1) {
       await otra.keyboard.press('Shift');
       await page.clock.fastForward('01:00');
     }
-    await expect(page.getByRole('heading', { name: titulo })).toBeVisible();
-    await expect(bloqueoOtra).toBeVisible({ timeout: PLAZO_MS });
+    // Con la regla anterior la primera se bloqueaba al minuto 10 (y avisaba a la otra).
+    await expect(pantallaBloqueo(page, SUPERVISOR_1)).toHaveCount(0);
+    await expect(pantallaBloqueo(otra, SUPERVISOR_1)).toHaveCount(0);
+    await expect(botonCuenta(page, SUPERVISOR_1)).toBeVisible();
+    await expect(botonCuenta(otra, SUPERVISOR_1)).toBeVisible();
+
+    // Cuando nadie la usa durante 10 minutos, se bloquean las dos.
+    await page.clock.fastForward('10:00');
+    await expect(pantallaBloqueo(page, SUPERVISOR_1)).toBeVisible({ timeout: PLAZO_MS });
+    await expect(pantallaBloqueo(otra, SUPERVISOR_1)).toBeVisible({ timeout: PLAZO_MS });
+  });
+
+  test('sin actividad en ninguna pestaña, se bloquean las dos en menos de 2 s', async ({
+    page,
+  }) => {
+    await page.clock.install();
+    await iniciarSesionPorUI(page, SUPERVISOR_1);
+    const otra = await segundaPestana(page, SUPERVISOR_1);
+    await expect(pantallaBloqueo(page, SUPERVISOR_1)).toHaveCount(0);
+    await expect(pantallaBloqueo(otra, SUPERVISOR_1)).toHaveCount(0);
+
+    // Un minuto de margen sobre el límite de 10 por la interacción del propio login.
+    await page.clock.fastForward('11:00');
+    await expect(pantallaBloqueo(page, SUPERVISOR_1)).toBeVisible({ timeout: PLAZO_MS });
+    await expect(pantallaBloqueo(otra, SUPERVISOR_1)).toBeVisible({ timeout: PLAZO_MS });
   });
 });

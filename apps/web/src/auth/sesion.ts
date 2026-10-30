@@ -15,6 +15,11 @@
 // - Entre pestañas (ADR 0023, M7): cerrar sesión, bloquear por inactividad o entrar con otro usuario
 //   se avisa por el canal de sesión (sin secretos); las demás pestañas descartan su sesión en memoria
 //   en el mismo tick (y vuelven al login o al bloqueo). No borran datos locales.
+// - Inactividad compartida (ADR 0023, enmienda 1; ítem A2): la última actividad es del USUARIO, no
+//   de la pestaña. Las pestañas se avisan su última interacción (`actividad`, más la marca de
+//   `localStorage`) y un `bloqueo` por `inactividad` no bloquea a la pestaña que tuvo interacción
+//   propia dentro del plazo: responde con `actividad`. Un `bloqueo` por `revocacion` (o sin motivo,
+//   de una pestaña con el código anterior) bloquea siempre.
 // - Revocación del servidor (S-09): `SESION_REVOCADA` en una petición autenticada (cambio de rol,
 //   desactivación, revocación del admin) BLOQUEA la sesión (`revocada`): solo se desbloquea con la
 //   contraseña contra el servidor, que trae el perfil fresco, nunca con el verificador local. El
@@ -39,7 +44,12 @@ import {
 } from '../datos/outbox';
 import type { PerfilLocal, VerificadorLocal } from '../datos/tipos';
 import { purgarAjenosSinVisibilidad, tieneVisibilidadAmplia } from '../datos/visibilidad';
-import { crearCanalSesion, type CanalSesion, type EventoSesion } from './canal-sesion';
+import {
+  crearCanalSesion,
+  type CanalSesion,
+  type EventoSesion,
+  type OpcionesEmision,
+} from './canal-sesion';
 import {
   conCandado,
   DURACION_CANDADO_SYNC_MS,
@@ -269,6 +279,10 @@ export class GestorSesion {
   /** `cerrarSesion` en curso: no se entregan más tokens. */
   #cerrando = false;
   #actividadGuardadaEn = Number.NEGATIVE_INFINITY;
+  /** Última interacción del usuario en ESTA pestaña (A2; decide la respuesta a un `bloqueo`). */
+  #interaccionPropiaEn = Number.NEGATIVE_INFINITY;
+  /** Última actividad del usuario actual avisada por otras pestañas (A2). */
+  #actividadAjenaEn = Number.NEGATIVE_INFINITY;
   readonly #oyentes = new Set<Oyente>();
   readonly #canal: CanalSesion | null;
 
@@ -340,7 +354,8 @@ export class GestorSesion {
     });
     // Primero la marca persistida y después el aviso: la otra pestaña, al bloquearse, ya la lee.
     void this.#marcarLoginOnline(usuario.id).finally(() =>
-      this.#avisarOtrasPestanas('bloqueo', usuario.id),
+      // A2: por revocación, las demás pestañas se bloquean SIEMPRE, tengan o no actividad.
+      this.#avisarOtrasPestanas('bloqueo', usuario.id, { motivo: 'revocacion' }),
     );
   }
 
@@ -370,6 +385,9 @@ export class GestorSesion {
     if ((estado.usuario?.id ?? null) !== previo) {
       this.#renovarSenal();
       this.#actividadGuardadaEn = Number.NEGATIVE_INFINITY;
+      // La actividad conocida es del usuario anterior: no cuenta para el nuevo (A2).
+      this.#interaccionPropiaEn = Number.NEGATIVE_INFINITY;
+      this.#actividadAjenaEn = Number.NEGATIVE_INFINITY;
     }
     for (const oyente of this.#oyentes) {
       oyente(this.#estado);
@@ -406,9 +424,27 @@ export class GestorSesion {
           descartar();
         }
         return;
+      case 'actividad':
+        // A2: otra pestaña del mismo usuario tuvo una interacción. Las horas del futuro (reloj
+        // adelantado o valor manipulado) se ignoran: no deben aplazar el bloqueo.
+        if (
+          evento.user_id === actual.id &&
+          evento.at <= this.#ahora() &&
+          evento.at > this.#actividadAjenaEn
+        ) {
+          this.#actividadAjenaEn = evento.at;
+        }
+        return;
       case 'bloqueo':
         // Bloqueo del mismo usuario: esta pestaña también pide "Confirme que es <nombre>".
         if (evento.user_id === actual.id && !this.#estado.bloqueada) {
+          if (evento.motivo === 'inactividad' && this.#interaccionPropiaReciente()) {
+            // A2: quien avisó no conocía aún la última interacción de esta pestaña (el aviso de
+            // actividad sale al final de un intervalo de 5 s). No se bloquea y se la comunica.
+            this.#avisarOtrasPestanas('actividad', actual.id, { at: this.#interaccionPropiaEn });
+            return;
+          }
+          // Por revocación, o sin motivo (pestaña con el código anterior): siempre se bloquea.
           this.#olvidarToken();
           this.#renovarSenal();
           this.#publicar({ ...this.#estado, bloqueada: true });
@@ -437,8 +473,50 @@ export class GestorSesion {
     }
   }
 
-  #avisarOtrasPestanas(tipo: EventoSesion['tipo'], userId: string | null): void {
-    this.#canal?.emitir(tipo, userId);
+  #avisarOtrasPestanas(
+    tipo: EventoSesion['tipo'],
+    userId: string | null,
+    opciones?: OpcionesEmision,
+  ): void {
+    this.#canal?.emitir(tipo, userId, opciones);
+  }
+
+  /** Esta pestaña tuvo una interacción del usuario dentro del plazo de inactividad (A2). */
+  #interaccionPropiaReciente(): boolean {
+    const transcurrido = this.#ahora() - this.#interaccionPropiaEn;
+    return transcurrido >= 0 && transcurrido < LIMITE_INACTIVIDAD_MS;
+  }
+
+  /**
+   * A2 (ADR 0023, enmienda 1): última actividad conocida del usuario actual en las demás
+   * pestañas: el máximo entre los avisos `actividad` recibidos y la marca compartida, que se relee
+   * en cada llamada. Las horas del futuro se ignoran. `-Infinity` si no hay ninguna.
+   */
+  ultimaActividadCompartida(): number {
+    const usuario = this.#estado.usuario;
+    if (usuario === null) {
+      return Number.NEGATIVE_INFINITY;
+    }
+    const ahora = this.#ahora();
+    let ultima =
+      this.#actividadAjenaEn <= ahora ? this.#actividadAjenaEn : Number.NEGATIVE_INFINITY;
+    const marca = this.#canal?.leerMarcaActividad() ?? null;
+    if (marca !== null && marca.user_id === usuario.id && marca.at <= ahora && marca.at > ultima) {
+      ultima = marca.at;
+    }
+    return ultima;
+  }
+
+  /**
+   * A2: avisa a las demás pestañas la última interacción de esta (aviso `actividad` y marca
+   * compartida). El límite de frecuencia lo pone el vigilante. Bloqueada o sin sesión, nada.
+   */
+  avisarActividad(at: number): void {
+    const usuario = this.#estado.usuario;
+    if (usuario === null || this.#estado.bloqueada || !Number.isFinite(at)) {
+      return;
+    }
+    this.#avisarOtrasPestanas('actividad', usuario.id, { at });
   }
 
   #renovarSenal(): void {
@@ -746,13 +824,15 @@ export class GestorSesion {
 
   /**
    * Bloquea la sesión (inactividad o vuelta de segundo plano). La sync de esta pestaña sigue. Las
-   * demás pestañas del mismo usuario también se bloquean (ADR 0023).
+   * demás pestañas del mismo usuario también se bloquean (ADR 0023), salvo la que tuvo interacción
+   * propia dentro del plazo (motivo `inactividad`, enmienda 1). El vigilante solo lo llama si
+   * NINGUNA pestaña tuvo actividad en el plazo.
    */
   bloquear(): void {
     const usuario = this.#estado.usuario;
     if (usuario !== null && !this.#estado.bloqueada) {
       this.#publicar({ ...this.#estado, bloqueada: true });
-      this.#avisarOtrasPestanas('bloqueo', usuario.id);
+      this.#avisarOtrasPestanas('bloqueo', usuario.id, { motivo: 'inactividad' });
     }
   }
 
@@ -766,6 +846,8 @@ export class GestorSesion {
       return;
     }
     const ahora = this.#ahora();
+    // A2: cada interacción cuenta para responder a un `bloqueo` por inactividad de otra pestaña.
+    this.#interaccionPropiaEn = ahora;
     if (ahora - this.#actividadGuardadaEn < INTERVALO_REGISTRO_ACTIVIDAD_MS) {
       return;
     }
