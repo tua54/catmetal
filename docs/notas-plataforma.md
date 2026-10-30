@@ -60,7 +60,7 @@ Fuente: informe de `documentation-researcher` (URLs en cada punto).
 - `crypto.getRandomValues` en workerd acepta como máximo 64 KiB por llamada.
 - D1 rechaza `sqlite_version()` ("not authorized"). Los errores de FOREIGN KEY de D1 no indican tabla ni columna.
 - En D1, `LIKE ?` con patrones largos construidos a partir de UUID o correos falló con "LIKE or GLOB pattern too complex"; usar `instr()` o rangos.
-- En D1, `meta.changes` de una sentencia **incluye las filas que escriben sus triggers** (un INSERT en `validations` que dispara `validations_aplica_decision` devuelve `changes = 2`). Los planes con sentencia principal lo tienen en cuenta.
+- En D1, `meta.changes` de una sentencia **incluye las filas que escriben sus triggers** (un INSERT en `validations` que dispara `validations_aplica_decision` devuelve `changes = 2`). Desde B11 (correcciones v1.1), aprobar y rechazar ya no dependen de ese conteo: verifican el resultado con una lectura en el mismo batch (`filasEsperadas` en `dominio/plan.ts`).
 
 ## R2 y streams en workerd (tarea 6.1)
 

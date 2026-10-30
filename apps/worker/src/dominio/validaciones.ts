@@ -10,6 +10,9 @@
 //   La inserción va condicionada a que el consumo siga como se leyó; la auditoría de la validación
 //   y la del consumo, condicionadas a que la validación exista. Si no aplicó, se relee
 //   (`ejecutarConReintento`) y el comando devuelve el error preciso.
+// - Si aplicó lo dice una LECTURA en el mismo batch, justo después del INSERT (B11): la validación
+//   propia de esta petición y el consumo ya decidido como se responde. No depende de que
+//   `meta.changes` cuente las filas que escribe el trigger.
 //
 // Los payloads son los de las mutaciones `consumo.aprobar` / `consumo.rechazar` (`/sync/push`).
 
@@ -111,6 +114,22 @@ async function decidir(
     sql: 'EXISTS (SELECT 1 FROM validations WHERE id = ? AND validado_por = ?)',
     parametros: [validacion.id, ctx.actor.id],
   };
+  // B11: la validación es la de esta petición (hora de recepción) y el trigger dejó el consumo como
+  // `decidido` (lo que se responde).
+  const verificacion = ctx.db
+    .prepare(
+      `SELECT 1 AS aplicada FROM validations AS v JOIN consumptions AS c ON c.id = v.consumption_id
+       WHERE v.id = ? AND v.validado_por = ? AND v.server_received_at = ?
+         AND c.estado = ? AND c.version = ? AND c.updated_at = ?`,
+    )
+    .bind(
+      validacion.id,
+      ctx.actor.id,
+      validacion.server_received_at,
+      decidido.estado,
+      decidido.version,
+      decidido.updated_at,
+    );
   const auditar = (
     entidad: 'validations' | 'consumptions',
     entidadId: string,
@@ -164,12 +183,13 @@ async function decidir(
           ctx.actor.id,
           decision === 'aprobado' ? 1 : 0,
         ),
+      verificacion,
       auditar('validations', validacion.id, 'validacion.crear', null, { ...validacion }),
       auditar('consumptions', actual.id, ACCION_CONSUMO[decision], { ...actual }, { ...decidido }),
     ],
-    // En D1, `meta.changes` incluye las filas que escriben los triggers: si aplicó, son 2 (la
-    // validación y el consumo que actualiza `validations_aplica_decision`); si no, 0.
-    principal: { indice: 0, cambiosEsperados: 2 },
+    // Por las filas de `verificacion`, no por `meta.changes` del INSERT (que en D1 incluye las
+    // filas que escribe el trigger y podría cambiar): B11.
+    principal: { indice: 1, filasEsperadas: 1 },
     respuesta: { consumo: consumoDe(decidido), validacion },
     siNoAplica: new ErrorApi('CONFLICTO'),
   };
