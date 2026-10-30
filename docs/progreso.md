@@ -5,12 +5,12 @@
 ## Estado actual
 
 - Rama de trabajo: `build/v1` (línea base en `main`: `bfa8975`).
-- Fases 0, 1 y 2 cerradas (tags `fase-0`, `fase-1`, `fase-2`). Fase en curso: **Fase 3 — Sincronización**.
-- Ya confirmadas de la Fase 3 (adelantadas): 3.3 (Dexie + outbox), 3.4 (cliente de auth), contrato de `/sync/snapshot`. En curso: 3.5 (motor de sync del cliente, `react-developer`).
+- Fases 0, 1, 2 y 3 cerradas (tags `fase-0` a `fase-3`). Fase en curso: **Fase 4 — PWA del supervisor**.
+- Ya confirmadas de la Fase 4 (adelantadas): 4.1 componentes, 4.2 shell PWA/login/estado de sync (más 4.2b perdidos y atascados), 4.3 pantallas del supervisor, 4.4a infraestructura E2E. Adelantada de la Fase 6: 6.1 cron de backup.
 
 ## Siguiente paso
 
-Confirmar `docs/plan-fase-3.md` y delegar las tareas de servidor 3.1 (`/sync/push`) y 3.2 (`/sync/pull` y `/sync/snapshot`) a `general-purpose`; al terminar la 3.5, integrar y pedir la revisión 3.6 a `database-specialist`.
+Terminar la 4.4b (E2E de 3 consumos offline con foto y tablet compartida, `test-engineer` en curso), luego la revisión de seguridad 4.5 y el cierre de la Fase 4.
 
 ## Mapeo de subagentes
 
@@ -85,7 +85,7 @@ No se usan `mvc-dotnet-developer`, `angular-developer` ni `orchestrator`.
 - 2.8 correcciones de seguridad confirmadas (`2594d7e`).
 - Cierre: 1.428 pruebas en verde; `pnpm audit --prod` sin vulnerabilidades. Evidencia: `docs/evidencia/fase-2.md`.
 
-### Fase 3 — Sincronización (en curso)
+### Fase 3 — Sincronización (cerrada)
 
 - Adelantadas y confirmadas: 3.3 (Dexie + outbox), 3.4 (cliente de auth), contrato `/sync/snapshot` (orquestador), 3.5 (motor de sync del cliente, `react-developer`).
 - Decisión menor (3.5): sin conexión y sin pendientes, el indicador dice "Sin conexión · Todo sincronizado" (en vez de "0 por sincronizar").
@@ -97,3 +97,5 @@ No se usan `mvc-dotnet-developer`, `angular-developer` ni `orchestrator`.
 - 4.4a infraestructura E2E confirmada (18 pruebas, Chromium y WebKit; login offline ~280 ms en Chromium y ~1,5 s en WebKit).
 - En curso: 3.8 (correcciones del servidor), 3.9 (correcciones del cliente), 4.3 (pantallas del supervisor).
 - Pendiente menor: que `scripts/seed.mjs` acepte `SEED_PASSWORD` por variable de entorno para retirar `scripts/e2e-precarga-seed.mjs`.
+- 3.8 (servidor) y 3.9 (cliente) corrigieron los hallazgos de la revisión 3.6. Pruebas inestables corregidas sin tocar aserciones (rate limiter y rutas lazy).
+- Cierre: shared 209, worker 1.152, web 374 pruebas; audit sin vulnerabilidades. Evidencia: `docs/evidencia/fase-3.md`.
