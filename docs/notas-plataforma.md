@@ -61,3 +61,9 @@ Fuente: informe de `documentation-researcher` (URLs en cada punto).
 - D1 rechaza `sqlite_version()` ("not authorized"). Los errores de FOREIGN KEY de D1 no indican tabla ni columna.
 - En D1, `LIKE ?` con patrones largos construidos a partir de UUID o correos falló con "LIKE or GLOB pattern too complex"; usar `instr()` o rangos.
 - En D1, `meta.changes` de una sentencia **incluye las filas que escriben sus triggers** (un INSERT en `validations` que dispara `validations_aplica_decision` devuelve `changes = 2`). Los planes con sentencia principal lo tienen en cuenta.
+
+## R2 y streams en workerd (tarea 6.1)
+
+- El `DecompressionStream` de workerd rechaza un gzip de varios miembros ("Trailing bytes after end of compressed data"); `zlib` de Node y `gunzip` sí lo leen completo. El manifest del backup trae `segmentos_gzip` para descomprimir por miembros en workerd.
+- Miniflare (como R2) exige en multipart partes de al menos 5 MiB y del mismo tamaño, salvo la última.
+- `crypto.DigestStream` está disponible en workerd y en el pool de pruebas.
