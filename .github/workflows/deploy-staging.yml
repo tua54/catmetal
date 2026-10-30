@@ -23,7 +23,7 @@ concurrency:
 jobs:
   calidad:
     name: Gates antes de desplegar
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/setup@fa36a5ef7dcdefc3a7cb25655c122e00cf6e636e # v3.1.2
@@ -40,7 +40,7 @@ jobs:
     needs: calidad
     # B8: además de la política de ramas del environment, el job solo corre desde main.
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment: staging
     env:
       WRANGLER_SEND_METRICS: 'false'
