@@ -378,6 +378,10 @@ interface Actor {
   alertaReloj?: boolean;
 }
 
+/**
+ * Auditoría de un desbloqueo. `fallos`: los que quedan en el cupo tras desbloquearlo (0 al
+ * reiniciarlo; `máximo − 1` cuando el login correcto solo descuenta su unidad de `g`, A5).
+ */
 function auditoriaDesbloqueo(
   db: D1Database,
   tipo: TipoCupo,
@@ -385,6 +389,7 @@ function auditoriaDesbloqueo(
   actor: Actor,
   ahora: string,
   condicion: CondicionDeEscritura,
+  fallos = 0,
 ): D1PreparedStatement {
   return sentenciaAuditoriaCondicional(
     db,
@@ -394,7 +399,7 @@ function auditoriaDesbloqueo(
       accion: 'login_cupos.desbloqueado',
       actor_id: actor.userId,
       device_id: actor.deviceId,
-      despues: { user_id: userId, tipo, fallos: 0, bloqueado_hasta: null },
+      despues: { user_id: userId, tipo, fallos, bloqueado_hasta: null },
       server_at: ahora,
       alerta_reloj: actor.alertaReloj === true,
     },
@@ -410,11 +415,21 @@ function auditoriaDesbloqueo(
  *   `reserva_id` nueva, y la auditoría se condiciona a ella (ADR 0028, punto 4); los fallos sin
  *   bloqueo vuelven a 0 en otro UPDATE, sin auditar;
  * - el global `g` (al que suman las reservas de ambos tipos, S-02) NO se reinicia (si no, cada login legítimo le regalaría al atacante otros 20
- *   intentos). Solo se descuenta el +1 de ESTA reserva, que no fue un fallo, si `g` no está
- *   bloqueado; un `g` bloqueado se deja tal cual (vence con su ventana). No se compara la
- *   ventana: con reservas concurrentes, la que abrió la ventana puede tener una hora posterior a
- *   la de otra que se ejecutó después. Si la ventana de `g` se reinició justo entre la reserva y
- *   este batch (milisegundos), la ventana nueva cuenta un fallo de menos: un efecto acotado a 1.
+ *   intentos). Solo se descuenta el +1 de ESTA reserva, que no fue un fallo:
+ *   - si `g` no está bloqueado, se descuenta sin más. No se compara la ventana: con reservas
+ *     concurrentes, la que abrió la ventana puede tener una hora posterior a la de otra que se
+ *     ejecutó después. Si la ventana de `g` se reinició justo entre la reserva y este batch
+ *     (milisegundos), la ventana nueva cuenta un fallo de menos: un efecto acotado a 1;
+ *   - A5 (ADR 0018, enmienda 2): si `g` quedó bloqueado POR ESTA RESERVA (`reserva_id` de `g` igual
+ *     al de la reserva y `bloqueado_hasta` no nulo; con `g` bloqueado ninguna otra reserva pudo
+ *     cambiarlo, porque su upsert no aplica sobre un bloqueo vigente), se descuenta la unidad, se
+ *     quita el bloqueo con una `reserva_id` nueva y se audita `login_cupos.desbloqueado` (tipo
+ *     global) condicionado a ella (ADR 0028). Un login correcto nunca deja `g` bloqueado, y el
+ *     atacante no gana intentos: `g` queda con los mismos fallos reales que antes del login;
+ *   - un `g` bloqueado por OTRA reserva se deja tal cual (vence con su ventana).
+ *   El descuento sin bloqueo va ANTES que el desbloqueo: si fuera después, volvería a descontar
+ *   sobre el `g` recién desbloqueado. Son excluyentes: uno exige `bloqueado_hasta IS NULL`, el otro
+ *   `IS NOT NULL`, y el primero no cambia `bloqueado_hasta`.
  */
 export function sentenciasReinicioTrasLogin(
   db: D1Database,
@@ -453,6 +468,28 @@ export function sentenciasReinicioTrasLogin(
          WHERE user_id = ? AND origen = ? AND fallos > 0 AND bloqueado_hasta IS NULL`,
       )
       .bind(ahora, reserva.userId, ORIGEN_GLOBAL),
+  );
+  // A5: `g` bloqueado por ESTA reserva → se descuenta su unidad y se quita el bloqueo, con auditoría.
+  // La reserva que bloquea `g` lo deja exactamente en el máximo (el upsert no aplica sobre un
+  // bloqueo vigente y una ventana nueva empieza en 1 < máximo): tras el descuento, `máximo − 1`.
+  const desbloqueoGlobal = uuidv7();
+  sentencias.push(
+    db
+      .prepare(
+        `UPDATE login_cupos
+         SET fallos = fallos - 1, bloqueado_hasta = NULL, reserva_id = ?, updated_at = ?
+         WHERE user_id = ? AND origen = ? AND reserva_id = ? AND bloqueado_hasta IS NOT NULL`,
+      )
+      .bind(desbloqueoGlobal, ahora, reserva.userId, ORIGEN_GLOBAL, reserva.reservaId),
+    auditoriaDesbloqueo(
+      db,
+      'global',
+      reserva.userId,
+      actor,
+      ahora,
+      porReserva(reserva.userId, ORIGEN_GLOBAL, desbloqueoGlobal),
+      MAX_INTENTOS_LOGIN_GLOBAL - 1,
+    ),
   );
   return sentencias;
 }
