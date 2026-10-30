@@ -5,6 +5,7 @@ import {
   type ListaAuditoria,
   MAX_EVIDENCIA_BYTES,
   MAX_INTENTOS_LOGIN,
+  MAX_INTENTOS_LOGIN_GLOBAL,
   MENSAJES_ERROR,
   type Usuario,
   uuidv7,
@@ -39,6 +40,10 @@ import {
 } from './fase2-consumos-helpers';
 import { api, esperarError, sesion, type SesionDeRol } from './fase2-helpers';
 
+// Pruebas con PBKDF2 y muchas peticiones: con la máquina cargada superan el límite por defecto de
+// 5 s. Mismo valor que las demás pruebas pesadas del worker; no cambia ninguna aserción.
+vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
+
 function intentar(email: string, password: string, ip = `ip-${crypto.randomUUID()}`) {
   return peticion('/api/v1/auth/login', {
     body: { email, password, device_id: uuidv7() },
@@ -65,71 +70,102 @@ async function accionesDeUsuario(id: string): Promise<string[]> {
 // H-01: reserva atómica del intento antes del PBKDF2
 // ---------------------------------------------------------------------------------------------
 
+// ADR 0018 (M1) reemplazó el bloqueo por cuenta (`users.intentos_fallidos`/`bloqueado_hasta`) por
+// cupos por (cuenta, origen) en `login_cupos`. H-01 sigue vigente sobre los cupos: la reserva es
+// atómica y previa al PBKDF2. Estas pruebas verifican lo mismo que antes sobre la tabla nueva.
+async function cupo(userId: string, origen: 'g' | 'ip') {
+  return env.DB.prepare(
+    `SELECT fallos, bloqueado_hasta FROM login_cupos WHERE user_id = ? AND ${
+      origen === 'g' ? "origen = 'g'" : "origen GLOB 'ip:*'"
+    }`,
+  )
+    .bind(userId)
+    .first<{ fallos: number; bloqueado_hasta: string | null }>();
+}
+
+async function accionesDeCupos(id: string): Promise<string[]> {
+  const { results } = await env.DB.prepare(
+    `SELECT accion FROM audit_log WHERE entidad = 'login_cupos' AND entidad_id = ? ORDER BY seq`,
+  )
+    .bind(id)
+    .all<{ accion: string }>();
+  return results.map((r) => r.accion);
+}
+
 describe('H-01: intentos de login concurrentes', () => {
-  it('20 intentos incorrectos simultáneos (IP distintas) dejan exactamente 5 y la cuenta bloqueada', async () => {
+  it('30 intentos incorrectos simultáneos (IP distintas) dejan exactamente 20 y el tope global bloqueado', async () => {
     const u = await crearUsuarioConClave();
     const respuestas = await Promise.all(
-      Array.from({ length: 20 }, (_, i) => intentar(u.email, `mala-${String(i)}`)),
+      Array.from({ length: 30 }, (_, i) => intentar(u.email, `mala-${String(i)}`)),
     );
-    expect(respuestas.map((r) => r.status)).toEqual(Array.from({ length: 20 }, () => 401));
-    const fila = await estadoBloqueo(u.id);
-    expect(fila?.intentos_fallidos).toBe(MAX_INTENTOS_LOGIN);
-    expect(fila?.bloqueado_hasta).not.toBeNull();
+    expect(respuestas.map((r) => r.status)).toEqual(Array.from({ length: 30 }, () => 401));
+    const fila = await cupo(u.id, 'g');
+    expect(fila?.fallos).toBe(MAX_INTENTOS_LOGIN_GLOBAL);
     expect(Date.parse(fila?.bloqueado_hasta ?? '')).toBeGreaterThan(Date.now());
     // Un único evento de bloqueo, aunque varios intentos calculen el mismo milisegundo.
-    expect(await accionesDeUsuario(u.id)).toEqual(['usuario.bloqueado']);
-    // Bloqueada: la contraseña correcta tampoco entra, y el contador no se mueve.
+    expect(await accionesDeCupos(u.id)).toEqual(['login_cupos.bloqueado']);
+    // Tope agotado: la contraseña correcta desde otro origen desconocido tampoco entra, y el
+    // contador no se mueve. Las columnas de la v1 ya no cuentan.
     expect((await intentar(u.email, u.password)).status).toBe(401);
-    expect((await estadoBloqueo(u.id))?.intentos_fallidos).toBe(MAX_INTENTOS_LOGIN);
+    expect((await cupo(u.id, 'g'))?.fallos).toBe(MAX_INTENTOS_LOGIN_GLOBAL);
+    expect(await estadoBloqueo(u.id)).toEqual({ intentos_fallidos: 0, bloqueado_hasta: null });
   });
 
-  it('8 logins concurrentes con la contraseña correcta dejan la cuenta desbloqueada y en 0', async () => {
+  it('8 logins concurrentes con la contraseña correcta dejan los cupos en 0', async () => {
     const u = await crearUsuarioConClave();
     const respuestas = await Promise.all(
       Array.from({ length: 8 }, () => intentar(u.email, u.password)),
     );
-    // Si 5 reservas coinciden en vuelo, la quinta bloquea y las siguientes reciben 401; cada login
-    // que reservó y verificó reinicia el contador, así que al final la cuenta queda en 0.
-    expect(respuestas.filter((r) => r.status === 200).length).toBeGreaterThan(0);
-    expect(await estadoBloqueo(u.id)).toEqual({ intentos_fallidos: 0, bloqueado_hasta: null });
+    expect(respuestas.every((r) => r.status === 200)).toBe(true);
+    // Cada login descuenta su propia reserva de `g` (no fue un fallo) y reinicia su origen.
+    expect((await cupo(u.id, 'g'))?.fallos).toBe(0);
   });
 
-  it('un login correcto tras fallos reinicia el contador', async () => {
+  it('un login correcto tras fallos reinicia el cupo de su origen', async () => {
     const u = await crearUsuarioConClave();
-    await Promise.all([intentar(u.email, 'mala-1'), intentar(u.email, 'mala-2')]);
-    expect((await estadoBloqueo(u.id))?.intentos_fallidos).toBe(2);
-    await iniciarSesion(u, { ip: `ip-${crypto.randomUUID()}` });
-    expect(await estadoBloqueo(u.id)).toEqual({ intentos_fallidos: 0, bloqueado_hasta: null });
+    const ip = `ip-${crypto.randomUUID()}`;
+    await Promise.all([intentar(u.email, 'mala-1', ip), intentar(u.email, 'mala-2', ip)]);
+    expect((await cupo(u.id, 'ip'))?.fallos).toBe(2);
+    await iniciarSesion(u, { ip });
+    expect(await cupo(u.id, 'ip')).toEqual({ fallos: 0, bloqueado_hasta: null });
     // Sin bloqueo previo no hay evento de desbloqueo.
-    expect(await accionesDeUsuario(u.id)).toEqual([]);
+    expect(await accionesDeCupos(u.id)).toEqual([]);
   });
 
   it('la contraseña correcta en el quinto intento entra: la reserva bloqueó y el login lo deshace (auditado)', async () => {
     const u = await crearUsuarioConClave();
+    const red = `2001:db8:${Math.floor(Math.random() * 0xffff).toString(16)}:5`;
     for (let i = 1; i < MAX_INTENTOS_LOGIN; i += 1) {
-      expect((await intentar(u.email, `mala-${String(i)}`)).status).toBe(401);
+      expect((await intentar(u.email, `mala-${String(i)}`, `${red}::${String(i)}`)).status).toBe(
+        401,
+      );
     }
-    const sesionIniciada = await iniciarSesion(u, { ip: `ip-${crypto.randomUUID()}` });
+    const sesionIniciada = await iniciarSesion(u, { ip: `${red}::99` });
     expect((await perfil(sesionIniciada.cuerpo.access_token)).status).toBe(200);
-    expect(await estadoBloqueo(u.id)).toEqual({ intentos_fallidos: 0, bloqueado_hasta: null });
-    expect(await accionesDeUsuario(u.id)).toEqual(['usuario.bloqueado', 'usuario.desbloqueado']);
+    expect(await cupo(u.id, 'ip')).toEqual({ fallos: 0, bloqueado_hasta: null });
+    expect(await accionesDeCupos(u.id)).toEqual([
+      'login_cupos.bloqueado',
+      'login_cupos.desbloqueado',
+    ]);
     const desbloqueo = await env.DB.prepare(
       `SELECT actor_id, datos_despues FROM audit_log
-       WHERE entidad = 'users' AND entidad_id = ? AND accion = 'usuario.desbloqueado'`,
+       WHERE entidad = 'login_cupos' AND entidad_id = ? AND accion = 'login_cupos.desbloqueado'`,
     )
       .bind(u.id)
       .first<{ actor_id: string; datos_despues: string }>();
     expect(desbloqueo?.actor_id).toBe(u.id);
     expect(JSON.parse(desbloqueo?.datos_despues ?? '{}')).toEqual({
-      id: u.id,
-      intentos_fallidos: 0,
+      user_id: u.id,
+      tipo: 'origen',
+      fallos: 0,
       bloqueado_hasta: null,
     });
   });
 
-  it('una cuenta inactiva no reserva intentos (el contador no cambia)', async () => {
+  it('una cuenta inactiva no reserva intentos (no crea cupos)', async () => {
     const u = await crearUsuarioConClave('supervisor', { activo: 0 });
     await Promise.all([intentar(u.email, 'mala'), intentar(u.email, u.password)]);
+    expect(await cupo(u.id, 'g')).toBeNull();
     expect(await estadoBloqueo(u.id)).toEqual({ intentos_fallidos: 0, bloqueado_hasta: null });
   });
 });
@@ -152,14 +188,17 @@ describe('H-02: tiempo mínimo de las respuestas 401 del login', () => {
     const u = await crearUsuarioConClave();
     const inactivo = await crearUsuarioConClave('supervisor', { activo: 0 });
     const bloqueado = await crearUsuarioConClave();
-    await env.DB.prepare('UPDATE users SET intentos_fallidos = 5, bloqueado_hasta = ? WHERE id = ?')
-      .bind(new Date(Date.now() + 600_000).toISOString(), bloqueado.id)
-      .run();
+    // ADR 0018: el bloqueo es del cupo del origen, no de la cuenta. IPs del mismo /64: mismo origen
+    // para el cupo, claves distintas para el limitador (que respondería 429 al 6.º intento).
+    const red = `2001:db8:${Math.floor(Math.random() * 0xffff).toString(16)}:2`;
+    for (let i = 1; i <= MAX_INTENTOS_LOGIN; i += 1) {
+      await intentar(bloqueado.email, 'mala', `${red}::${String(i)}`);
+    }
     const casos = [
       () => intentar(`nadie-${uuidv7()}@catmetal.test`, 'cualquier-clave'),
       () => intentar(u.email, 'cualquier-clave'),
       () => intentar(inactivo.email, inactivo.password),
-      () => intentar(bloqueado.email, bloqueado.password),
+      () => intentar(bloqueado.email, bloqueado.password, `${red}::99`),
     ];
     for (const caso of casos) {
       expect(await duracion(caso)).toBeGreaterThanOrEqual(TIEMPO_MINIMO_LOGIN_FALLIDO_MS);

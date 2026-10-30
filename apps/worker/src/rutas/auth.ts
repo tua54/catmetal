@@ -1,11 +1,9 @@
-// Rutas `/api/v1/auth` (docs/spec.md §5, ADR 0007 y 0008).
+// Rutas `/api/v1/auth` (docs/spec.md §5, ADR 0007, 0008 y 0018).
 
 import {
   ACCESS_TOKEN_TTL_S,
   ahoraIso,
-  BLOQUEO_MINUTOS,
   loginSchema,
-  MAX_INTENTOS_LOGIN,
   type Perfil,
   permisosDeRol,
   type RespuestaSesion,
@@ -13,9 +11,23 @@ import {
   uuidv7,
 } from '@catmetal/shared';
 import { type Context, Hono } from 'hono';
-import { sentenciaAuditoriaCondicional } from '../auditoria/auditar';
 import { derivacionFicticia, verificarContrasena } from '../auth/contrasenas';
 import { borrarCookieRefresh, leerCookieRefresh, ponerCookieRefresh } from '../auth/cookie';
+import {
+  origenDeDispositivo,
+  origenDeIp,
+  type Reserva,
+  reservarDispositivo,
+  reservarOrigenDesconocido,
+  sentenciasReinicioTrasLogin,
+} from '../auth/cupos';
+import {
+  entradaDelUsuario,
+  nuevaEntrada,
+  ponerCookieDispositivo,
+  valorRenovado,
+  valoresCookieDispositivo,
+} from '../auth/dispositivo';
 import {
   buscarRefresh,
   type FilaRefresh,
@@ -40,13 +52,14 @@ interface FilaUsuarioLogin {
   email: string;
   rol: Rol;
   password_hash: string;
+  activo: number;
 }
 
 /**
  * Tiempo mínimo, desde que empieza el login, de toda respuesta 401 `CREDENCIALES_INVALIDAS`
  * (H-02 de docs/auditoria/seguridad-fase-2.md). Cubre la derivación PBKDF2 (real o ficticia) y las
- * idas a D1, para que la latencia no distinga una cuenta inexistente, inactiva, bloqueada o con la
- * contraseña equivocada. Es un piso, no un valor exacto.
+ * idas a D1, para que la latencia no distinga una cuenta inexistente, inactiva, con el cupo de login
+ * agotado (ADR 0018) o con la contraseña equivocada. Es un piso, no un valor exacto.
  */
 export const TIEMPO_MINIMO_LOGIN_FALLIDO_MS = 400;
 
@@ -97,7 +110,11 @@ async function responderSesion(
   return c.json(cuerpo);
 }
 
-/** Primera capa contra fuerza bruta: binding de Rate Limiting, clave IP + email (ADR 0008 punto 6). */
+/**
+ * Primera capa contra fuerza bruta: binding de Rate Limiting, clave IP + email (ADR 0008 punto 6).
+ * No se aplica a un dispositivo conocido verificado (ADR 0018 punto 5): su cupo en D1 es más estricto
+ * y así un atacante tras la misma IP pública (NAT de planta) no le agota el límite.
+ */
 async function limitarIntentos(c: Context<AppEnv>, email: string): Promise<void> {
   const ip = c.req.header('cf-connecting-ip') ?? 'local';
   const { success } = await c.env.LOGIN_LIMITER.limit({ key: `${ip}:${email}` });
@@ -118,59 +135,6 @@ export async function esperar(ms: number): Promise<void> {
   await new Promise<void>((resolver) => setTimeout(resolver, ms));
 }
 
-/**
- * Reserva un intento de login ANTES de comparar el hash (H-01; ADR 0008 punto 6). Un único
- * `UPDATE … RETURNING` condicional cuenta el intento como fallido de antemano:
- *
- * - solo aplica si la cuenta está activa y no bloqueada (`bloqueado_hasta` NULL o vencido);
- * - si el bloqueo anterior ya venció, el contador vuelve a 1 y se limpia `bloqueado_hasta`;
- * - al llegar a MAX_INTENTOS_LOGIN fija `bloqueado_hasta`, y la auditoría `usuario.bloqueado` se
- *   inserta en el MISMO batch, condicionada a que este intento haya fijado ese bloqueo (y sin
- *   duplicarla si otro intento del mismo milisegundo calculó el mismo `bloqueado_hasta`).
- *
- * D1 ejecuta cada batch de forma serial y atómica: N intentos concurrentes no pueden reservar más
- * de MAX_INTENTOS_LOGIN; los demás no obtienen fila. Si la contraseña resulta correcta,
- * `iniciarSesion` reinicia el contador (y audita el desbloqueo si la cuenta quedó bloqueada).
- * Devuelve `true` si el intento quedó reservado.
- */
-async function reservarIntento(db: D1Database, userId: string): Promise<boolean> {
-  const ahora = ahoraIso();
-  const hasta = new Date(Date.parse(ahora) + BLOQUEO_MINUTOS * 60_000).toISOString();
-  const nuevoContador = `CASE WHEN bloqueado_hasta IS NOT NULL AND bloqueado_hasta <= ?1 THEN 1 ELSE intentos_fallidos + 1 END`;
-  const [reserva] = await db.batch<{ intentos_fallidos: number; bloqueado_hasta: string | null }>([
-    db
-      .prepare(
-        `UPDATE users SET
-           intentos_fallidos = ${nuevoContador},
-           bloqueado_hasta = CASE WHEN ${nuevoContador} >= ?2 THEN ?3 ELSE NULL END,
-           updated_at = ?1
-         WHERE id = ?4 AND activo = 1 AND (bloqueado_hasta IS NULL OR bloqueado_hasta <= ?1)
-         RETURNING intentos_fallidos, bloqueado_hasta`,
-      )
-      .bind(ahora, MAX_INTENTOS_LOGIN, hasta, userId),
-    sentenciaAuditoriaCondicional(
-      db,
-      {
-        entidad: 'users',
-        entidad_id: userId,
-        accion: 'usuario.bloqueado',
-        actor_id: null,
-        device_id: null,
-        despues: { id: userId, intentos_fallidos: MAX_INTENTOS_LOGIN, bloqueado_hasta: hasta },
-        server_at: ahora,
-      },
-      {
-        sql: `EXISTS (SELECT 1 FROM users WHERE id = ? AND bloqueado_hasta = ? AND updated_at = ?)
-          AND NOT EXISTS (SELECT 1 FROM audit_log WHERE entidad = 'users' AND entidad_id = ?
-            AND accion = 'usuario.bloqueado'
-            AND json_extract(datos_despues, '$.bloqueado_hasta') = ?)`,
-        parametros: [userId, hasta, ahora, userId, hasta],
-      },
-    ),
-  ]);
-  return (reserva?.results.length ?? 0) === 1;
-}
-
 async function login(c: Context<AppEnv>, datos: LoginValidado): Promise<Response> {
   const inicio = Date.now();
   try {
@@ -184,28 +148,55 @@ async function login(c: Context<AppEnv>, datos: LoginValidado): Promise<Response
   }
 }
 
+/**
+ * Login (ADR 0018):
+ * 1. se busca al usuario y, si la cookie `mp_dispositivo` trae una entrada válida suya, el intento
+ *    es de su dispositivo conocido; si no, de un origen desconocido (la IP normalizada);
+ * 2. primera capa (limitador `ip:email`), salvo para el dispositivo conocido; para una cuenta
+ *    inexistente también aplica, así el 429 no revela si existe;
+ * 3. reserva atómica del cupo en D1 ANTES de comparar el hash; sin reserva (cupo bloqueado) o con
+ *    la cuenta inexistente o inactiva, derivación ficticia y la misma 401;
+ * 4. con la contraseña correcta, el batch del login reinicia el cupo del origen usado y se renueva
+ *    la cookie del dispositivo.
+ */
 async function intentarLogin(c: Context<AppEnv>, datos: LoginValidado): Promise<Response> {
   const db = c.env.DB;
-  await limitarIntentos(c, datos.email);
+  const secreto = c.env.REFRESH_SECRET;
+  const ahoraMs = Date.now();
 
   const usuario = await db
-    .prepare('SELECT id, nombre, email, rol, password_hash FROM users WHERE email = ?')
+    .prepare('SELECT id, nombre, email, rol, password_hash, activo FROM users WHERE email = ?')
     .bind(datos.email)
     .first<FilaUsuarioLogin>();
+  const presentadas = valoresCookieDispositivo(c.req.header('Cookie'));
+  const conocida =
+    usuario === null ? null : await entradaDelUsuario(secreto, presentadas, usuario.id, ahoraMs);
+  if (conocida === null) {
+    await limitarIntentos(c, datos.email);
+  }
 
-  // Inexistente: derivación ficticia y la misma respuesta (no se audita el correo).
-  if (usuario === null) {
+  // Inexistente o inactivo: derivación ficticia y la misma respuesta (no se audita el correo ni se
+  // crean cupos).
+  if (usuario?.activo !== 1) {
     await derivacionFicticia();
     throw new ErrorApi('CREDENCIALES_INVALIDAS');
   }
-  // Inactivo o bloqueado: no hay reserva ni se compara el hash; la respuesta es idéntica con la
-  // contraseña correcta o no.
-  if (!(await reservarIntento(db, usuario.id))) {
+  const reserva: Reserva | null =
+    conocida === null
+      ? await reservarOrigenDesconocido(
+          db,
+          usuario.id,
+          await origenDeIp(secreto, c.req.header('cf-connecting-ip')),
+          ahoraMs,
+        )
+      : await reservarDispositivo(db, usuario.id, origenDeDispositivo(conocida.nonce), ahoraMs);
+  // Cupo bloqueado: no se compara el hash; la respuesta es idéntica con la contraseña correcta o no.
+  if (reserva === null) {
     await derivacionFicticia();
     throw new ErrorApi('CREDENCIALES_INVALIDAS');
   }
   if (!(await verificarContrasena(datos.password, usuario.password_hash))) {
-    // El intento ya quedó contado (y, si tocaba, la cuenta bloqueada) en la reserva.
+    // El fallo ya quedó contado (y, si tocaba, el cupo bloqueado y auditado) en la reserva.
     throw new ErrorApi('CREDENCIALES_INVALIDAS');
   }
 
@@ -218,15 +209,21 @@ async function intentarLogin(c: Context<AppEnv>, datos: LoginValidado): Promise<
   const deviceId = ajeno ? uuidv7() : datos.device_id;
   const userAgent = c.req.header('User-Agent')?.slice(0, MAX_USER_AGENT) ?? null;
 
-  // `iniciarSesion` siempre reinicia el contador: la reserva lo dejó en ≥ 1.
-  const emitido = await iniciarSesion(db, c.env.REFRESH_SECRET, {
+  // El batch del login reinicia el cupo usado (la reserva lo dejó en ≥ 1).
+  const emitido = await iniciarSesion(db, secreto, {
     userId: usuario.id,
     deviceId,
     dispositivoNuevo: existente === null || ajeno,
     instalacionId: datos.instalacion_id ?? null,
     nombreDispositivo: datos.device_nombre ?? null,
     userAgent,
+    adicionales: (ahora) =>
+      sentenciasReinicioTrasLogin(db, reserva, { userId: usuario.id, deviceId }, ahora),
   });
+  // Cookie del dispositivo conocido: entrada nueva primero y las válidas de otros usuarios. Se pone
+  // antes de construir la respuesta (Set-Cookie solo aparece tras un login correcto).
+  const nueva = await nuevaEntrada(secreto, usuario.id, ahoraMs);
+  ponerCookieDispositivo(c, await valorRenovado(secreto, presentadas, nueva, ahoraMs));
   return responderSesion(c, emitido, usuario);
 }
 

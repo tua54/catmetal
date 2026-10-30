@@ -39,6 +39,9 @@ export const COLUMNAS_AUDITABLES = {
     'reemplazado_por',
   ],
   devices: ['id', 'user_id', 'nombre', 'user_agent', 'instalacion_id', 'ultimo_sync_at'],
+  // Cupos de login (ADR 0018): sin IP, sin nonce y sin origen. `entidad_id` = user_id. Sin descriptor de
+  // sync: estas filas nunca viajan por /sync/pull, y /audit solo se las muestra al admin.
+  login_cupos: ['user_id', 'tipo', 'fallos', 'bloqueado_hasta'],
   // Entidades de negocio (Fase 2). Se listan todas aquí para que las tareas de consumos, novedades,
   // evidencias y validaciones no tengan que editar este archivo en paralelo.
   settings: ['clave', 'valor', 'actualizado_por', 'created_at', 'updated_at'],
@@ -142,6 +145,7 @@ export const COLUMNAS_BOOLEANAS: Readonly<Record<EntidadAuditada, readonly strin
   users: ['activo'],
   refresh_tokens: [],
   devices: [],
+  login_cupos: [],
   settings: [],
   materials: ['activo'],
   production_orders: ['force'],

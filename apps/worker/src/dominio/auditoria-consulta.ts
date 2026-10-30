@@ -71,7 +71,8 @@ const COLUMNAS = `a.seq, a.id, a.entidad, a.entidad_id, a.order_id, a.accion, a.
  * que filtra por una entidad ajena: se filtra, no es un error, y no revela si hay filas.
  */
 const SOLO_NEGOCIO: CondicionSql = {
-  sql: `a.entidad NOT IN ('users', 'devices', 'refresh_tokens')`,
+  // `login_cupos` (ADR 0018): bloqueos y desbloqueos de login, solo para el admin.
+  sql: `a.entidad NOT IN ('users', 'devices', 'refresh_tokens', 'login_cupos')`,
   parametros: [],
 };
 

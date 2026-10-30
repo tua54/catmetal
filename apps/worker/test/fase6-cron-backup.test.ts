@@ -68,6 +68,7 @@ describe('tablas del backup', () => {
       'order_planned_materials',
       'order_supervisors',
       'refresh_tokens',
+      'login_cupos',
       'devices',
       'settings',
       'production_orders',

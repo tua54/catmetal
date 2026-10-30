@@ -25,6 +25,8 @@ const TABLAS_ESPERADAS = [
   'devices',
   'evidences',
   'incidents',
+  // ADR 0018 (M1): tabla técnica de cupos de login (migración 0007).
+  'login_cupos',
   'materials',
   'order_planned_materials',
   'order_supervisors',
@@ -147,6 +149,8 @@ const INDICES_ESPERADOS: Record<
   audit_log_order_id_seq: { tabla: 'audit_log', columnas: ['order_id', 'seq'], unico: false },
   // Revisión de la Fase 3: B5 (purga del cron) y B1 (por expresión, solo en migrations/0006)
   refresh_tokens_expira_at: { tabla: 'refresh_tokens', columnas: ['expira_at'], unico: false },
+  // ADR 0018 (M1): purga de login_cupos en el cron de mantenimiento.
+  login_cupos_updated_at: { tabla: 'login_cupos', columnas: ['updated_at'], unico: false },
   sync_mutations_no_aplicadas_consumo: {
     tabla: 'sync_mutations',
     columnas: ['user_id', null],

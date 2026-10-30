@@ -196,6 +196,8 @@ describe('ejecutarCron', () => {
       'backup_fallido',
       'tamano_base',
       'purga_refresh_tokens',
+      // ADR 0018 (M1): purga de login_cupos después de la de refresh_tokens.
+      'purga_login_cupos',
       'cron_fin',
     ]);
     expect(eventos[1]).toMatchObject({ nivel: 'error', evento: 'backup_fallido' });
@@ -258,6 +260,8 @@ describe('handler scheduled', () => {
       'backup_resumen',
       'tamano_base',
       'purga_refresh_tokens',
+      // ADR 0018 (M1): purga de login_cupos después de la de refresh_tokens.
+      'purga_login_cupos',
       'cron_fin',
     ]);
     expect(eventos[1]).toMatchObject({ nivel: 'info', estado: 'completo' });

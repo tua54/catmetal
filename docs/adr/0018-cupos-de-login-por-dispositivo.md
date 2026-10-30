@@ -119,6 +119,19 @@ Se adopta la opción 3.
 - El tope global acota las adivinanzas a 20 por 15 min por cuenta (unas 1.920 al día), sin importar cuántas IP se usen. Con PBKDF2 de 100.000 iteraciones y la política de contraseñas vigente, es un riesgo aceptable. Se registra en `docs/preguntas-abiertas.md`, por si el cliente quiere CAPTCHA o un segundo factor.
 - Hay una cookie más en `/api/v1/auth`, una tabla técnica más y una entidad de auditoría nueva.
 
+## Notas de implementación (M1)
+
+- **Login correcto desde un origen desconocido.** La reserva había contado el intento en `g` como fallo anticipado, así que el login correcto devuelve **esa** unidad (`fallos - 1`, solo si `g` no está bloqueado) y no reinicia `g`. Sin esto, un usuario legítimo que entra 20 veces en 15 min desde orígenes nuevos se bloquearía solo. Al atacante no le da ningún intento extra.
+- Cada login correcto rota el nonce de la entrada del dispositivo. La fila `d:` anterior la purga el mantenimiento.
+- Los fallos ya no escriben `users.intentos_fallidos` ni `bloqueado_hasta`. El login correcto los deja en 0 y NULL, y audita `usuario.desbloqueado` si quedaba un bloqueo heredado de la v1.
+- El script de emergencia tiene 4 sentencias idempotentes, cada auditoría con id fijo y `NOT EXISTS`:
+  1. `login_cupos.desbloqueo_emergencia` con `tipo: 'todos'`;
+  2. `usuario.desbloqueado`, solo si había columnas heredadas que reiniciar;
+  3. el reinicio de `login_cupos`;
+  4. el reinicio de `users`.
+- El desbloqueo del admin audita un `login_cupos.desbloqueado` por cada tipo con bloqueo vigente.
+- Una IP que no se puede interpretar se usa tal cual, en minúsculas.
+
 ## Cómo revertir
 
 Volver al bloqueo por cuenta de la ADR 0008, punto 6: restaurar `reservarIntento` sobre `users` y dejar de emitir y leer `mp_dispositivo`. La tabla `login_cupos` puede quedar sin uso. Revertir **no** es recomendable porque reabre el abuso M1.

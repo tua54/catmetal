@@ -1,4 +1,5 @@
-// POST /api/v1/auth/login: credenciales, bloqueo, rate limiting, dispositivos y cookie (ADR 0008).
+// POST /api/v1/auth/login: credenciales, cupos (ADR 0018), rate limiting, dispositivos y cookie
+// (ADR 0008).
 import { BLOQUEO_MINUTOS, MENSAJES_ERROR, permisosDeRol, uuidv7 } from '@catmetal/shared';
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
@@ -167,88 +168,107 @@ describe('credenciales inválidas', () => {
   });
 });
 
-describe('bloqueo de cuenta (5 intentos, 15 min)', () => {
-  it('tras 5 fallos bloquea, audita, y responde idéntico aun con la contraseña correcta', async () => {
-    const u = await usuario();
-    for (let i = 1; i <= 4; i += 1) {
-      expect(await cuerpoYEstado(await intentar(u.email, `mala-${String(i)}`))).toEqual(
-        CREDENCIALES_INVALIDAS,
-      );
-    }
-    const antes = await env.DB.prepare(
-      'SELECT intentos_fallidos, bloqueado_hasta FROM users WHERE id = ?',
-    )
-      .bind(u.id)
-      .first();
-    expect(antes).toEqual({ intentos_fallidos: 4, bloqueado_hasta: null });
+// ADR 0018 (M1): el bloqueo duro por cuenta de la v1 se reemplazó por cupos por (cuenta, origen).
+// Estas pruebas cubrían `users.intentos_fallidos`/`bloqueado_hasta`; ahora verifican lo mismo
+// (bloqueo a los 5, 15 min, auditoría, respuesta idéntica, ventana vencida) sobre `login_cupos`.
+// El resto de M1 está en correcciones-m1-login-cupos.test.ts y correcciones-m1-dispositivo.test.ts.
+describe('cupo de login por origen (5 intentos, 15 min; ADR 0018)', () => {
+  /** IP del mismo /64: mismo origen para el cupo, otra clave para el limitador. */
+  const red = () => `2001:db8:${Math.floor(Math.random() * 0xffff).toString(16)}:1`;
 
-    expect(await cuerpoYEstado(await intentar(u.email, 'mala-5'))).toEqual(CREDENCIALES_INVALIDAS);
-    const bloqueado = await env.DB.prepare(
-      'SELECT intentos_fallidos, bloqueado_hasta FROM users WHERE id = ?',
+  async function cupoIp(userId: string) {
+    return env.DB.prepare(
+      `SELECT fallos, bloqueado_hasta FROM login_cupos WHERE user_id = ? AND origen GLOB 'ip:*'`,
     )
-      .bind(u.id)
-      .first<{ intentos_fallidos: number; bloqueado_hasta: string }>();
-    expect(bloqueado?.intentos_fallidos).toBe(5);
+      .bind(userId)
+      .first<{ fallos: number; bloqueado_hasta: string | null }>();
+  }
+
+  it('tras 5 fallos bloquea el origen, audita, y responde idéntico aun con la contraseña correcta', async () => {
+    const u = await usuario();
+    const prefijo = red();
+    for (let i = 1; i <= 4; i += 1) {
+      expect(
+        await cuerpoYEstado(
+          await intentar(u.email, `mala-${String(i)}`, `${prefijo}::${String(i)}`),
+        ),
+      ).toEqual(CREDENCIALES_INVALIDAS);
+    }
+    expect(await cupoIp(u.id)).toEqual({ fallos: 4, bloqueado_hasta: null });
+
+    expect(await cuerpoYEstado(await intentar(u.email, 'mala-5', `${prefijo}::5`))).toEqual(
+      CREDENCIALES_INVALIDAS,
+    );
+    const bloqueado = await cupoIp(u.id);
+    expect(bloqueado?.fallos).toBe(5);
     const minutos = (Date.parse(bloqueado?.bloqueado_hasta ?? '') - Date.now()) / 60_000;
     expect(minutos).toBeGreaterThan(BLOQUEO_MINUTOS - 1);
     expect(minutos).toBeLessThanOrEqual(BLOQUEO_MINUTOS);
 
     const auditoria = await env.DB.prepare(
-      `SELECT accion, actor_id FROM audit_log WHERE entidad = 'users' AND entidad_id = ?`,
+      `SELECT accion, actor_id FROM audit_log WHERE entidad = 'login_cupos' AND entidad_id = ?`,
     )
       .bind(u.id)
       .all();
-    expect(auditoria.results).toEqual([{ accion: 'usuario.bloqueado', actor_id: null }]);
+    expect(auditoria.results).toEqual([{ accion: 'login_cupos.bloqueado', actor_id: null }]);
+    // Las columnas de la v1 ya no cuentan ni bloquean.
+    expect(
+      await env.DB.prepare('SELECT intentos_fallidos, bloqueado_hasta FROM users WHERE id = ?')
+        .bind(u.id)
+        .first(),
+    ).toEqual({ intentos_fallidos: 0, bloqueado_hasta: null });
 
     // Durante el bloqueo: misma respuesta con la contraseña correcta, y el contador no cambia.
-    expect(await cuerpoYEstado(await intentar(u.email, u.password))).toEqual(
+    expect(await cuerpoYEstado(await intentar(u.email, u.password, `${prefijo}::6`))).toEqual(
       CREDENCIALES_INVALIDAS,
     );
-    expect(await cuerpoYEstado(await intentar(u.email, 'mala-6'))).toEqual(CREDENCIALES_INVALIDAS);
-    const durante = await env.DB.prepare('SELECT intentos_fallidos FROM users WHERE id = ?')
-      .bind(u.id)
-      .first();
-    expect(durante).toEqual({ intentos_fallidos: 5 });
+    expect(await cuerpoYEstado(await intentar(u.email, 'mala-6', `${prefijo}::7`))).toEqual(
+      CREDENCIALES_INVALIDAS,
+    );
+    expect((await cupoIp(u.id))?.fallos).toBe(5);
   });
 
-  it('al vencer el bloqueo, la contraseña correcta entra y reinicia el contador', async () => {
+  it('al vencer el bloqueo, la contraseña correcta entra y reinicia el cupo', async () => {
     const u = await usuario();
+    const ip = `ip-${crypto.randomUUID()}`;
+    await intentar(u.email, 'mala', ip);
     const vencido = new Date(Date.now() - 1000).toISOString();
-    await env.DB.prepare('UPDATE users SET intentos_fallidos = 5, bloqueado_hasta = ? WHERE id = ?')
-      .bind(vencido, u.id)
-      .run();
-    await iniciarSesion(u, { ip: `ip-${crypto.randomUUID()}` });
-    const fila = await env.DB.prepare(
-      'SELECT intentos_fallidos, bloqueado_hasta FROM users WHERE id = ?',
+    await env.DB.prepare(
+      `UPDATE login_cupos SET fallos = 5, ventana_inicio = ?, bloqueado_hasta = ?
+       WHERE user_id = ? AND origen GLOB 'ip:*'`,
     )
-      .bind(u.id)
-      .first();
-    expect(fila).toEqual({ intentos_fallidos: 0, bloqueado_hasta: null });
+      .bind(new Date(Date.now() - 16 * 60_000).toISOString(), vencido, u.id)
+      .run();
+    await iniciarSesion(u, { ip });
+    expect(await cupoIp(u.id)).toEqual({ fallos: 0, bloqueado_hasta: null });
   });
 
   it('al vencer el bloqueo, un fallo reinicia el contador a 1 (no vuelve a bloquear)', async () => {
     const u = await usuario();
-    await env.DB.prepare('UPDATE users SET intentos_fallidos = 5, bloqueado_hasta = ? WHERE id = ?')
-      .bind(new Date(Date.now() - 1000).toISOString(), u.id)
-      .run();
-    await intentar(u.email, 'mala');
-    const fila = await env.DB.prepare(
-      'SELECT intentos_fallidos, bloqueado_hasta FROM users WHERE id = ?',
+    const ip = `ip-${crypto.randomUUID()}`;
+    await intentar(u.email, 'mala', ip);
+    await env.DB.prepare(
+      `UPDATE login_cupos SET fallos = 5, ventana_inicio = ?, bloqueado_hasta = ?
+       WHERE user_id = ? AND origen GLOB 'ip:*'`,
     )
-      .bind(u.id)
-      .first();
-    expect(fila).toEqual({ intentos_fallidos: 1, bloqueado_hasta: null });
+      .bind(
+        new Date(Date.now() - 16 * 60_000).toISOString(),
+        new Date(Date.now() - 1000).toISOString(),
+        u.id,
+      )
+      .run();
+    await intentar(u.email, 'mala', ip);
+    expect(await cupoIp(u.id)).toEqual({ fallos: 1, bloqueado_hasta: null });
   });
 
-  it('un login correcto reinicia los intentos fallidos previos', async () => {
+  it('un login correcto reinicia los fallos previos de su origen', async () => {
     const u = await usuario();
-    await intentar(u.email, 'mala-1');
-    await intentar(u.email, 'mala-2');
-    await iniciarSesion(u);
-    const fila = await env.DB.prepare('SELECT intentos_fallidos FROM users WHERE id = ?')
-      .bind(u.id)
-      .first();
-    expect(fila).toEqual({ intentos_fallidos: 0 });
+    const ip = `ip-${crypto.randomUUID()}`;
+    await intentar(u.email, 'mala-1', ip);
+    await intentar(u.email, 'mala-2', ip);
+    expect((await cupoIp(u.id))?.fallos).toBe(2);
+    await iniciarSesion(u, { ip });
+    expect((await cupoIp(u.id))?.fallos).toBe(0);
   });
 });
 

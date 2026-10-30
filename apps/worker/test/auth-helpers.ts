@@ -84,10 +84,16 @@ export interface CookieLeida {
   atributos: string[];
 }
 
-/** Lee la cookie `mp_refresh` de la respuesta (valor y atributos). */
+/**
+ * Lee la cookie `mp_refresh` de la respuesta (valor y atributos). Usa `getSetCookie()`: desde la
+ * ADR 0018 el login emite dos Set-Cookie (`mp_dispositivo` y `mp_refresh`) y `get('Set-Cookie')`
+ * los uniría con comas.
+ */
 export function cookieRefresh(respuesta: Response): CookieLeida | null {
-  const cabecera = respuesta.headers.get('Set-Cookie');
-  if (cabecera === null || !cabecera.startsWith('mp_refresh=')) {
+  const cabecera = respuesta.headers
+    .getSetCookie()
+    .find((linea) => linea.startsWith('mp_refresh='));
+  if (cabecera === undefined) {
     return null;
   }
   const [par = '', ...atributos] = cabecera.split(';').map((parte) => parte.trim());

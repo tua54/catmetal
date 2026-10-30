@@ -23,6 +23,7 @@ export const TABLAS_BACKUP: readonly TablaBackup[] = [
   { nombre: 'order_planned_materials', pk: ['order_id', 'material_id'] },
   { nombre: 'order_supervisors', pk: ['order_id', 'user_id'] },
   { nombre: 'refresh_tokens', pk: ['id'] },
+  { nombre: 'login_cupos', pk: ['user_id', 'origen'] },
   { nombre: 'devices', pk: ['id'] },
   { nombre: 'settings', pk: ['clave'] },
   { nombre: 'production_orders', pk: ['id'] },

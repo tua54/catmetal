@@ -82,9 +82,19 @@ export const PBKDF2_ITERACIONES_SERVIDOR = 100_000;
 export const ACCESS_TOKEN_TTL_S = 900;
 /** Vida del refresh token, en segundos: 30 días. */
 export const REFRESH_TOKEN_TTL_S = 2_592_000;
-/** Intentos fallidos consecutivos antes de bloquear la cuenta. */
+/**
+ * Fallos de login por (cuenta, origen) en la ventana antes de bloquear ESE origen (ADR 0018): el
+ * dispositivo conocido (cookie `mp_dispositivo`) o un origen desconocido (IP normalizada).
+ */
 export const MAX_INTENTOS_LOGIN = 5;
-/** Duración del bloqueo de cuenta, en minutos. */
+/**
+ * Tope global de fallos por cuenta entre TODOS los orígenes desconocidos en la ventana (ADR 0018).
+ * No afecta al dispositivo conocido.
+ */
+export const MAX_INTENTOS_LOGIN_GLOBAL = 20;
+/** Ventana fija de los cupos de login, en minutos, contada desde el primer fallo (ADR 0018). */
+export const VENTANA_INTENTOS_LOGIN_MINUTOS = 15;
+/** Duración del bloqueo de un cupo de login, en minutos, desde el fallo que lo agota (ADR 0018). */
 export const BLOQUEO_MINUTOS = 15;
 /** Diferencia entre reloj del dispositivo y del servidor que activa `alerta_reloj`, en ms: 10 min. */
 export const ALERTA_RELOJ_MS = 600_000;

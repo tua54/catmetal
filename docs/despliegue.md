@@ -83,6 +83,31 @@ Remove-Item "$env:TEMP\catmetal-primer-admin.sql"
 
 El archivo contiene el hash de la contraseña: nunca lo guarde dentro del repositorio (por si acaso, `primer-admin.sql` y `*-primer-admin.sql` están en `.gitignore`) y bórrelo tras aplicarlo. La contraseña no puede estar en la lista de contraseñas comunes. Desde la app, el admin crea los demás usuarios, materiales y asignaciones.
 
+### 5.1 Desbloqueo de emergencia del login (ADR 0018)
+
+Úselo cuando ningún admin puede entrar, por ejemplo porque todos sus orígenes quedaron con el cupo de login agotado. Antes, intente entrar desde la tablet o el PC donde esa persona ya inició sesión (dispositivo conocido): los fallos de otros orígenes no afectan su cupo.
+
+El script **no** se conecta a Cloudflare: solo escribe un archivo `.sql` local. Ese archivo:
+
+- reinicia todos los cupos de `login_cupos` del usuario (dispositivos, orígenes y el tope global) y las columnas heredadas `users.intentos_fallidos` y `bloqueado_hasta`;
+- inserta su fila de auditoría `login_cupos.desbloqueo_emergencia`, sin el correo;
+- no usa `DELETE` y no hace nada si el correo no existe;
+- es idempotente: aplicarlo dos veces no cambia nada más.
+
+Desde `apps/worker`:
+
+```powershell
+# Sin --salida, el SQL se escribe en la carpeta temporal del sistema, FUERA del repositorio.
+node ../../scripts/desbloqueo-emergencia-sql.mjs --email admin@catmetal.com
+# Ensayo opcional contra la base local:
+npx wrangler d1 execute DB --local --file="$env:TEMP\catmetal-desbloqueo-emergencia.sql"
+# Staging (producción: mp-prod --env production):
+npx wrangler d1 execute mp-staging --env staging --remote --file="$env:TEMP\catmetal-desbloqueo-emergencia.sql"
+Remove-Item "$env:TEMP\catmetal-desbloqueo-emergencia.sql"
+```
+
+En Linux o macOS, el archivo queda en `$(node -p "require('os').tmpdir()")/catmetal-desbloqueo-emergencia.sql`, o donde indique `--salida`. Después, la persona entra con su contraseña desde cualquier dispositivo. Si el ataque continúa, conviene que entre desde un dispositivo conocido.
+
 ## 6. Desplegar
 
 ```powershell

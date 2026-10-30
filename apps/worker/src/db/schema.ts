@@ -192,6 +192,43 @@ export const refresh_tokens = sqliteTable(
   ],
 );
 
+/**
+ * Cupos de login por (cuenta, origen) (ADR 0018, M1). Tabla TÉCNICA, como `refresh_tokens`: no es
+ * de negocio, no tiene trigger de inmutabilidad y el cron de mantenimiento purga las filas viejas.
+ * Su historia de seguridad (bloqueos y desbloqueos) queda en `audit_log` (entidad `login_cupos`).
+ */
+export const login_cupos = sqliteTable(
+  'login_cupos',
+  {
+    user_id: text('user_id')
+      .notNull()
+      .references(() => users.id),
+    /**
+     * `d:<nonce>` (dispositivo conocido), `ip:<hmac>` (origen desconocido: HMAC de la IP
+     * normalizada, nunca la IP) o `g` (tope global de los orígenes desconocidos de la cuenta).
+     */
+    origen: text('origen').notNull(),
+    fallos: integer('fallos').notNull(),
+    /** Inicio de la ventana fija de 15 min (primer fallo). */
+    ventana_inicio: text('ventana_inicio').notNull(),
+    bloqueado_hasta: text('bloqueado_hasta'),
+    /** Id aleatorio de la última reserva: encadena las sentencias del mismo batch. */
+    reserva_id: text('reserva_id').notNull(),
+    ...marcasDeTiempo(),
+  },
+  (t) => [
+    primaryKey({ name: 'login_cupos_pk', columns: [t.user_id, t.origen] }),
+    // Purga del cron: filas sin cambios hace más de 24 h, sin recorrer la tabla.
+    index('login_cupos_updated_at').on(t.updated_at),
+    check('login_cupos_fallos_no_negativos', sql`fallos >= 0`),
+    check(
+      'login_cupos_origen_valido',
+      sql`origen = 'g' OR (origen GLOB 'd:?*' AND length(origen) <= 64) OR (origen GLOB 'ip:?*' AND length(origen) <= 64)`,
+    ),
+    check('login_cupos_fechas_iso', fechas([...MARCAS, 'ventana_inicio'], ['bloqueado_hasta'])),
+  ],
+);
+
 // ---------------------------------------------------------------------------------------------
 // Configuración
 // ---------------------------------------------------------------------------------------------
@@ -548,6 +585,7 @@ export const schema = {
   users,
   devices,
   refresh_tokens,
+  login_cupos,
   settings,
   materials,
   production_orders,
@@ -567,6 +605,7 @@ export type FilaDispositivo = typeof devices.$inferSelect;
 export type NuevoDispositivo = typeof devices.$inferInsert;
 export type FilaRefreshToken = typeof refresh_tokens.$inferSelect;
 export type NuevoRefreshToken = typeof refresh_tokens.$inferInsert;
+export type FilaLoginCupo = typeof login_cupos.$inferSelect;
 export type FilaSetting = typeof settings.$inferSelect;
 export type NuevoSetting = typeof settings.$inferInsert;
 export type FilaMaterial = typeof materials.$inferSelect;

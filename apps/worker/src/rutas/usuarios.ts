@@ -14,6 +14,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { sentenciaAuditoria, sentenciaAuditoriaCondicional } from '../auditoria/auditar';
 import { hashearContrasena } from '../auth/contrasenas';
+import { sentenciasReinicioAdmin } from '../auth/cupos';
 import { sentenciaRevocarTodas } from '../auth/sesiones';
 import { ErrorApi } from '../errores';
 import { autenticar, requierePermiso } from '../middleware/autenticar';
@@ -243,6 +244,19 @@ export function crearRutasUsuarios(): Hono<AppEnv> {
       );
       if (revocaSesiones) {
         sentencias.push(sentenciaRevocarTodas(db, id, ahora, auditado));
+      }
+      if (desbloquear) {
+        // ADR 0018 punto 6: el desbloqueo del admin reinicia además TODOS los cupos de login del
+        // usuario (dispositivos, orígenes y el global), con su auditoría, si la edición se aplicó.
+        sentencias.push(
+          ...sentenciasReinicioAdmin(
+            db,
+            id,
+            { userId: sesion.userId, deviceId: sesion.deviceId },
+            ahora,
+            auditado,
+          ),
+        );
       }
 
       const [actualizacion] = await db.batch(sentencias);

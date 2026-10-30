@@ -2,7 +2,7 @@
 // D1 local real; consumos con fixtures SQL que respetan los triggers (fase2-auditoria-helpers).
 import { BOM_CSV, fechaHoraBogotaCsv, type ResumenOrden, uuidv7 } from '@catmetal/shared';
 import { env } from 'cloudflare:workers';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { ENCABEZADO_CSV, LOTE_CSV } from '../src/dominio/reportes';
 import {
   type Autor,
@@ -23,6 +23,10 @@ import {
   type SesionDeRol,
 } from './fase2-helpers';
 import { insertar, sentenciaInsert } from './fixtures-db';
+
+// Pruebas con PBKDF2 y muchas peticiones: con la máquina cargada superan el límite por defecto de
+// 5 s. Mismo valor que las demás pruebas pesadas del worker; no cambia ninguna aserción.
+vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
 
 let admin: SesionDeRol;
 let jefe: SesionDeRol;

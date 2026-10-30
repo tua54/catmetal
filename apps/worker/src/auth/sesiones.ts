@@ -52,6 +52,11 @@ export interface DatosNuevaSesion {
   instalacionId: string | null;
   nombreDispositivo: string | null;
   userAgent: string | null;
+  /**
+   * Sentencias adicionales para el MISMO batch, después de registrar el dispositivo (por ejemplo,
+   * el reinicio del cupo de login usado, ADR 0018). Reciben la hora del batch.
+   */
+  adicionales?: (ahora: string) => D1PreparedStatement[];
 }
 
 /** Acción de auditoría de una familia revocada porque otro usuario entró en el mismo navegador. */
@@ -143,9 +148,10 @@ function sentenciasRevocarAjenas(
 }
 
 /**
- * Login correcto: registra o actualiza el dispositivo, reinicia el contador de intentos, revoca las
- * familias activas del mismo usuario en el mismo dispositivo y, si llega un `instalacion_id`, las de
- * otros usuarios en ese mismo navegador (F4-06); por último crea una familia nueva.
+ * Login correcto: registra o actualiza el dispositivo, reinicia el cupo de login usado y las columnas
+ * de bloqueo heredadas de la v1, revoca las familias activas del mismo usuario en el mismo
+ * dispositivo y, si llega un `instalacion_id`, las de otros usuarios en ese mismo navegador
+ * (F4-06); por último crea una familia nueva.
  */
 export async function iniciarSesion(
   db: D1Database,
@@ -221,9 +227,12 @@ export async function iniciarSesion(
     );
   }
 
-  // Reinicio del contador (H-01): la reserva del intento lo dejó en ≥ 1 y, si este era el
-  // intento que alcanzaba el máximo, también fijó `bloqueado_hasta`. La contraseña correcta lo
-  // deshace; si había un bloqueo se audita el desbloqueo ANTES del UPDATE (condición previa).
+  // Cupo de login del origen usado (ADR 0018): se reinicia en el mismo batch.
+  sentencias.push(...(datos.adicionales?.(ahora) ?? []));
+
+  // Columnas de la v1 (`users.intentos_fallidos`/`bloqueado_hasta`, ADR 0018 punto 6): ya no
+  // bloquean el login, pero el login correcto las deja en 0/NULL para que no quede ningún bloqueo
+  // heredado. Si había un bloqueo se audita el desbloqueo ANTES del UPDATE (condición previa).
   sentencias.push(
     sentenciaAuditoriaCondicional(
       db,
