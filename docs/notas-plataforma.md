@@ -73,3 +73,4 @@ Fuente: informe de `documentation-researcher` (URLs en cada punto).
 - Con `injectManifest`, vite-plugin-pwa agrega los íconos del manifest al precache además de `globPatterns` (salían duplicados): `includeManifestIcons: false`.
 - `lib.webworker` choca con `lib.dom`: el Service Worker tiene su propio `tsconfig` (`apps/web/src/pwa/sw/tsconfig.json`).
 - Los comentarios XML de un SVG no pueden contener `--`: sharp/librsvg falla al rasterizarlo.
+- `browser-image-compression` descarga por defecto su código de Web Worker desde `cdn.jsdelivr.net`: rompe la CSP `'self'` y no funciona sin conexión. Usar siempre `useWebWorker: false`.
