@@ -3,6 +3,7 @@
 - Estado: aceptado
 - Fecha: 2026-10-29
 - Fase: 3 (adelantada en paralelo con la Fase 2)
+- Enmendado por: ADR 0022 (snapshot en un área temporal y autoridad del servidor tras un cambio de época o un reinicio).
 
 ## Contexto
 

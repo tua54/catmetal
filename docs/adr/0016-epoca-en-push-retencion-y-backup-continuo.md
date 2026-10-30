@@ -3,6 +3,7 @@
 - Estado: aceptado
 - Fecha: 2026-10-29
 - Fase: 3
+- Enmendado por: ADR 0022 (snapshot en un área temporal y autoridad del servidor tras un cambio de época o un reinicio).
 - Enmienda: ADR 0009 (época y retención) y ADR 0014 (backup)
 
 ## Contexto
