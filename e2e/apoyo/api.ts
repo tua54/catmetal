@@ -58,13 +58,21 @@ let sesionJefe: SesionApi | null = null;
 export const ENV_TOKEN_JEFE = 'E2E_TOKEN_JEFE';
 export const ENV_TOKEN_JEFE_RENOVAR_EN = 'E2E_TOKEN_JEFE_RENOVAR_EN';
 
-function sesionJefeDelEntorno(): SesionApi | null {
-  const accessToken = process.env[ENV_TOKEN_JEFE];
-  const renovarEn = Number(process.env[ENV_TOKEN_JEFE_RENOVAR_EN]);
+export const ENV_TOKEN_ADMIN = 'E2E_TOKEN_ADMIN';
+export const ENV_TOKEN_ADMIN_RENOVAR_EN = 'E2E_TOKEN_ADMIN_RENOVAR_EN';
+
+/** Sesión de API que `global-setup.ts` dejó en el entorno (o `null` si no hay). */
+export function sesionDelEntorno(variableToken: string, variableRenovar: string): SesionApi | null {
+  const accessToken = process.env[variableToken];
+  const renovarEn = Number(process.env[variableRenovar]);
   if (!accessToken || !Number.isFinite(renovarEn)) {
     return null;
   }
   return { accessToken, deviceId: '', renovarEn };
+}
+
+function sesionJefeDelEntorno(): SesionApi | null {
+  return sesionDelEntorno(ENV_TOKEN_JEFE, ENV_TOKEN_JEFE_RENOVAR_EN);
 }
 
 /** GET autenticado como jefe (rol con acceso de lectura a órdenes, consumos y evidencias). */

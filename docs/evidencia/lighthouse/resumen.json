@@ -1,0 +1,582 @@
+{
+  "generado": "2026-10-30T03:18:23.335Z",
+  "umbral": 90,
+  "perfil": {
+    "viewport": {
+      "width": 1180,
+      "height": 820
+    },
+    "formFactor": "mobile (tablet)",
+    "userAgent": "Mozilla/5.0 (Linux; Android 13; SM-X700) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+    "throttling": {
+      "rttMs": 150,
+      "throughputKbps": 1638.4,
+      "requestLatencyMs": 562.5,
+      "downloadThroughputKbps": 1474.56,
+      "uploadThroughputKbps": 675,
+      "cpuSlowdownMultiplier": 4
+    },
+    "throttlingMethod": "simulate",
+    "navegador": "Chromium de Playwright"
+  },
+  "cumple": true,
+  "por_debajo_del_umbral": [],
+  "resultados": [
+    {
+      "etiqueta": "Login (sin sesión)",
+      "url": "http://localhost:8788/login",
+      "version_lighthouse": "13.6.0",
+      "hora": "2026-10-30T03:16:07.831Z",
+      "puntuaciones": {
+        "performance": 96,
+        "accessibility": 100,
+        "best-practices": 92
+      },
+      "metricas": {
+        "fcp_ms": 817,
+        "lcp_ms": 2749,
+        "tbt_ms": 30,
+        "cls": 0.017,
+        "speed_index_ms": 871
+      },
+      "auditorias_fallidas": [
+        {
+          "categoria": "performance",
+          "id": "largest-contentful-paint",
+          "titulo": "Largest Contentful Paint",
+          "puntuacion": 0.84,
+          "peso": 25,
+          "valor": "2.7 s",
+          "descripcion": null,
+          "elementos": []
+        },
+        {
+          "categoria": "best-practices",
+          "id": "errors-in-console",
+          "titulo": "Browser errors were logged to the console",
+          "puntuacion": 0,
+          "peso": 1,
+          "valor": null,
+          "descripcion": null,
+          "elementos": [
+            {
+              "url": null
+            }
+          ]
+        },
+        {
+          "categoria": "best-practices",
+          "id": "inspector-issues",
+          "titulo": "Issues were logged in the `Issues` panel in Chrome Devtools",
+          "puntuacion": 0,
+          "peso": 1,
+          "valor": null,
+          "descripcion": null,
+          "elementos": [
+            {
+              "url": null
+            }
+          ]
+        }
+      ],
+      "corridas": [
+        {
+          "puntuaciones": {
+            "performance": 96,
+            "accessibility": 100,
+            "best-practices": 92
+          },
+          "metricas": {
+            "fcp_ms": 817,
+            "lcp_ms": 2749,
+            "tbt_ms": 30,
+            "cls": 0.017,
+            "speed_index_ms": 871
+          }
+        },
+        {
+          "puntuaciones": {
+            "performance": 94,
+            "accessibility": 100,
+            "best-practices": 92
+          },
+          "metricas": {
+            "fcp_ms": 792,
+            "lcp_ms": 2507,
+            "tbt_ms": 191,
+            "cls": 0.017,
+            "speed_index_ms": 914
+          }
+        },
+        {
+          "puntuaciones": {
+            "performance": 97,
+            "accessibility": 100,
+            "best-practices": 92
+          },
+          "metricas": {
+            "fcp_ms": 780,
+            "lcp_ms": 2562,
+            "tbt_ms": 89,
+            "cls": 0.017,
+            "speed_index_ms": 821
+          }
+        }
+      ]
+    },
+    {
+      "etiqueta": "Supervisor · Mis órdenes",
+      "url": "http://localhost:8788/supervisor",
+      "version_lighthouse": "13.6.0",
+      "hora": "2026-10-30T03:16:49.524Z",
+      "puntuaciones": {
+        "performance": 97,
+        "accessibility": 100,
+        "best-practices": 96
+      },
+      "metricas": {
+        "fcp_ms": 59,
+        "lcp_ms": 643,
+        "tbt_ms": 184,
+        "cls": 0.002,
+        "speed_index_ms": 461
+      },
+      "auditorias_fallidas": [
+        {
+          "categoria": "performance",
+          "id": "total-blocking-time",
+          "titulo": "Total Blocking Time",
+          "puntuacion": 0.91,
+          "peso": 30,
+          "valor": "180 ms",
+          "descripcion": null,
+          "elementos": []
+        },
+        {
+          "categoria": "best-practices",
+          "id": "inspector-issues",
+          "titulo": "Issues were logged in the `Issues` panel in Chrome Devtools",
+          "puntuacion": 0,
+          "peso": 1,
+          "valor": null,
+          "descripcion": null,
+          "elementos": [
+            {
+              "url": null
+            }
+          ]
+        }
+      ],
+      "corridas": [
+        {
+          "puntuaciones": {
+            "performance": 97,
+            "accessibility": 100,
+            "best-practices": 96
+          },
+          "metricas": {
+            "fcp_ms": 34,
+            "lcp_ms": 652,
+            "tbt_ms": 199,
+            "cls": 0.002,
+            "speed_index_ms": 1193
+          }
+        },
+        {
+          "puntuaciones": {
+            "performance": 98,
+            "accessibility": 100,
+            "best-practices": 96
+          },
+          "metricas": {
+            "fcp_ms": 28,
+            "lcp_ms": 645,
+            "tbt_ms": 163,
+            "cls": 0.002,
+            "speed_index_ms": 477
+          }
+        },
+        {
+          "puntuaciones": {
+            "performance": 97,
+            "accessibility": 100,
+            "best-practices": 96
+          },
+          "metricas": {
+            "fcp_ms": 59,
+            "lcp_ms": 643,
+            "tbt_ms": 184,
+            "cls": 0.002,
+            "speed_index_ms": 461
+          }
+        }
+      ]
+    },
+    {
+      "etiqueta": "Supervisor · Registro de consumo",
+      "url": "http://localhost:8788/supervisor/ordenes/019a3000-0003-7000-8000-000000000001/registrar",
+      "version_lighthouse": "13.6.0",
+      "hora": "2026-10-30T03:17:04.388Z",
+      "puntuaciones": {
+        "performance": 98,
+        "accessibility": 100,
+        "best-practices": 96
+      },
+      "metricas": {
+        "fcp_ms": 30,
+        "lcp_ms": 648,
+        "tbt_ms": 165,
+        "cls": 0.002,
+        "speed_index_ms": 503
+      },
+      "auditorias_fallidas": [
+        {
+          "categoria": "performance",
+          "id": "total-blocking-time",
+          "titulo": "Total Blocking Time",
+          "puntuacion": 0.93,
+          "peso": 30,
+          "valor": "170 ms",
+          "descripcion": null,
+          "elementos": []
+        },
+        {
+          "categoria": "best-practices",
+          "id": "inspector-issues",
+          "titulo": "Issues were logged in the `Issues` panel in Chrome Devtools",
+          "puntuacion": 0,
+          "peso": 1,
+          "valor": null,
+          "descripcion": null,
+          "elementos": [
+            {
+              "url": null
+            }
+          ]
+        }
+      ],
+      "corridas": [
+        {
+          "puntuaciones": {
+            "performance": 97,
+            "accessibility": 100,
+            "best-practices": 96
+          },
+          "metricas": {
+            "fcp_ms": 27,
+            "lcp_ms": 645,
+            "tbt_ms": 192,
+            "cls": 0.002,
+            "speed_index_ms": 591
+          }
+        },
+        {
+          "puntuaciones": {
+            "performance": 98,
+            "accessibility": 100,
+            "best-practices": 96
+          },
+          "metricas": {
+            "fcp_ms": 30,
+            "lcp_ms": 648,
+            "tbt_ms": 165,
+            "cls": 0.002,
+            "speed_index_ms": 503
+          }
+        },
+        {
+          "puntuaciones": {
+            "performance": 99,
+            "accessibility": 100,
+            "best-practices": 96
+          },
+          "metricas": {
+            "fcp_ms": 28,
+            "lcp_ms": 646,
+            "tbt_ms": 148,
+            "cls": 0.002,
+            "speed_index_ms": 517
+          }
+        }
+      ]
+    },
+    {
+      "etiqueta": "Estado de sincronización",
+      "url": "http://localhost:8788/sincronizacion",
+      "version_lighthouse": "13.6.0",
+      "hora": "2026-10-30T03:17:18.799Z",
+      "puntuaciones": {
+        "performance": 98,
+        "accessibility": 100,
+        "best-practices": 96
+      },
+      "metricas": {
+        "fcp_ms": 30,
+        "lcp_ms": 648,
+        "tbt_ms": 154,
+        "cls": 0.003,
+        "speed_index_ms": 443
+      },
+      "auditorias_fallidas": [
+        {
+          "categoria": "performance",
+          "id": "total-blocking-time",
+          "titulo": "Total Blocking Time",
+          "puntuacion": 0.94,
+          "peso": 30,
+          "valor": "150 ms",
+          "descripcion": null,
+          "elementos": []
+        },
+        {
+          "categoria": "best-practices",
+          "id": "inspector-issues",
+          "titulo": "Issues were logged in the `Issues` panel in Chrome Devtools",
+          "puntuacion": 0,
+          "peso": 1,
+          "valor": null,
+          "descripcion": null,
+          "elementos": [
+            {
+              "url": null
+            }
+          ]
+        }
+      ],
+      "corridas": [
+        {
+          "puntuaciones": {
+            "performance": 98,
+            "accessibility": 100,
+            "best-practices": 96
+          },
+          "metricas": {
+            "fcp_ms": 30,
+            "lcp_ms": 648,
+            "tbt_ms": 154,
+            "cls": 0.003,
+            "speed_index_ms": 443
+          }
+        },
+        {
+          "puntuaciones": {
+            "performance": 96,
+            "accessibility": 100,
+            "best-practices": 96
+          },
+          "metricas": {
+            "fcp_ms": 57,
+            "lcp_ms": 647,
+            "tbt_ms": 220,
+            "cls": 0.003,
+            "speed_index_ms": 532
+          }
+        },
+        {
+          "puntuaciones": {
+            "performance": 100,
+            "accessibility": 100,
+            "best-practices": 96
+          },
+          "metricas": {
+            "fcp_ms": 22,
+            "lcp_ms": 639,
+            "tbt_ms": 87,
+            "cls": 0.003,
+            "speed_index_ms": 315
+          }
+        }
+      ]
+    },
+    {
+      "etiqueta": "Jefe · Validación de consumos",
+      "url": "http://localhost:8788/jefe",
+      "version_lighthouse": "13.6.0",
+      "hora": "2026-10-30T03:17:49.096Z",
+      "puntuaciones": {
+        "performance": 98,
+        "accessibility": 100,
+        "best-practices": 96
+      },
+      "metricas": {
+        "fcp_ms": 21,
+        "lcp_ms": 638,
+        "tbt_ms": 131,
+        "cls": 0.071,
+        "speed_index_ms": 449
+      },
+      "auditorias_fallidas": [
+        {
+          "categoria": "performance",
+          "id": "total-blocking-time",
+          "titulo": "Total Blocking Time",
+          "puntuacion": 0.96,
+          "peso": 30,
+          "valor": "130 ms",
+          "descripcion": null,
+          "elementos": []
+        },
+        {
+          "categoria": "performance",
+          "id": "cumulative-layout-shift",
+          "titulo": "Cumulative Layout Shift",
+          "puntuacion": 0.96,
+          "peso": 25,
+          "valor": "0.071",
+          "descripcion": null,
+          "elementos": [
+            {
+              "url": null
+            }
+          ]
+        },
+        {
+          "categoria": "best-practices",
+          "id": "inspector-issues",
+          "titulo": "Issues were logged in the `Issues` panel in Chrome Devtools",
+          "puntuacion": 0,
+          "peso": 1,
+          "valor": null,
+          "descripcion": null,
+          "elementos": [
+            {
+              "url": null
+            }
+          ]
+        }
+      ],
+      "corridas": [
+        {
+          "puntuaciones": {
+            "performance": 94,
+            "accessibility": 100,
+            "best-practices": 96
+          },
+          "metricas": {
+            "fcp_ms": 30,
+            "lcp_ms": 703,
+            "tbt_ms": 257,
+            "cls": 0.071,
+            "speed_index_ms": 532
+          }
+        },
+        {
+          "puntuaciones": {
+            "performance": 98,
+            "accessibility": 100,
+            "best-practices": 96
+          },
+          "metricas": {
+            "fcp_ms": 21,
+            "lcp_ms": 638,
+            "tbt_ms": 131,
+            "cls": 0.071,
+            "speed_index_ms": 449
+          }
+        },
+        {
+          "puntuaciones": {
+            "performance": 98,
+            "accessibility": 100,
+            "best-practices": 96
+          },
+          "metricas": {
+            "fcp_ms": 22,
+            "lcp_ms": 639,
+            "tbt_ms": 136,
+            "cls": 0.071,
+            "speed_index_ms": 446
+          }
+        }
+      ]
+    },
+    {
+      "etiqueta": "Admin · Usuarios",
+      "url": "http://localhost:8788/admin",
+      "version_lighthouse": "13.6.0",
+      "hora": "2026-10-30T03:18:03.596Z",
+      "puntuaciones": {
+        "performance": 99,
+        "accessibility": 100,
+        "best-practices": 96
+      },
+      "metricas": {
+        "fcp_ms": 21,
+        "lcp_ms": 638,
+        "tbt_ms": 140,
+        "cls": 0.002,
+        "speed_index_ms": 404
+      },
+      "auditorias_fallidas": [
+        {
+          "categoria": "performance",
+          "id": "total-blocking-time",
+          "titulo": "Total Blocking Time",
+          "puntuacion": 0.95,
+          "peso": 30,
+          "valor": "140 ms",
+          "descripcion": null,
+          "elementos": []
+        },
+        {
+          "categoria": "best-practices",
+          "id": "inspector-issues",
+          "titulo": "Issues were logged in the `Issues` panel in Chrome Devtools",
+          "puntuacion": 0,
+          "peso": 1,
+          "valor": null,
+          "descripcion": null,
+          "elementos": [
+            {
+              "url": null
+            }
+          ]
+        }
+      ],
+      "corridas": [
+        {
+          "puntuaciones": {
+            "performance": 99,
+            "accessibility": 100,
+            "best-practices": 96
+          },
+          "metricas": {
+            "fcp_ms": 21,
+            "lcp_ms": 638,
+            "tbt_ms": 140,
+            "cls": 0.002,
+            "speed_index_ms": 404
+          }
+        },
+        {
+          "puntuaciones": {
+            "performance": 100,
+            "accessibility": 100,
+            "best-practices": 96
+          },
+          "metricas": {
+            "fcp_ms": 22,
+            "lcp_ms": 639,
+            "tbt_ms": 74,
+            "cls": 0.002,
+            "speed_index_ms": 349
+          }
+        },
+        {
+          "puntuaciones": {
+            "performance": 98,
+            "accessibility": 100,
+            "best-practices": 96
+          },
+          "metricas": {
+            "fcp_ms": 23,
+            "lcp_ms": 640,
+            "tbt_ms": 166,
+            "cls": 0.002,
+            "speed_index_ms": 430
+          }
+        }
+      ]
+    }
+  ]
+}

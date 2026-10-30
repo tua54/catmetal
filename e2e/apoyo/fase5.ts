@@ -10,8 +10,11 @@ import type { ConsumoDetallado } from '../../packages/shared/src/tipos';
 import type { EventoLineaTiempo, LineaTiempoOrden } from '../../packages/shared/src/reportes';
 import {
   ENCABEZADOS_ORIGEN,
+  ENV_TOKEN_ADMIN,
+  ENV_TOKEN_ADMIN_RENOVAR_EN,
   getCrudoComoJefe,
   iniciarSesionApi,
+  sesionDelEntorno,
   uuidV7,
   type SesionApi,
 } from './api';
@@ -33,8 +36,13 @@ export async function sesionDe(
   request: APIRequestContext,
   usuario: UsuarioSeed,
 ): Promise<SesionApi> {
-  const previa = sesiones.get(usuario.email);
+  const previa =
+    sesiones.get(usuario.email) ??
+    (usuario.email === ADMIN.email
+      ? (sesionDelEntorno(ENV_TOKEN_ADMIN, ENV_TOKEN_ADMIN_RENOVAR_EN) ?? undefined)
+      : undefined);
   if (previa !== undefined && Date.now() < previa.renovarEn) {
+    sesiones.set(usuario.email, previa);
     return previa;
   }
   const nueva = await iniciarSesionApi(request, usuario);
