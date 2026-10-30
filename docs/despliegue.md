@@ -62,7 +62,8 @@ npx wrangler d1 migrations list mp-staging --env staging --remote
 npx wrangler d1 migrations apply mp-staging --env staging --remote
 ```
 
-- Aplica en orden las migraciones de `/migrations` (0000 esquema, 0001 y 0004 triggers, 0002 configuración inicial con `tolerancia_pct = 5` y una `sync_epoca` aleatoria, 0003, 0005 y 0006 índices).
+- Aplica en orden las migraciones de `/migrations` (0000 esquema, 0001 y 0004 triggers, 0002 configuración inicial con `tolerancia_pct = 5` y una `sync_epoca` aleatoria, 0003, 0005 y 0006 índices, 0007 cupos de login, 0008 settings válidos en INSERT, 0009 marca de escritura `escritura_id`).
+- **La 0009 (v1.2, ADR 0028) se aplica antes de desplegar el Worker v1.2**: ese Worker escribe `escritura_id` y fallaría con `no such column` sobre una base sin ella. El workflow de staging ya aplica las migraciones antes del `deploy`. Aplique la migración y despliegue seguidos: en el intervalo, el cron de backup de la v1.1 exportaría la columna nueva (inocuo: la restauración la ignora).
 - Pide confirmación; antes toma un backup automático. Si una migración falla, se revierte y queda aplicada la última exitosa.
 - No ejecute `drizzle-kit migrate` ni `push` (irían por HTTP sin el control de `wrangler`).
 
@@ -280,7 +281,7 @@ Fuera de una restauración pasa lo mismo cuando una subida no llega a confirmars
 
 ### 9.5 Detectar filas de auditoría duplicadas o espurias (ADR 0028)
 
-Hasta la v1.1, una petición concurrente que **perdía** (su escritura no cambiaba filas) podía dejar igual su fila de auditoría si calculaba el mismo `ahora` que la ganadora, o si la condición no usaba la hora (validaciones). Desde la v1.2 la auditoría se condiciona a una marca de escritura y eso ya no ocurre. En una base creada antes de la v1.2 (staging, o producción si se desplegó la v1.0 o la v1.1), estas consultas listan los candidatos. Deben devolver 0 filas. Son de solo lectura. Guárdelas en `deteccion-auditoria.sql` y ejecútelas con `wrangler d1 execute <base> --env <entorno> --file=deteccion-auditoria.sql` contra la base remota del entorno.
+Hasta la v1.1, una petición concurrente que **perdía** (su escritura no cambiaba filas) podía dejar igual su fila de auditoría si calculaba el mismo `ahora` que la ganadora, o si la condición no usaba la hora (validaciones). Desde la v1.2 la auditoría se condiciona a una marca de escritura y eso ya no ocurre. En una base creada antes de la v1.2 (staging, o producción si se desplegó la v1.0 o la v1.1), estas consultas listan los candidatos. Deben devolver 0 filas. Son de solo lectura, pero recorren `audit_log` completa (no hay índice por `accion`): en una base grande pueden topar el tiempo máximo de consulta de D1. En ese caso, córralas sobre una copia restaurada en local (sección 9.2) o por rangos de `seq` (`AND seq BETWEEN ? AND ?`). Guárdelas en `deteccion-auditoria.sql` y ejecútelas con `wrangler d1 execute <base> --env <entorno> --file=deteccion-auditoria.sql` contra la base remota del entorno.
 
 ```sql
 -- 1. Acciones que ocurren una sola vez por entidad, con más de una fila (sea cual sea server_at).

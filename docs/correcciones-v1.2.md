@@ -146,3 +146,10 @@ Este documento es **el alcance de la sesión v1.2**. Cada ítem trae:
 - **Dónde**: `apps/worker/src/dominio/materiales.ts` (testigo `updated_at`), `dominio/settings.ts` (testigo `valor IS ?`) y `dominio/asignaciones.ts` (testigo `activo`).
 - **Escenario**: con escrituras en el mismo milisegundo, una edición basada en una lectura vieja pisa a otra (materiales). Con un valor que vuelve al anterior (ABA), el cambio se aplica con un `datos_antes` que ya no es el estado previo (tolerancia, asignaciones). La restauración usa `datos_antes` (R-04).
 - **Aceptación**: la principal exige también la marca de escritura leída (`escritura_id IS ?`, ADR 0028). Prueba determinista en `apps/worker/test/correcciones-n1-concurrencia-optimista.test.ts`.
+
+### N2. Dos escrituras de `users` no renuevan la marca de escritura
+
+- **Prioridad**: P2 (bajo; hallazgo R-v12-01 de `docs/auditoria/revision-esquema-v1.2.md`). Está en el área de A1.
+- **Dónde**: `apps/worker/src/auth/sesiones.ts` (el `UPDATE users SET intentos_fallidos = 0, updated_at = ?` del login, sin auditar) y `scripts/desbloqueo-emergencia-sql.mjs` (reinicio de `users`).
+- **Escenario**: en esos caminos el testigo de concurrencia de N1 queda solo en `updated_at`. Si el login cae en el mismo milisegundo que el `updated_at` que leyó un admin, su `usuario.editar` se aplica con un `datos_antes.intentos_fallidos` viejo. No se pierde ninguna actualización.
+- **Aceptación**: las dos escrituras fijan una marca nueva (nunca `NULL`). Prueba determinista.
