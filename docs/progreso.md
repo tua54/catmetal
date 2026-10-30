@@ -148,3 +148,4 @@ No se usan `mvc-dotnet-developer`, `angular-developer` ni `orchestrator`.
 - D9 (desviaciones) y P25 (preguntas abiertas) registradas para M1.
 - ADR 0022 (M5/M6) aceptado (82b88ca); react-developer implementa. ADR 0020 (M3) y 0021 (M4) propuestos por general-purpose; segunda opinión de software-architect en curso. M1 en implementación.
 - M1 resuelto (e8e5a27). N2 (seed y AUTOINCREMENT) resuelto (25c254a); D1 local recreada con seed --reset. N3 registrado (P2).
+- M2-servidor (d498af3), M5/M6 (bf91c2f). M7 y M2-cliente encargados a react-developer. Decisión menor: B1 y B6 (P2, solo `apps/worker/src/auth/`) se adelantan en paralelo con el resto de P1, con archivos disjuntos, igual que D8 en la v1.

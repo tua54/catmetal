@@ -126,6 +126,8 @@ Los cambios de la spec de esta ronda están en `docs/spec.md` §14 (v2.1).
 
 ### B2. Documentar la ventana de gracia de la rotación
 
+- **Estado**: RESUELTO (ver commit `docs(desviaciones)` de B2): entrada D10 en `docs/desviaciones.md`.
+
 - **Dónde**: `sesiones.ts:411-440`; ADR 0008 punto 3.
 - **Aceptación**: hay una entrada en `docs/desviaciones.md` que referencia el ADR.
 
