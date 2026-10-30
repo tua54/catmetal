@@ -26,8 +26,9 @@
 
 | # | Estado | Referencia |
 |---|---|---|
-| F4-01, F4-02, F4-03, F4-04, F4-05, F4-08, F4-09, F4-12 | En corrección (tarea 4.7, cliente) | ADR 0017 |
-| F4-06, F4-10 | En corrección (tarea 4.7, servidor) | ADR 0017 |
+| F4-01, F4-02, F4-03, F4-04, F4-05, F4-08, F4-09, F4-12 | **Corregidos** con pruebas (`apps/web/src/auth/{sesion-seguridad,inactividad}.test.ts`, `sync/motor-seguridad.test.ts`, `datos/retencion.test.ts`, `components/layout/PantallaBloqueo.test.tsx`) | `c6b442b`, ADR 0017 |
+| F4-06, F4-10 | **Corregidos** con pruebas (`apps/worker/test/auth-instalacion.test.ts`, `handlers.test.ts`) | `c7b855e` |
+| F4-06 (riesgo residual) | El `instalacion_id` lo envía el cliente: quien conozca el de otro navegador y tenga credenciales válidas podría cerrar sesiones allí; es un UUID v7 aleatorio que solo ve el admin. Aceptado | ADR 0017 |
 | F4-07, F4-11 | Riesgo aceptado | ADR 0017 |
 
 ## Aspectos verificados sin hallazgos (resumen)

@@ -100,7 +100,9 @@ No se usan `mvc-dotnet-developer`, `angular-developer` ni `orchestrator`.
 - 3.8 (servidor) y 3.9 (cliente) corrigieron los hallazgos de la revisión 3.6. Pruebas inestables corregidas sin tocar aserciones (rate limiter y rutas lazy).
 - Cierre: shared 209, worker 1.152, web 374 pruebas; audit sin vulnerabilidades. Evidencia: `docs/evidencia/fase-3.md`.
 
-### Fase 4 — PWA del supervisor (en curso)
+### Fase 4 — PWA del supervisor (cerrada)
 
 - Adelantadas y confirmadas: 4.1, 4.2 (+4.2b), 4.3, 4.4a. En curso: 4.4b (E2E offline con foto y tablet compartida).
 - **Tareas adelantadas de la Fase 5** en paralelo: 5.1–5.2 (pantallas del jefe, `react-developer`) y 5.3 (pantallas de admin, otro `react-developer`), con archivos separados; ambos tocan solo su bloque de `src/rutas/rutas.tsx`.
+- 4.4b E2E offline con foto y tablet compartida; 4.5 revisión de seguridad (2 medios); ADR 0017; 4.7 correcciones (cliente `c6b442b`, servidor `c7b855e`); `wrangler.jsonc` sin invocation logs ni URLs públicas en producción.
+- Cierre: 1.859 pruebas unitarias/integración y 25 E2E en verde; audit sin vulnerabilidades. Evidencia: `docs/evidencia/fase-4.md`.
