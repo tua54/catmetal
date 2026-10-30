@@ -13,6 +13,8 @@ Reglas comunes a todos los ítems de código:
 
 ## ADR previstos
 
+> **Numeración final** (difiere de la prevista): 0018 M1, 0019 M2, 0020 M3, 0021 M4, 0022 M5/M6, 0023 M7, 0024 B4, 0025 B12, 0026 B5, 0027 S-03/S-09. B3 no necesitó ADR, porque el contrato no cambió.
+
 | ADR | Ítem | Tema | Segunda opinión |
 |---|---|---|---|
 | 0018 | M1 | Cupos de login por dispositivo conocido y por origen desconocido, y desbloqueo de emergencia. Reemplaza el punto de bloqueo de ADR 0008. | `software-architect` |

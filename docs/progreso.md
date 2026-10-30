@@ -6,11 +6,11 @@
 
 - Rama de trabajo: `fix/auditoria-v1`, desde `build/v1` (línea base en `main`: `bfa8975`).
 - **Fases 0 a 6 cerradas** (tags `fase-0` a `fase-6`). Sesión v1 terminada: ver `docs/INFORME-FINAL.md`.
-- **Sesión de correcciones v1.1 en curso** en la rama `fix/auditoria-v1`. Plan: `docs/plan-correcciones.md`.
+- **Sesión de correcciones v1.1 terminada** en la rama `fix/auditoria-v1`. Ver `docs/INFORME-CORRECCIONES.md`.
 
 ## Siguiente paso
 
-En curso: M7 y M2-cliente (react-developer), correcciones R-01 a R-05 de la revisión de esquema (general-purpose) y B5-servidor (general-purpose). Pendiente: B5-cliente, B3-cliente, B9 y B10 (react-developer); N3; revisión de seguridad (M1, M7, B1, B3, B4, B5); gates finales e informe.
+Ninguno en esta sesión. El equipo revisa `docs/INFORME-CORRECCIONES.md`, ejecuta `docs/pendientes-humanos.md` y hace el push cuando lo apruebe.
 
 ## Sesión de correcciones v1.1
 
@@ -151,3 +151,7 @@ No se usan `mvc-dotnet-developer`, `angular-developer` ni `orchestrator`.
 - M2-servidor (d498af3), M5/M6 (bf91c2f). M7 y M2-cliente encargados a react-developer. Decisión menor: B1 y B6 (P2, solo `apps/worker/src/auth/`) se adelantan en paralelo con el resto de P1, con archivos disjuntos, igual que D8 en la v1.
 - M3/M4 (88c6afb), B1 (f5d4454), B6 (51a3ed3), B7 (231ad15; 0008 aplicada a la D1 local), B8 (8f24550). En curso: M7 y M2-cliente (react-developer), B3+B12+B11 y B4 (general-purpose).
 - B4 (ea0f97d, ADR 0024), B3-servidor (f8b5c1b), B12 (65e4732, ADR 0025), B11 (69eb496). Revisión de esquema guardada (5bcfbc0): aprobado con cambios, R-01 alto. ADR 0026 (B5).
+- M7 y M2-cliente (ea2b5df). El react-developer que los implementó quedó esperando un comando en segundo plano; el orquestador corrió los gates y la E2E y confirmó su trabajo. Gates de P1: format:check, y E2E 35/35.
+- Revisión de seguridad (5ad5b39, d4b6d21) con seguimiento de M7: 0 críticos, altos o medios. S-02, S-05 y S-06 (53487c8), S-03 y S-09 (2c29a5d, d14566f, ADR 0027); S-01 se acepta para respetar la spec §5 (d).
+- P2 del cliente: B3 (cc367e4), B9 (8045d1f), B10 (79f0999) y B5 (68dc60d).
+- Gates finales en verde: 2.252 pruebas, 35 E2E, audit sin vulnerabilidades y Lighthouse 100. Informe y tag `correcciones-v1.1`.

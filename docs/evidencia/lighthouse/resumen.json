@@ -1,5 +1,5 @@
 {
-  "generado": "2026-10-30T04:33:40.849Z",
+  "generado": "2026-10-30T18:26:24.787Z",
   "umbral": 90,
   "perfil": {
     "viewport": {
@@ -26,37 +26,27 @@
       "etiqueta": "Login (sin sesión)",
       "url": "http://localhost:8788/login",
       "version_lighthouse": "13.6.0",
-      "hora": "2026-10-30T04:30:01.078Z",
+      "hora": "2026-10-30T18:23:11.076Z",
       "puntuaciones": {
-        "performance": 91,
+        "performance": 96,
         "accessibility": 100,
         "best-practices": 96
       },
       "metricas": {
-        "fcp_ms": 778,
-        "lcp_ms": 2650,
-        "tbt_ms": 283,
+        "fcp_ms": 788,
+        "lcp_ms": 2700,
+        "tbt_ms": 18,
         "cls": 0,
-        "speed_index_ms": 1141
+        "speed_index_ms": 804
       },
       "auditorias_fallidas": [
         {
           "categoria": "performance",
           "id": "largest-contentful-paint",
           "titulo": "Largest Contentful Paint",
-          "puntuacion": 0.86,
+          "puntuacion": 0.85,
           "peso": 25,
           "valor": "2.7 s",
-          "descripcion": null,
-          "elementos": []
-        },
-        {
-          "categoria": "performance",
-          "id": "total-blocking-time",
-          "titulo": "Total Blocking Time",
-          "puntuacion": 0.8,
-          "peso": 30,
-          "valor": "280 ms",
           "descripcion": null,
           "elementos": []
         },
@@ -78,44 +68,44 @@
       "corridas": [
         {
           "puntuaciones": {
+            "performance": 96,
+            "accessibility": 100,
+            "best-practices": 96
+          },
+          "metricas": {
+            "fcp_ms": 788,
+            "lcp_ms": 2700,
+            "tbt_ms": 18,
+            "cls": 0,
+            "speed_index_ms": 804
+          }
+        },
+        {
+          "puntuaciones": {
             "performance": 94,
             "accessibility": 100,
             "best-practices": 96
           },
           "metricas": {
-            "fcp_ms": 795,
-            "lcp_ms": 2822,
-            "tbt_ms": 145,
-            "cls": 0.017,
-            "speed_index_ms": 1039
-          }
-        },
-        {
-          "puntuaciones": {
-            "performance": 91,
-            "accessibility": 100,
-            "best-practices": 96
-          },
-          "metricas": {
-            "fcp_ms": 778,
-            "lcp_ms": 2650,
-            "tbt_ms": 283,
+            "fcp_ms": 766,
+            "lcp_ms": 2642,
+            "tbt_ms": 192,
             "cls": 0,
-            "speed_index_ms": 1141
+            "speed_index_ms": 1028
           }
         },
         {
           "puntuaciones": {
-            "performance": 78,
+            "performance": 96,
             "accessibility": 100,
             "best-practices": 96
           },
           "metricas": {
-            "fcp_ms": 794,
-            "lcp_ms": 2836,
-            "tbt_ms": 724,
-            "cls": 0.017,
-            "speed_index_ms": 1126
+            "fcp_ms": 766,
+            "lcp_ms": 2628,
+            "tbt_ms": 128,
+            "cls": 0,
+            "speed_index_ms": 983
           }
         }
       ]
@@ -124,60 +114,32 @@
       "etiqueta": "Supervisor · Mis órdenes",
       "url": "http://localhost:8788/supervisor",
       "version_lighthouse": "13.6.0",
-      "hora": "2026-10-30T04:30:20.332Z",
+      "hora": "2026-10-30T18:23:48.602Z",
       "puntuaciones": {
-        "performance": 93,
+        "performance": 100,
         "accessibility": 100,
         "best-practices": 100
       },
       "metricas": {
-        "fcp_ms": 68,
-        "lcp_ms": 659,
-        "tbt_ms": 313,
+        "fcp_ms": 43,
+        "lcp_ms": 645,
+        "tbt_ms": 84,
         "cls": 0.002,
-        "speed_index_ms": 1893
+        "speed_index_ms": 300
       },
       "auditorias_fallidas": [
         {
           "categoria": "performance",
           "id": "total-blocking-time",
           "titulo": "Total Blocking Time",
-          "puntuacion": 0.77,
+          "puntuacion": 0.99,
           "peso": 30,
-          "valor": "310 ms",
+          "valor": "80 ms",
           "descripcion": null,
           "elementos": []
         }
       ],
       "corridas": [
-        {
-          "puntuaciones": {
-            "performance": 93,
-            "accessibility": 100,
-            "best-practices": 100
-          },
-          "metricas": {
-            "fcp_ms": 68,
-            "lcp_ms": 659,
-            "tbt_ms": 313,
-            "cls": 0.002,
-            "speed_index_ms": 1893
-          }
-        },
-        {
-          "puntuaciones": {
-            "performance": 92,
-            "accessibility": 100,
-            "best-practices": 100
-          },
-          "metricas": {
-            "fcp_ms": 95,
-            "lcp_ms": 684,
-            "tbt_ms": 344,
-            "cls": 0.002,
-            "speed_index_ms": 753
-          }
-        },
         {
           "puntuaciones": {
             "performance": 99,
@@ -185,145 +147,11 @@
             "best-practices": 100
           },
           "metricas": {
-            "fcp_ms": 40,
+            "fcp_ms": 38,
             "lcp_ms": 642,
-            "tbt_ms": 104,
+            "tbt_ms": 102,
             "cls": 0.002,
-            "speed_index_ms": 342
-          }
-        }
-      ]
-    },
-    {
-      "etiqueta": "Supervisor · Registro de consumo",
-      "url": "http://localhost:8788/supervisor/ordenes/019a3000-0003-7000-8000-000000000001/registrar",
-      "version_lighthouse": "13.6.0",
-      "hora": "2026-10-30T04:31:10.093Z",
-      "puntuaciones": {
-        "performance": 92,
-        "accessibility": 100,
-        "best-practices": 100
-      },
-      "metricas": {
-        "fcp_ms": 63,
-        "lcp_ms": 656,
-        "tbt_ms": 354,
-        "cls": 0.002,
-        "speed_index_ms": 746
-      },
-      "auditorias_fallidas": [
-        {
-          "categoria": "performance",
-          "id": "total-blocking-time",
-          "titulo": "Total Blocking Time",
-          "puntuacion": 0.73,
-          "peso": 30,
-          "valor": "350 ms",
-          "descripcion": null,
-          "elementos": []
-        }
-      ],
-      "corridas": [
-        {
-          "puntuaciones": {
-            "performance": 91,
-            "accessibility": 100,
-            "best-practices": 100
-          },
-          "metricas": {
-            "fcp_ms": 79,
-            "lcp_ms": 671,
-            "tbt_ms": 389,
-            "cls": 0.002,
-            "speed_index_ms": 820
-          }
-        },
-        {
-          "puntuaciones": {
-            "performance": 92,
-            "accessibility": 100,
-            "best-practices": 100
-          },
-          "metricas": {
-            "fcp_ms": 63,
-            "lcp_ms": 656,
-            "tbt_ms": 354,
-            "cls": 0.002,
-            "speed_index_ms": 746
-          }
-        },
-        {
-          "puntuaciones": {
-            "performance": 95,
-            "accessibility": 100,
-            "best-practices": 100
-          },
-          "metricas": {
-            "fcp_ms": 98,
-            "lcp_ms": 691,
-            "tbt_ms": 249,
-            "cls": 0.002,
-            "speed_index_ms": 843
-          }
-        }
-      ]
-    },
-    {
-      "etiqueta": "Estado de sincronización",
-      "url": "http://localhost:8788/sincronizacion",
-      "version_lighthouse": "13.6.0",
-      "hora": "2026-10-30T04:31:50.056Z",
-      "puntuaciones": {
-        "performance": 98,
-        "accessibility": 100,
-        "best-practices": 100
-      },
-      "metricas": {
-        "fcp_ms": 107,
-        "lcp_ms": 697,
-        "tbt_ms": 170,
-        "cls": 0.003,
-        "speed_index_ms": 798
-      },
-      "auditorias_fallidas": [
-        {
-          "categoria": "performance",
-          "id": "total-blocking-time",
-          "titulo": "Total Blocking Time",
-          "puntuacion": 0.93,
-          "peso": 30,
-          "valor": "170 ms",
-          "descripcion": null,
-          "elementos": []
-        }
-      ],
-      "corridas": [
-        {
-          "puntuaciones": {
-            "performance": 92,
-            "accessibility": 100,
-            "best-practices": 100
-          },
-          "metricas": {
-            "fcp_ms": 75,
-            "lcp_ms": 664,
-            "tbt_ms": 343,
-            "cls": 0.003,
-            "speed_index_ms": 726
-          }
-        },
-        {
-          "puntuaciones": {
-            "performance": 98,
-            "accessibility": 100,
-            "best-practices": 100
-          },
-          "metricas": {
-            "fcp_ms": 107,
-            "lcp_ms": 697,
-            "tbt_ms": 170,
-            "cls": 0.003,
-            "speed_index_ms": 798
+            "speed_index_ms": 1007
           }
         },
         {
@@ -334,10 +162,172 @@
           },
           "metricas": {
             "fcp_ms": 43,
+            "lcp_ms": 645,
+            "tbt_ms": 84,
+            "cls": 0.002,
+            "speed_index_ms": 300
+          }
+        },
+        {
+          "puntuaciones": {
+            "performance": 100,
+            "accessibility": 100,
+            "best-practices": 100
+          },
+          "metricas": {
+            "fcp_ms": 38,
+            "lcp_ms": 641,
+            "tbt_ms": 72,
+            "cls": 0.002,
+            "speed_index_ms": 287
+          }
+        }
+      ]
+    },
+    {
+      "etiqueta": "Supervisor · Registro de consumo",
+      "url": "http://localhost:8788/supervisor/ordenes/019a3000-0003-7000-8000-000000000001/registrar",
+      "version_lighthouse": "13.6.0",
+      "hora": "2026-10-30T18:24:23.116Z",
+      "puntuaciones": {
+        "performance": 100,
+        "accessibility": 100,
+        "best-practices": 100
+      },
+      "metricas": {
+        "fcp_ms": 42,
+        "lcp_ms": 644,
+        "tbt_ms": 90,
+        "cls": 0.002,
+        "speed_index_ms": 381
+      },
+      "auditorias_fallidas": [
+        {
+          "categoria": "performance",
+          "id": "total-blocking-time",
+          "titulo": "Total Blocking Time",
+          "puntuacion": 0.99,
+          "peso": 30,
+          "valor": "90 ms",
+          "descripcion": null,
+          "elementos": []
+        }
+      ],
+      "corridas": [
+        {
+          "puntuaciones": {
+            "performance": 100,
+            "accessibility": 100,
+            "best-practices": 100
+          },
+          "metricas": {
+            "fcp_ms": 41,
+            "lcp_ms": 642,
+            "tbt_ms": 81,
+            "cls": 0.002,
+            "speed_index_ms": 312
+          }
+        },
+        {
+          "puntuaciones": {
+            "performance": 100,
+            "accessibility": 100,
+            "best-practices": 100
+          },
+          "metricas": {
+            "fcp_ms": 42,
+            "lcp_ms": 644,
+            "tbt_ms": 90,
+            "cls": 0.002,
+            "speed_index_ms": 381
+          }
+        },
+        {
+          "puntuaciones": {
+            "performance": 100,
+            "accessibility": 100,
+            "best-practices": 100
+          },
+          "metricas": {
+            "fcp_ms": 44,
+            "lcp_ms": 642,
+            "tbt_ms": 73,
+            "cls": 0.002,
+            "speed_index_ms": 336
+          }
+        }
+      ]
+    },
+    {
+      "etiqueta": "Estado de sincronización",
+      "url": "http://localhost:8788/sincronizacion",
+      "version_lighthouse": "13.6.0",
+      "hora": "2026-10-30T18:24:57.370Z",
+      "puntuaciones": {
+        "performance": 100,
+        "accessibility": 100,
+        "best-practices": 100
+      },
+      "metricas": {
+        "fcp_ms": 40,
+        "lcp_ms": 642,
+        "tbt_ms": 69,
+        "cls": 0.003,
+        "speed_index_ms": 280
+      },
+      "auditorias_fallidas": [
+        {
+          "categoria": "performance",
+          "id": "total-blocking-time",
+          "titulo": "Total Blocking Time",
+          "puntuacion": 0.99,
+          "peso": 30,
+          "valor": "70 ms",
+          "descripcion": null,
+          "elementos": []
+        }
+      ],
+      "corridas": [
+        {
+          "puntuaciones": {
+            "performance": 100,
+            "accessibility": 100,
+            "best-practices": 100
+          },
+          "metricas": {
+            "fcp_ms": 39,
+            "lcp_ms": 641,
+            "tbt_ms": 71,
+            "cls": 0.003,
+            "speed_index_ms": 284
+          }
+        },
+        {
+          "puntuaciones": {
+            "performance": 100,
+            "accessibility": 100,
+            "best-practices": 100
+          },
+          "metricas": {
+            "fcp_ms": 40,
+            "lcp_ms": 642,
+            "tbt_ms": 69,
+            "cls": 0.003,
+            "speed_index_ms": 280
+          }
+        },
+        {
+          "puntuaciones": {
+            "performance": 100,
+            "accessibility": 100,
+            "best-practices": 100
+          },
+          "metricas": {
+            "fcp_ms": 40,
             "lcp_ms": 643,
-            "tbt_ms": 80,
-            "cls": 0.004,
-            "speed_index_ms": 379
+            "tbt_ms": 15,
+            "cls": 0.003,
+            "speed_index_ms": 325
           }
         }
       ]
@@ -346,27 +336,27 @@
       "etiqueta": "Jefe · Validación de consumos",
       "url": "http://localhost:8788/jefe",
       "version_lighthouse": "13.6.0",
-      "hora": "2026-10-30T04:32:18.733Z",
+      "hora": "2026-10-30T18:25:27.717Z",
       "puntuaciones": {
-        "performance": 94,
+        "performance": 100,
         "accessibility": 100,
         "best-practices": 100
       },
       "metricas": {
-        "fcp_ms": 86,
-        "lcp_ms": 754,
-        "tbt_ms": 299,
-        "cls": 0.002,
-        "speed_index_ms": 871
+        "fcp_ms": 43,
+        "lcp_ms": 642,
+        "tbt_ms": 81,
+        "cls": 0.036,
+        "speed_index_ms": 353
       },
       "auditorias_fallidas": [
         {
           "categoria": "performance",
           "id": "total-blocking-time",
           "titulo": "Total Blocking Time",
-          "puntuacion": 0.79,
+          "puntuacion": 0.99,
           "peso": 30,
-          "valor": "300 ms",
+          "valor": "80 ms",
           "descripcion": null,
           "elementos": []
         }
@@ -374,44 +364,44 @@
       "corridas": [
         {
           "puntuaciones": {
-            "performance": 94,
+            "performance": 100,
             "accessibility": 100,
             "best-practices": 100
           },
           "metricas": {
-            "fcp_ms": 86,
-            "lcp_ms": 754,
-            "tbt_ms": 299,
-            "cls": 0.002,
-            "speed_index_ms": 871
-          }
-        },
-        {
-          "puntuaciones": {
-            "performance": 89,
-            "accessibility": 100,
-            "best-practices": 100
-          },
-          "metricas": {
-            "fcp_ms": 68,
-            "lcp_ms": 880,
-            "tbt_ms": 436,
-            "cls": 0.014,
-            "speed_index_ms": 796
-          }
-        },
-        {
-          "puntuaciones": {
-            "performance": 99,
-            "accessibility": 100,
-            "best-practices": 100
-          },
-          "metricas": {
-            "fcp_ms": 51,
-            "lcp_ms": 645,
-            "tbt_ms": 133,
+            "fcp_ms": 43,
+            "lcp_ms": 642,
+            "tbt_ms": 76,
             "cls": 0.036,
-            "speed_index_ms": 454
+            "speed_index_ms": 361
+          }
+        },
+        {
+          "puntuaciones": {
+            "performance": 100,
+            "accessibility": 100,
+            "best-practices": 100
+          },
+          "metricas": {
+            "fcp_ms": 43,
+            "lcp_ms": 642,
+            "tbt_ms": 81,
+            "cls": 0.036,
+            "speed_index_ms": 353
+          }
+        },
+        {
+          "puntuaciones": {
+            "performance": 100,
+            "accessibility": 100,
+            "best-practices": 100
+          },
+          "metricas": {
+            "fcp_ms": 41,
+            "lcp_ms": 641,
+            "tbt_ms": 86,
+            "cls": 0.036,
+            "speed_index_ms": 379
           }
         }
       ]
@@ -420,27 +410,27 @@
       "etiqueta": "Admin · Usuarios",
       "url": "http://localhost:8788/admin",
       "version_lighthouse": "13.6.0",
-      "hora": "2026-10-30T04:33:15.790Z",
+      "hora": "2026-10-30T18:26:03.020Z",
       "puntuaciones": {
-        "performance": 92,
+        "performance": 100,
         "accessibility": 100,
         "best-practices": 100
       },
       "metricas": {
-        "fcp_ms": 65,
-        "lcp_ms": 802,
-        "tbt_ms": 339,
+        "fcp_ms": 39,
+        "lcp_ms": 641,
+        "tbt_ms": 71,
         "cls": 0.002,
-        "speed_index_ms": 656
+        "speed_index_ms": 292
       },
       "auditorias_fallidas": [
         {
           "categoria": "performance",
           "id": "total-blocking-time",
           "titulo": "Total Blocking Time",
-          "puntuacion": 0.74,
+          "puntuacion": 0.99,
           "peso": 30,
-          "valor": "340 ms",
+          "valor": "70 ms",
           "descripcion": null,
           "elementos": []
         }
@@ -448,44 +438,44 @@
       "corridas": [
         {
           "puntuaciones": {
-            "performance": 92,
+            "performance": 100,
             "accessibility": 100,
             "best-practices": 100
           },
           "metricas": {
-            "fcp_ms": 79,
-            "lcp_ms": 813,
-            "tbt_ms": 340,
-            "cls": 0.002,
-            "speed_index_ms": 713
-          }
-        },
-        {
-          "puntuaciones": {
-            "performance": 92,
-            "accessibility": 100,
-            "best-practices": 100
-          },
-          "metricas": {
-            "fcp_ms": 65,
-            "lcp_ms": 802,
-            "tbt_ms": 339,
-            "cls": 0.002,
-            "speed_index_ms": 656
-          }
-        },
-        {
-          "puntuaciones": {
-            "performance": 99,
-            "accessibility": 100,
-            "best-practices": 100
-          },
-          "metricas": {
-            "fcp_ms": 49,
+            "fcp_ms": 38,
             "lcp_ms": 641,
-            "tbt_ms": 112,
+            "tbt_ms": 83,
             "cls": 0.002,
-            "speed_index_ms": 384
+            "speed_index_ms": 309
+          }
+        },
+        {
+          "puntuaciones": {
+            "performance": 100,
+            "accessibility": 100,
+            "best-practices": 100
+          },
+          "metricas": {
+            "fcp_ms": 39,
+            "lcp_ms": 641,
+            "tbt_ms": 71,
+            "cls": 0.002,
+            "speed_index_ms": 292
+          }
+        },
+        {
+          "puntuaciones": {
+            "performance": 100,
+            "accessibility": 100,
+            "best-practices": 100
+          },
+          "metricas": {
+            "fcp_ms": 39,
+            "lcp_ms": 642,
+            "tbt_ms": 81,
+            "cls": 0.002,
+            "speed_index_ms": 287
           }
         }
       ]
