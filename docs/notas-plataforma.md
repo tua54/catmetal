@@ -67,3 +67,9 @@ Fuente: informe de `documentation-researcher` (URLs en cada punto).
 - El `DecompressionStream` de workerd rechaza un gzip de varios miembros ("Trailing bytes after end of compressed data"); `zlib` de Node y `gunzip` sí lo leen completo. El manifest del backup trae `segmentos_gzip` para descomprimir por miembros en workerd.
 - Miniflare (como R2) exige en multipart partes de al menos 5 MiB y del mismo tamaño, salvo la última.
 - `crypto.DigestStream` está disponible en workerd y en el pool de pruebas.
+
+## PWA (tarea 4.2)
+
+- Con `injectManifest`, vite-plugin-pwa agrega los íconos del manifest al precache además de `globPatterns` (salían duplicados): `includeManifestIcons: false`.
+- `lib.webworker` choca con `lib.dom`: el Service Worker tiene su propio `tsconfig` (`apps/web/src/pwa/sw/tsconfig.json`).
+- Los comentarios XML de un SVG no pueden contener `--`: sharp/librsvg falla al rasterizarlo.
