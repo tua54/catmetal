@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["node"]
+  },
+  // Solo los archivos TypeScript de la raíz: la configuración de Playwright y las pruebas E2E.
+  // Cada paquete de apps/ y packages/ tiene su propio tsconfig.
+  "include": ["playwright.config.ts", "scripts/e2e-config.d.mts", "e2e/**/*.ts"]
+}

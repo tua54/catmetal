@@ -16,10 +16,12 @@
     "db:seed:local": "node scripts/seed.mjs",
     "db:reset:local": "node scripts/seed.mjs --reset",
     "lint": "eslint .",
-    "typecheck": "pnpm -r typecheck",
+    "typecheck": "pnpm -r typecheck && tsc --noEmit -p tsconfig.json",
     "test": "pnpm -r --workspace-concurrency=1 test",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "test:e2e": "playwright test",
+    "test:e2e:instalar": "playwright install chromium webkit"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
