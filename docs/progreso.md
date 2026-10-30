@@ -10,7 +10,7 @@
 
 ## Siguiente paso
 
-Ola 1 de P1 en curso: M1 (implementación, general-purpose), M3/M4 (diseño ADR 0020/0021, general-purpose), M5/M6 (diseño ADR 0022, react-developer). Después: M2-servidor (después de M1, porque comparten auditar.ts), M7 y M2-cliente.
+En curso: M3→M4 (general-purpose; push.ts queda para el final), M2-servidor (general-purpose) y M5/M6 (react-developer). Después: M7 y M2-cliente (react-developer), y las revisiones de cierre de P1.
 
 ## Sesión de correcciones v1.1
 
@@ -146,3 +146,5 @@ No se usan `mvc-dotnet-developer`, `angular-developer` ni `orchestrator`.
 - Cierre: 1.926 pruebas, 33 E2E, Lighthouse ≥ 90, audit --prod sin vulnerabilidades. Evidencia: `docs/evidencia/fase-6.md`.
 - C2 y N1 resueltos (e06919d). ADR 0019 (M2), 0023 (M7) y 0018 (M1, con la segunda opinión de software-architect: aprobar con cambios, todos incorporados).
 - D9 (desviaciones) y P25 (preguntas abiertas) registradas para M1.
+- ADR 0022 (M5/M6) aceptado (82b88ca); react-developer implementa. ADR 0020 (M3) y 0021 (M4) propuestos por general-purpose; segunda opinión de software-architect en curso. M1 en implementación.
+- M1 resuelto (e8e5a27). N2 (seed y AUTOINCREMENT) resuelto (25c254a); D1 local recreada con seed --reset. N3 registrado (P2).
