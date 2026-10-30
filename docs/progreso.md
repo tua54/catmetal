@@ -11,7 +11,7 @@
 
 ## Siguiente paso
 
-Sesión v1.2: P1 cerrado; P2 confirmado salvo A6-cliente (en curso con react-developer) y A11 (cierre). Después: revisión de seguridad (A1, A3, A5, A6, A8), gates finales completos (e2e, format, audit, lighthouse), 20 repeticiones de concurrencia, cierre de procesos, informe y tag.
+Sesión v1.2: todos los ítems resueltos (A1–A11, N1–N3) y revisiones guardadas. Gates finales, 20 repeticiones y cierre de procesos hechos (`docs/evidencia/correcciones-v1.2.md`). Falta: `docs/INFORME-CORRECCIONES-V1.2.md`, commit final y tag `correcciones-v1.2` (sin push).
 
 ## Sesión de correcciones v1.2
 
@@ -42,6 +42,8 @@ No se usan `mvc-dotnet-developer`, `angular-developer` ni `orchestrator`.
 - A2 entregado (646 pruebas web, E2E 3/3). A1 entregado (1411 pruebas worker, 98,41 %; N1 confirmado y corregido). Gates del orquestador sobre el árbol combinado: lint, typecheck, format:check OK; `pnpm test` 2322 pruebas sin fallos; `pnpm test:e2e` 36 passed. Commits: ADR 0028 notas `d2ee8af`, A1+N1 `6fbad17`, ADR 0023 notas `233015c`, A2 `8206366`, estados `a47bff0`.
 - Enmiendas de ADR para P2: 0026 (`8cd866b`), 0018 (`b0647aa`), ADR 0029 nuevo para A6 (`8129096`), 0022 enmienda 1 para A7 (`b5d9b9f`). A10 `f57c03f`, A9 `81aa189`.
 - Revisión de esquema de A1 (database-specialist): aprobado; R-v12-01 → N2. Guardada en `b5d777c`.
+- A6-cliente `27de118`. Revisión de seguridad: aprobada con observaciones, guardada en `2061fcb`; S-v12-01 corregido en `23289d0` (ADR 0018 `babb0e4`). N3 (pruebas del limitador dependientes de la hora) encontrado en los gates finales y corregido en `947b69f`.
+- Gates finales en `23289d0`: lint, typecheck, format OK; 2365 pruebas; E2E 36; audit sin vulnerabilidades; Lighthouse ≥ 90; 20/20 repeticiones de concurrencia. Sin procesos vivos.
 - P2: A4 `6775a8a`, A3 `30641d4`, A5 `d0bdf03`, A8 `11965e0`, A6-servidor `77f0612`, N2 `d20436b`, A7 `7c8cf4f`.
 
 ## Sesión de correcciones v1.1

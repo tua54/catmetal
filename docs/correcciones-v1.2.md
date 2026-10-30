@@ -133,6 +133,8 @@ Este documento es **el alcance de la sesión v1.2**. Cada ítem trae:
 
 ### A11. Procesos en segundo plano
 
+- **Estado**: RESUELTO (disciplina de la sesión y cierre verificado; evidencia en `docs/evidencia/correcciones-v1.2.md`, sección A11).
+
 - **Situación**: en la v1.1, un subagente dejó un shell vigilando una medición durante 5 h 51 min después del informe final.
 - **Aceptación**:
   - Ningún comando de espera sin tiempo límite: todo bucle `until`/`while` lleva un tope.
@@ -169,6 +171,8 @@ Este documento es **el alcance de la sesión v1.2**. Cada ítem trae:
 - **Aceptación**: las dos escrituras fijan una marca nueva (nunca `NULL`). Prueba determinista.
 
 ### N3. Las pruebas del limitador de login dependen de la hora
+
+- **Estado**: RESUELTO (`947b69f`).
 
 - **Prioridad**: P1 (mismo tipo de defecto que A1: hace fallar el CI del PR al azar). Encontrado al correr los gates finales.
 - **Dónde**: `apps/worker/test/fase2-transversal-errores.test.ts` (caso "429 DEMASIADOS_INTENTOS: sexto intento de login con la misma IP y correo") y `apps/worker/test/auth-login.test.ts` ("sin cf-connecting-ip usa la clave local"). Otras dos pruebas (`auth-login.test.ts` y `correcciones-m1-login-cupos.test.ts`) ya tenían la precondición escrita a mano.

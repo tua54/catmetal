@@ -52,7 +52,7 @@
 
 | Id | Estado |
 |---|---|
-| S-v12-01 | Corregido: el refresh emite la entrada nueva con un nonce determinista por familia, así un refresh token da como mucho un cupo `d:`. Frase de la ADR 0018 corregida. Ver el commit de S-v12-01 en `docs/INFORME-CORRECCIONES-V1.2.md`. |
+| S-v12-01 | Corregido en `23289d0` (ADR 0018 en `babb0e4`): el refresh emite la entrada nueva con un nonce determinista por familia, así un refresh token da como mucho un cupo `d:`. Prueba: `apps/worker/test/correcciones-s-v12-01-refresh-nonce.test.ts`. |
 | S-v12-02 | Sin acción. |
 | S-v12-03 | Sin acción: la prueba `correcciones-a6-token-pagina.test.ts` cubre el rechazo por identidad, y el filtro por visibilidad actual ya lo cubren las pruebas de snapshot de la fase 3. |
 | S-v12-04 | Aceptado como riesgo residual (informativo, no alcanzable en la práctica); registrado en `docs/pendientes-humanos.md` como mejora. |
