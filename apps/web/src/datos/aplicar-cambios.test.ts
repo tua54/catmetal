@@ -4,9 +4,9 @@ import {
   aplicarCambios,
   aplicarEntidades,
   completarHidratacion,
-  completarSnapshot,
   leerMetaSync,
 } from './aplicar-cambios';
+import { completarSnapshot, guardarPaginaSnapshot } from './snapshot-temporal';
 import { db } from './db';
 import {
   aplicarResultados,
@@ -53,6 +53,21 @@ function pagina(cambios: CambioSync[], extra: Partial<SyncPullResponse> = {}): S
 // `datos` es cualquier fila con `id` (Consumo, Novedad…); el spread la convierte en objeto JSON plano.
 function upsert<T extends { id: string }>(entidad: string, datos: T): CambioSync {
   return cambio('upsert', entidad, datos.id, { ...datos });
+}
+
+/** Guarda un snapshot completo de una sola página en el área temporal y lo reemplaza. */
+async function snapshotCompleto(
+  userId: string,
+  entidades: CambioSync[],
+  extra: { epoca?: string; cursor?: number } = {},
+): Promise<Awaited<ReturnType<typeof completarSnapshot>>> {
+  await guardarPaginaSnapshot(userId, {
+    epoca: extra.epoca ?? EPOCA,
+    cursor: extra.cursor ?? seq,
+    entidades: entidades.map((c) => ({ entidad: c.entidad, id: c.id, datos: c.datos ?? {} })),
+    siguiente_pagina: null,
+  });
+  return completarSnapshot(userId);
 }
 
 async function enviarYAplicar(userId: string): Promise<void> {
@@ -483,7 +498,7 @@ describe('aplicarCambios: hidratar, reiniciar y época', () => {
     expect(await db.meta.get(B)).toBeUndefined();
   });
 
-  it('reiniciar borra el estado sincronizado no protegido y pide snapshot', async () => {
+  it('reiniciar no borra nada: pide snapshot y el reemplazo completo quita lo que ya no se ve', async () => {
     const ajeno = consumoServidor();
     const propio = consumoServidor({ registrado_por: A });
     const huerfana = novedadServidor();
@@ -509,13 +524,13 @@ describe('aplicarCambios: hidratar, reiniciar y época', () => {
     });
     const r = await aplicarCambios(A, pagina([cambio('reiniciar', 'users', A)]));
     expect(r.acciones).toEqual([{ tipo: 'snapshot', motivo: 'reiniciar' }]);
-    expect(await db.consumos.get([A, ajeno.id])).toBeUndefined();
-    // ADR 0016 (M1): lo propio sincronizado NO se borra; queda por verificar contra el snapshot.
-    expect(await db.consumos.get([A, propio.id])).toMatchObject({ verificar_en_snapshot: true });
+    // ADR 0022 (M5): hasta que el snapshot esté completo, nada se borra.
+    expect(await db.consumos.get([A, ajeno.id])).toBeDefined();
+    expect(await db.consumos.get([A, propio.id])).toBeDefined();
     expect(await db.consumos.get([A, pendiente.id])).toBeDefined();
-    expect(await db.novedades.count()).toBe(0);
-    expect(await db.validaciones.count()).toBe(0);
-    expect(await db.evidencias.count()).toBe(0);
+    expect(await db.novedades.count()).toBe(1);
+    expect(await db.validaciones.count()).toBe(1);
+    expect(await db.evidencias.count()).toBe(1);
     expect(await leerMetaSync(A)).toMatchObject({
       requiere_snapshot: true,
       hidrataciones: [],
@@ -525,8 +540,21 @@ describe('aplicarCambios: hidratar, reiniciar y época', () => {
     // Mientras no se complete, la acción sigue aunque lleguen más páginas.
     const otra = await aplicarCambios(A, pagina([]));
     expect(otra.acciones).toEqual([{ tipo: 'snapshot', motivo: 'reiniciar' }]);
-    const acciones = await completarSnapshot(A, { cursor: 500, epoca: EPOCA });
-    expect(acciones).toEqual([]);
+    // El snapshot completo solo trae el consumo propio: lo ajeno y lo huérfano no protegido se va.
+    expect(await snapshotCompleto(A, [upsert('consumptions', propio)], { cursor: 500 })).toEqual({
+      reemplazado: true,
+      epoca_cambiada: false,
+      aplicados: 1,
+      ignorados: 0,
+    });
+    expect(await db.consumos.get([A, ajeno.id])).toBeUndefined();
+    expect(await db.consumos.get([A, propio.id])).toMatchObject({
+      perdido_en_restauracion: false,
+    });
+    expect(await db.consumos.get([A, pendiente.id])).toBeDefined();
+    expect(await db.novedades.count()).toBe(0);
+    expect(await db.validaciones.count()).toBe(0);
+    expect(await db.evidencias.count()).toBe(0);
     expect(await leerMetaSync(A)).toMatchObject({
       cursor: 500,
       requiere_snapshot: false,
@@ -534,7 +562,7 @@ describe('aplicarCambios: hidratar, reiniciar y época', () => {
     });
   });
 
-  it('cambio de época: reencola las aplicadas conservadas, reinicia y pide snapshot', async () => {
+  it('cambio de época: reencola las aplicadas conservadas y pide snapshot sin borrar ni mover el cursor', async () => {
     await aplicarCambios(A, pagina([]));
     const r = await registrarConsumoConNovedadLocal(
       A,
@@ -558,6 +586,7 @@ describe('aplicarCambios: hidratar, reiniciar y época', () => {
     await aplicarCambios(A, pagina([upsert('consumptions', ajeno)]));
     await aplicarCambios(B, pagina([]));
     expect(await contarPendientes(A)).toBe(0);
+    const antes = await leerMetaSync(A);
 
     const respuesta = await aplicarCambios(
       A,
@@ -566,7 +595,7 @@ describe('aplicarCambios: hidratar, reiniciar y época', () => {
     expect(respuesta).toMatchObject({
       epoca_cambiada: true,
       reencoladas: 2,
-      cursor: 0,
+      cursor: antes.cursor,
       aplicados: 0,
       acciones: [{ tipo: 'snapshot', motivo: 'epoca' }],
     });
@@ -577,18 +606,33 @@ describe('aplicarCambios: hidratar, reiniciar y época', () => {
     expect(await db.consumos.get([A, r.consumo_id])).toMatchObject({
       estado_local: 'pendiente_sync',
     });
-    expect(await db.consumos.get([A, ajeno.id])).toBeUndefined();
+    // ADR 0022 (M5): lo ajeno sigue hasta el reemplazo; el cursor y la época, también.
+    expect(await db.consumos.get([A, ajeno.id])).toBeDefined();
     expect(await db.evidencias.get([A, foto!.id])).toMatchObject({ estado_subida: 'pendiente' });
     expect(await leerMetaSync(A)).toMatchObject({
-      cursor: 0,
-      epoca: 'epoca-2',
+      cursor: antes.cursor,
+      epoca: EPOCA,
       acciones: [{ tipo: 'snapshot', motivo: 'epoca' }],
     });
     // B no se toca.
     expect(await leerMetaSync(B)).toMatchObject({ epoca: EPOCA });
+
+    // El snapshot completo de la época nueva (vacío) reemplaza el estado y confirma la época.
+    expect(await snapshotCompleto(A, [], { epoca: 'epoca-2', cursor: 3 })).toMatchObject({
+      epoca_cambiada: true,
+    });
+    expect(await db.consumos.get([A, ajeno.id])).toBeUndefined();
+    expect(await db.consumos.get([A, r.consumo_id])).toMatchObject({
+      estado_local: 'pendiente_sync',
+      perdido_en_restauracion: false,
+    });
+    expect(await db.evidencias.get([A, foto!.id])).toMatchObject({ estado_subida: 'pendiente' });
+    expect(await contarPendientes(A)).toBe(2);
+    expect(await leerMetaSync(A)).toMatchObject({ cursor: 3, epoca: 'epoca-2', acciones: [] });
+    expect(await leerMetaSync(B)).toMatchObject({ epoca: EPOCA });
   });
 
-  it('un snapshot que termina con otra época vuelve a reiniciar', async () => {
+  it('un snapshot completo con otra época confirma la época nueva y reencola las aplicadas', async () => {
     await aplicarCambios(A, pagina([]));
     await registrarConsumoLocal(A, {
       order_id: ORDEN,
@@ -598,10 +642,14 @@ describe('aplicarCambios: hidratar, reiniciar y época', () => {
       lote: 'L',
     });
     await enviarYAplicar(A);
-    const acciones = await completarSnapshot(A, { cursor: 10, epoca: 'otra' });
-    expect(acciones).toEqual([{ tipo: 'snapshot', motivo: 'epoca' }]);
+    expect(await snapshotCompleto(A, [], { cursor: 10, epoca: 'otra' })).toMatchObject({
+      epoca_cambiada: true,
+    });
     expect(await contarPendientes(A)).toBe(1);
-    expect(await completarSnapshot(B, { cursor: 4, epoca: 'otra' })).toEqual([]);
+    expect(await leerMetaSync(A)).toMatchObject({ cursor: 10, epoca: 'otra', acciones: [] });
+    expect(await snapshotCompleto(B, [], { cursor: 4, epoca: 'otra' })).toMatchObject({
+      epoca_cambiada: false,
+    });
     expect(await leerMetaSync(B)).toMatchObject({ cursor: 4, epoca: 'otra' });
   });
 

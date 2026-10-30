@@ -64,6 +64,13 @@ export interface ServidorSync {
   alRecibir: ((p: PeticionSync) => void) | null;
   /** Órdenes cuyo snapshot de alcance `orden` responde 404 (desasignadas). */
   ordenesNoVisibles: Set<string>;
+  /**
+   * La N-ésima petición de snapshot `inicial` (contando desde que se asigna) falla por red
+   * (`TypeError`) sin responder; después vuelve a `null`.
+   */
+  fallarSnapshotEnPagina: number | null;
+  /** Próximas N peticiones de snapshot con `pagina` responden 400 `VALIDACION` (token inválido). */
+  rechazarPaginaSnapshot: number;
   /** `epoca` recibida en cada push (`null` si no vino). */
   epocasRecibidas: (string | null)[];
   seq(): number;
@@ -396,6 +403,8 @@ export function crearServidorSync(): ServidorSync {
     errorEvidencia: null,
     alRecibir: null,
     ordenesNoVisibles: new Set(),
+    fallarSnapshotEnPagina: null,
+    rechazarPaginaSnapshot: 0,
     epocasRecibidas: [],
     seq: () => seq,
     entidades: (entidad) =>
@@ -454,6 +463,20 @@ export function crearServidorSync(): ServidorSync {
         return pull(url.searchParams);
       }
       if (metodo === 'GET' && url.pathname === '/api/v1/sync/snapshot') {
+        if (
+          url.searchParams.get('alcance') === 'inicial' &&
+          servidor.fallarSnapshotEnPagina !== null
+        ) {
+          servidor.fallarSnapshotEnPagina -= 1;
+          if (servidor.fallarSnapshotEnPagina <= 0) {
+            servidor.fallarSnapshotEnPagina = null;
+            throw new TypeError('Failed to fetch');
+          }
+        }
+        if (url.searchParams.has('pagina') && servidor.rechazarPaginaSnapshot > 0) {
+          servidor.rechazarPaginaSnapshot -= 1;
+          return error('VALIDACION');
+        }
         return snapshot(url.searchParams);
       }
       const foto = /^\/api\/v1\/evidences\/(.+)$/.exec(url.pathname);

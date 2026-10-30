@@ -7,7 +7,10 @@
 // - `hidratar` y `reiniciar`: se PERSISTEN en `meta` (el cursor ya los pasó; si la app se cierra antes
 //   de atenderlos, no se pierden) y se devuelven como acciones para el motor.
 // - Época distinta: no se aplica nada de la respuesta; se reencolan las mutaciones aplicadas que se
-//   conservan, se reinicia el estado sincronizado y se pide un snapshot completo.
+//   conservan y se pide un snapshot completo.
+// - `reiniciar` y época distinta NO borran nada (ADR 0022, M5): el snapshot se descarga a un área
+//   temporal y reemplaza el estado solo cuando está completo (`snapshot-temporal.ts`). Con época
+//   distinta, el cursor y la época de `meta` tampoco cambian hasta ese reemplazo.
 //
 // Cada llamada es UNA transacción: los cambios, el cursor y la época se guardan juntos o nada.
 
@@ -21,15 +24,14 @@ import {
 import { db, tablasDeDatos } from './db';
 import { recalcular } from './derivar';
 import {
-  marcarPerdidosTrasSnapshot,
   reencolarAplicadas,
-  reiniciarEstadoSincronizado,
   revocarEntidad,
   upsertConsumo,
   upsertEvidencia,
   upsertNovedad,
   upsertValidacion,
   type EntidadAfectada,
+  type ModoServidor,
 } from './entidades';
 import {
   booleano,
@@ -68,7 +70,7 @@ export interface EntidadSync {
   datos: Record<string, unknown> | null;
 }
 
-function metaInicial(userId: string): MetaSync {
+export function metaInicial(userId: string): MetaSync {
   return {
     user_id: userId,
     cursor: 0,
@@ -105,24 +107,27 @@ function parsearValor(valor: unknown): unknown {
 
 /**
  * Aplica un `upsert`. Devuelve `null` si se ignoró, o las entidades a recalcular. Se copian solo los
- * campos conocidos (nunca se mezcla un `user_id` del servidor con el de la partición).
+ * campos conocidos (nunca se mezcla un `user_id` del servidor con el de la partición). `modo` se
+ * aplica a consumos, novedades y validaciones (ver `entidades.ts`); el reemplazo del snapshot usa
+ * `autoridad`.
  */
-async function aplicarUpsert(
+export async function aplicarUpsert(
   userId: string,
   { entidad, id, datos }: EntidadSync,
   ahora: string,
+  modo: ModoServidor = 'pull',
 ): Promise<EntidadAfectada[] | null> {
   if (!esObjeto(datos)) {
     return null;
   }
   switch (entidad) {
     case 'consumptions':
-      return esConsumo(datos) ? [await upsertConsumo(userId, datos, 'pull', ahora)] : null;
+      return esConsumo(datos) ? [await upsertConsumo(userId, datos, modo, ahora)] : null;
     case 'incidents': {
       if (!esNovedad(datos)) {
         return null;
       }
-      const afectadas = [await upsertNovedad(userId, datos, 'pull', ahora)];
+      const afectadas = [await upsertNovedad(userId, datos, modo, ahora)];
       if (Array.isArray(datos.evidencias)) {
         for (const e of datos.evidencias as unknown[]) {
           if (esEvidencia(e)) {
@@ -135,7 +140,7 @@ async function aplicarUpsert(
     case 'evidences':
       return esEvidencia(datos) ? [await upsertEvidencia(userId, datos, ahora)] : null;
     case 'validations':
-      return esValidacion(datos) ? [await upsertValidacion(userId, datos, 'pull', ahora)] : null;
+      return esValidacion(datos) ? [await upsertValidacion(userId, datos, modo, ahora)] : null;
     case 'production_orders': {
       if (!esOrden(datos)) {
         return null;
@@ -229,20 +234,17 @@ async function aplicarUpsert(
   }
 }
 
-/** Cambio de época dentro de la transacción en curso. */
-async function cambiarEpoca(
-  userId: string,
-  meta: MetaSync,
-  epoca: string,
-  ahora: string,
-): Promise<number> {
+/**
+ * Cambio de época dentro de la transacción en curso: reencola las aplicadas conservadas y pide el
+ * snapshot. No borra nada y NO cambia el cursor ni la época de `meta` (ADR 0022): se guardan con el
+ * reemplazo del snapshot completo. Mientras tanto el push sigue enviando la época vieja y recibe
+ * `EPOCA_CAMBIADA` sin que el servidor procese nada (ADR 0016, A1): las mutaciones esperan en cola.
+ */
+async function cambiarEpoca(userId: string, meta: MetaSync, ahora: string): Promise<number> {
   const { reencoladas, afectadas } = await reencolarAplicadas(userId, ahora);
-  await reiniciarEstadoSincronizado(userId);
   await recalcular(userId, afectadas);
   await db.meta.put({
     ...meta,
-    cursor: 0,
-    epoca,
     ultimo_sync_at: ahora,
     requiere_snapshot: true,
     motivo_snapshot: 'epoca',
@@ -262,10 +264,10 @@ export async function aplicarCambios(
     const meta = (await db.meta.get(userId)) ?? metaInicial(userId);
 
     if (meta.epoca !== null && meta.epoca !== r.epoca) {
-      const reencoladas = await cambiarEpoca(userId, meta, r.epoca, ahora);
+      const reencoladas = await cambiarEpoca(userId, meta, ahora);
       return {
         acciones: [{ tipo: 'snapshot', motivo: 'epoca' }],
-        cursor: 0,
+        cursor: meta.cursor,
         epoca: r.epoca,
         epoca_cambiada: true,
         aplicados: 0,
@@ -303,11 +305,8 @@ export async function aplicarCambios(
     }
     await recalcular(userId, afectadas);
 
-    if (reiniciar) {
-      // Cambió el alcance del usuario (rol o reactivación): lo que ya no deba ver se borra ahora;
-      // el snapshot completo trae lo que sí ve.
-      await reiniciarEstadoSincronizado(userId);
-    }
+    // `reiniciar` (cambió el alcance del usuario: rol o reactivación) no borra nada aquí (ADR 0022):
+    // el reemplazo del snapshot completo quita lo que ya no ve y trae lo que sí ve.
     const nueva: MetaSync = {
       ...meta,
       cursor: r.cursor,
@@ -335,8 +334,10 @@ export async function aplicarCambios(
 }
 
 /**
- * Aplica entidades de una página de snapshot (como `upsert`), sin tocar el cursor. El motor llama a
- * `completarSnapshot` o `completarHidratacion` al terminar la última página.
+ * Aplica entidades de una página del snapshot de una ORDEN (hidratación, como `upsert`), sin tocar
+ * el cursor: solo agrega, así que una interrupción no pierde nada. El motor llama a
+ * `completarHidratacion` al terminar. El snapshot `inicial` va al área temporal
+ * (`guardarPaginaSnapshot`, ADR 0022).
  */
 export async function aplicarEntidades(
   userId: string,
@@ -358,37 +359,6 @@ export async function aplicarEntidades(
     }
     await recalcular(userId, afectadas);
     return { aplicados, ignorados };
-  });
-}
-
-/**
- * Cierra un snapshot completo: guarda su cursor (`MAX(seq)` leído antes del estado, ADR 0005 regla
- * 7) y su época. Si la época cambió mientras tanto, reinicia de nuevo y pide otro snapshot.
- * Solo se llama cuando se aplicaron TODAS las páginas: entonces los consumos propios que siguen
- * por verificar son los que el servidor ya no tiene (`perdido_en_restauracion`).
- */
-export async function completarSnapshot(
-  userId: string,
-  snapshot: { cursor: number; epoca: string },
-): Promise<AccionMotor[]> {
-  const ahora = ahoraIso();
-  return db.transaction('rw', tablasDeDatos(), async () => {
-    const meta = (await db.meta.get(userId)) ?? metaInicial(userId);
-    if (meta.epoca !== null && meta.epoca !== snapshot.epoca) {
-      await cambiarEpoca(userId, meta, snapshot.epoca, ahora);
-      return [{ tipo: 'snapshot', motivo: 'epoca' }];
-    }
-    await marcarPerdidosTrasSnapshot(userId);
-    await db.meta.put({
-      ...meta,
-      cursor: snapshot.cursor,
-      epoca: snapshot.epoca,
-      ultimo_sync_at: ahora,
-      requiere_snapshot: false,
-      motivo_snapshot: null,
-      hidrataciones: [],
-    });
-    return [];
   });
 }
 

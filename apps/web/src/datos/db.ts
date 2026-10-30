@@ -16,6 +16,7 @@ import type {
   AsignacionLocal,
   CandadoLocal,
   ConsumoLocal,
+  EntidadSnapshotLocal,
   EventoTrazabilidad,
   EvidenciaLocal,
   Instalacion,
@@ -26,6 +27,7 @@ import type {
   OrdenLocal,
   PerfilLocal,
   PlaneadoLocal,
+  ProgresoSnapshot,
   SettingLocal,
   TablaMutable,
   UsuarioLocal,
@@ -70,6 +72,18 @@ export const ESQUEMA_V2 = {
   candados: 'nombre',
 } as const;
 
+/**
+ * v3 (correcciones v1.1, M5; ADR 0022): área temporal del snapshot `inicial`. Solo agrega tablas:
+ * no requiere `upgrade()` y no toca ningún dato existente (outbox, fotos, particiones).
+ * - `snapshot_entidades`: una fila por entidad descargada, clave `[user_id+entidad+id]` (una
+ *   página repetida no duplica nada).
+ * - `snapshot_progreso`: progreso de la descarga por usuario (época, cursor, siguiente página).
+ */
+export const ESQUEMA_V3 = {
+  snapshot_entidades: '[user_id+entidad+id]',
+  snapshot_progreso: 'user_id',
+} as const;
+
 export class CatmetalDb extends Dexie {
   declare outbox: Table<MutacionOutbox, string>;
   declare consumos: Table<ConsumoLocal, ClaveUsuario>;
@@ -87,11 +101,14 @@ export class CatmetalDb extends Dexie {
   declare trazabilidad: Table<EventoTrazabilidad, string>;
   declare instalacion: Table<Instalacion, string>;
   declare candados: Table<CandadoLocal, string>;
+  declare snapshot_entidades: Table<EntidadSnapshotLocal, [string, string, string]>;
+  declare snapshot_progreso: Table<ProgresoSnapshot, string>;
 
   constructor(nombre: string = NOMBRE_DB) {
     super(nombre);
     this.version(1).stores(ESQUEMA_V1);
     this.version(2).stores(ESQUEMA_V2);
+    this.version(3).stores(ESQUEMA_V3);
   }
 }
 
@@ -116,6 +133,14 @@ export function tablasDeDatos(): Table[] {
     db.perfiles,
     db.trazabilidad,
   ];
+}
+
+/**
+ * Tablas del área temporal del snapshot (ADR 0022). NO están en `tablasDeDatos()`: guardar una
+ * página no compite con las transacciones de la UI (registrar offline sigue siendo inmediato).
+ */
+export function tablasDeSnapshot(): Table[] {
+  return [db.snapshot_entidades, db.snapshot_progreso];
 }
 
 /** Rango de una clave compuesta que empieza por `prefijo` (toda la partición de un usuario). */

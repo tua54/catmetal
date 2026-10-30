@@ -1,11 +1,18 @@
-// Escritura de entidades del servidor en la partición local, revocación de visibilidad y reinicio
-// del estado sincronizado. Se usa desde los resultados del push (`modo = 'propio'`) y desde el pull
-// (`modo = 'pull'`).
+// Escritura de entidades del servidor en la partición local y revocación de visibilidad. El reemplazo
+// del estado tras un snapshot completo está en `snapshot-temporal.ts` (ADR 0022).
 //
-// Regla: en modo `pull`, el estado del servidor NUNCA pisa una entidad con mutaciones propias en cola;
-// se guarda en `servidor_diferido` y se adopta cuando la cola de esa entidad se vacía. En modo
-// `propio` (respuesta a una mutación propia ya aplicada) se adopta directamente, porque es el estado
-// sobre el que se calcularon las mutaciones que siguen en la cola.
+// Modos (ADR 0022, punto 5):
+// - `pull` (pull e hidratación): el estado del servidor NUNCA pisa una entidad con mutaciones propias
+//   en cola; se guarda en `servidor_diferido` y se adopta cuando la cola se vacía. Sin cola, se queda
+//   el más reciente (misma época).
+// - `propio` (respuesta `aplicada` a una mutación propia): se adopta directamente (es el estado sobre
+//   el que se calcularon las mutaciones que siguen en la cola), el más reciente salvo que `servidor`
+//   esté obsoleto.
+// - `actual` (respuesta `conflicto` o `rechazada` con el estado actual del servidor): se adopta SIN
+//   comparar versiones; el servidor acaba de leerlo (M6).
+// - `autoridad` (reemplazo del snapshot tras `reiniciar` o cambio de época): sin cola, el servidor
+//   reemplaza la copia local aunque su versión sea menor; con cola, va a `servidor_diferido` y
+//   `servidor` queda `servidor_obsoleto` (base de la cola, pero ya no comparable).
 //
 // Deben llamarse DENTRO de una transacción `rw` sobre `tablasDeDatos()`.
 
@@ -17,11 +24,65 @@ import {
   type Validacion,
 } from '@catmetal/shared';
 import { db, rangoDe } from './db';
-import { camposDe, entidadTieneCola, estaEnCola, evidenciaProtegida, leerClave } from './derivar';
-import { booleano, masReciente, type EntidadesServidor } from './servidor';
+import {
+  camposDe,
+  consumoDerivado,
+  entidadTieneCola,
+  estaEnCola,
+  evidenciaProtegida,
+  leerClave,
+} from './derivar';
+import { adoptarServidor, booleano, masReciente, type EntidadesServidor } from './servidor';
 import type { ConsumoLocal, TablaMutable } from './tipos';
 
-export type ModoServidor = 'propio' | 'pull';
+export type ModoServidor = 'propio' | 'pull' | 'actual' | 'autoridad';
+
+/** Campos de estado del servidor que escribe un upsert (comunes a consumos, novedades y validaciones). */
+interface EstadoServidor<T> {
+  servidor: T | null;
+  servidor_diferido: T | null;
+  servidor_obsoleto?: boolean;
+}
+
+/**
+ * Aplica la regla del modo (ver cabecera) a los campos de estado del servidor de una fila existente.
+ * `servidor_obsoleto` solo se escribe si cambia o ya existía (las filas anteriores no lo tienen).
+ */
+async function nuevoEstadoServidor<T extends { version?: number; updated_at?: string }>(
+  fila: EstadoServidor<T>,
+  s: T,
+  modo: ModoServidor,
+  tieneCola: () => Promise<boolean>,
+  comparar: boolean,
+): Promise<EstadoServidor<T>> {
+  const obsoleto = fila.servidor_obsoleto === true;
+  const limpiar = obsoleto ? { servidor_obsoleto: false } : {};
+  const elegir = (actual: T | null): T => (comparar ? (masReciente(actual, s) ?? s) : s);
+  switch (modo) {
+    case 'pull':
+      if (await tieneCola()) {
+        return { servidor: fila.servidor, servidor_diferido: elegir(fila.servidor_diferido) };
+      }
+      return {
+        servidor: comparar ? adoptarServidor(fila.servidor, obsoleto, s) : s,
+        servidor_diferido: fila.servidor_diferido,
+        ...limpiar,
+      };
+    case 'propio':
+      return {
+        servidor: comparar ? adoptarServidor(fila.servidor, obsoleto, s) : s,
+        servidor_diferido: fila.servidor_diferido,
+        ...limpiar,
+      };
+    case 'actual':
+      return { servidor: s, servidor_diferido: fila.servidor_diferido, ...limpiar };
+    case 'autoridad':
+      if (await tieneCola()) {
+        return { servidor: fila.servidor, servidor_diferido: s, servidor_obsoleto: true };
+      }
+      return { servidor: s, servidor_diferido: null, ...limpiar };
+  }
+}
 
 export interface EntidadAfectada {
   tabla: TablaMutable;
@@ -63,45 +124,28 @@ export async function upsertConsumo(
   const c = await db.consumos.get([userId, s.id]);
   // El servidor lo tiene: deja de estar por verificar o perdido tras una restauración.
   const confirmado = { verificar_en_snapshot: false, perdido_en_restauracion: false };
+  // En el reemplazo del snapshot la vista se deriva antes de escribir: una sola escritura por
+  // consumo en la transacción larga (ADR 0022, duración del reemplazo).
+  const escribir = async (fila: ConsumoLocal): Promise<void> => {
+    await db.consumos.put(modo === 'autoridad' ? await consumoDerivado(userId, fila) : fila);
+  };
   if (c === undefined) {
-    await db.consumos.add(consumoDesdeServidor(userId, s, ahora));
-  } else if (modo === 'pull' && (await entidadTieneCola(userId, 'consumos', s.id))) {
-    await db.consumos.put({
-      ...c,
-      ...confirmado,
-      servidor_diferido: masReciente(c.servidor_diferido, s),
-      actualizado_at: ahora,
-    });
+    if (modo === 'autoridad') {
+      await escribir(consumoDesdeServidor(userId, s, ahora));
+    } else {
+      await db.consumos.add(consumoDesdeServidor(userId, s, ahora));
+    }
   } else {
-    await db.consumos.put({
-      ...c,
-      ...confirmado,
-      servidor: masReciente(c.servidor, s),
-      actualizado_at: ahora,
-    });
+    const estado = await nuevoEstadoServidor(
+      c,
+      s,
+      modo,
+      () => entidadTieneCola(userId, 'consumos', s.id),
+      true,
+    );
+    await escribir({ ...c, ...confirmado, ...estado, actualizado_at: ahora });
   }
   return { tabla: 'consumos', id: s.id };
-}
-
-/**
- * Tras un snapshot COMPLETO: los consumos propios que siguen por verificar (el servidor no los
- * devolvió) y no tienen mutaciones en cola se marcan `perdido_en_restauracion`. Devuelve sus ids.
- */
-export async function marcarPerdidosTrasSnapshot(userId: string): Promise<string[]> {
-  const consumos = await db.consumos
-    .where(':id')
-    .between(...rangoDe(userId))
-    .filter((c) => c.verificar_en_snapshot === true)
-    .toArray();
-  const perdidos: string[] = [];
-  for (const c of consumos) {
-    const enCola = await entidadTieneCola(userId, 'consumos', c.id);
-    await db.consumos.put({ ...c, verificar_en_snapshot: false, perdido_en_restauracion: !enCola });
-    if (!enCola) {
-      perdidos.push(c.id);
-    }
-  }
-  return perdidos;
 }
 
 export async function upsertNovedad(
@@ -127,10 +171,15 @@ export async function upsertNovedad(
       error_sync: null,
       actualizado_at: ahora,
     });
-  } else if (modo === 'pull' && (await entidadTieneCola(userId, 'novedades', s.id))) {
-    await db.novedades.put({ ...n, servidor_diferido: s, actualizado_at: ahora });
   } else {
-    await db.novedades.put({ ...n, servidor: s, actualizado_at: ahora });
+    const estado = await nuevoEstadoServidor(
+      n,
+      s,
+      modo,
+      () => entidadTieneCola(userId, 'novedades', s.id),
+      false,
+    );
+    await db.novedades.put({ ...n, ...estado, actualizado_at: ahora });
   }
   return { tabla: 'novedades', id: s.id };
 }
@@ -158,10 +207,15 @@ export async function upsertValidacion(
       error_sync: null,
       actualizado_at: ahora,
     });
-  } else if (modo === 'pull' && (await entidadTieneCola(userId, 'validaciones', s.id))) {
-    await db.validaciones.put({ ...v, servidor_diferido: s, actualizado_at: ahora });
   } else {
-    await db.validaciones.put({ ...v, servidor: s, actualizado_at: ahora });
+    const estado = await nuevoEstadoServidor(
+      v,
+      s,
+      modo,
+      () => entidadTieneCola(userId, 'validaciones', s.id),
+      false,
+    );
+    await db.validaciones.put({ ...v, ...estado, actualizado_at: ahora });
   }
   return { tabla: 'validaciones', id: s.id };
 }
@@ -227,10 +281,10 @@ export async function guardarEntidadesServidor(
 }
 
 // ---------------------------------------------------------------------------------------------
-// Revocación y reinicio
+// Revocación y reencolado tras un cambio de época
 // ---------------------------------------------------------------------------------------------
 
-async function novedadProtegida(userId: string, id: string): Promise<boolean> {
+export async function novedadProtegida(userId: string, id: string): Promise<boolean> {
   if (await entidadTieneCola(userId, 'novedades', id)) {
     return true;
   }
@@ -248,7 +302,7 @@ async function novedadProtegida(userId: string, id: string): Promise<boolean> {
  * `conservarPropios`, fue registrado por el usuario (ADR 0005 regla 2: el supervisor sigue viendo
  * lo suyo aunque pierda la orden, y el servidor no se lo volvería a enviar).
  */
-async function consumoProtegido(
+export async function consumoProtegido(
   userId: string,
   c: ConsumoLocal,
   conservarPropios: boolean,
@@ -283,12 +337,12 @@ async function consumoProtegido(
   return false;
 }
 
-async function borrarNovedadConFotos(userId: string, id: string): Promise<void> {
+export async function borrarNovedadConFotos(userId: string, id: string): Promise<void> {
   await db.evidencias.where('[user_id+incident_id]').equals([userId, id]).delete();
   await db.novedades.delete([userId, id]);
 }
 
-async function borrarConsumoConHijos(userId: string, id: string): Promise<void> {
+export async function borrarConsumoConHijos(userId: string, id: string): Promise<void> {
   const novedades = await db.novedades
     .where('[user_id+consumption_id]')
     .equals([userId, id])
@@ -386,76 +440,6 @@ export async function revocarEntidad(
       return [];
     default:
       return [];
-  }
-}
-
-/**
- * Borra el estado sincronizado del usuario antes de un snapshot completo (`reiniciar` o cambio de
- * época). Conserva todo lo protegido (cola, rechazos y conflictos, fotos sin subir) y TODOS los
- * consumos propios: los que no están en cola se marcan `verificar_en_snapshot` y, si el snapshot
- * completo no los devuelve, `marcarPerdidosTrasSnapshot` los marca `perdido_en_restauracion`
- * (ADR 0016, M1). No toca `meta` ni `outbox`.
- */
-export async function reiniciarEstadoSincronizado(userId: string): Promise<void> {
-  const rango = rangoDe(userId);
-  for (const tabla of [
-    db.ordenes,
-    db.planeados,
-    db.asignaciones,
-    db.materiales,
-    db.settings,
-    db.usuarios,
-  ]) {
-    await tabla
-      .where(':id')
-      .between(...rango)
-      .delete();
-  }
-  const consumos = await db.consumos
-    .where(':id')
-    .between(...rango)
-    .toArray();
-  for (const c of consumos) {
-    if (c.registrado_por === userId) {
-      // Lo propio NUNCA se borra aquí (ADR 0016, M1): si no está en cola, queda por verificar y el
-      // snapshot completo decide si sigue en el servidor o se perdió en una restauración.
-      if (!(await entidadTieneCola(userId, 'consumos', c.id))) {
-        await db.consumos.put({ ...c, verificar_en_snapshot: true });
-      }
-    } else if (!(await consumoProtegido(userId, c, false))) {
-      await borrarConsumoConHijos(userId, c.id);
-    }
-  }
-  // Huérfanos (hijos cuyo consumo ya no está en la partición).
-  const novedades = await db.novedades
-    .where(':id')
-    .between(...rango)
-    .toArray();
-  for (const n of novedades) {
-    const tieneConsumo = (await db.consumos.get([userId, n.consumption_id])) !== undefined;
-    if (!tieneConsumo && !(await novedadProtegida(userId, n.id))) {
-      await borrarNovedadConFotos(userId, n.id);
-    }
-  }
-  const validaciones = await db.validaciones
-    .where(':id')
-    .between(...rango)
-    .toArray();
-  for (const v of validaciones) {
-    const tieneConsumo = (await db.consumos.get([userId, v.consumption_id])) !== undefined;
-    if (!tieneConsumo && !(await entidadTieneCola(userId, 'validaciones', v.id))) {
-      await db.validaciones.delete([userId, v.id]);
-    }
-  }
-  const evidencias = await db.evidencias
-    .where(':id')
-    .between(...rango)
-    .toArray();
-  for (const e of evidencias) {
-    const tieneNovedad = (await db.novedades.get([userId, e.incident_id])) !== undefined;
-    if (!tieneNovedad && !evidenciaProtegida(e)) {
-      await db.evidencias.delete([userId, e.id]);
-    }
   }
 }
 

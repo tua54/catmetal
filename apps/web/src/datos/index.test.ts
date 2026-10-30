@@ -26,6 +26,9 @@ describe('API pública de la capa de datos', () => {
       'aplicarCambios',
       'aplicarEntidades',
       'completarSnapshot',
+      'guardarPaginaSnapshot',
+      'leerProgresoSnapshot',
+      'descartarSnapshot',
       'completarHidratacion',
       'leerMetaSync',
     ] as const) {

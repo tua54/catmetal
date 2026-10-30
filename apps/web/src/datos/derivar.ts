@@ -10,7 +10,7 @@
 
 import { diaBogota, type EstadoOutbox, type Consumo } from '@catmetal/shared';
 import { claveEntidad, db, rangoDe } from './db';
-import { booleano, masReciente } from './servidor';
+import { adoptarServidor, booleano } from './servidor';
 import type {
   CamposConsumo,
   ConsumoLocal,
@@ -19,8 +19,10 @@ import type {
   ErrorSync,
   EvidenciaLocal,
   MutacionOutbox,
+  NovedadLocal,
   TablaMutable,
   UltimoResultado,
+  ValidacionLocal,
 } from './tipos';
 
 /** Estados de una mutación que todavía debe llegar al servidor. */
@@ -114,18 +116,49 @@ function estadoPorAviso(ultimo: UltimoResultado): 'rechazado_sync' | 'conflicto'
   return ultimo.resultado === 'rechazada' ? 'rechazado_sync' : 'conflicto';
 }
 
+/** `servidor_obsoleto` solo se escribe si ya existía o pasa a `true` (las filas anteriores no lo tienen). */
+function campoObsoleto(
+  anterior: boolean | undefined,
+  obsoleto: boolean,
+): { servidor_obsoleto?: boolean } {
+  return anterior !== undefined || obsoleto ? { servidor_obsoleto: obsoleto } : {};
+}
+
 /** Recalcula la vista local de un consumo de la partición. No hace nada si no existe. */
 export async function recalcularConsumo(userId: string, id: string): Promise<void> {
   const c = await db.consumos.get([userId, id]);
   if (c === undefined) {
     return;
   }
+  const actualizado = await consumoDerivado(userId, c);
+  // Sin cambios no se escribe: el reemplazo del snapshot recalcula miles de consumos en una sola
+  // transacción y cada `put` mantiene tres índices (ADR 0022, duración del reemplazo).
+  if (!sinCambios(actualizado, c)) {
+    await db.consumos.put(actualizado);
+  }
+}
+
+/** Dos filas iguales (mismas claves y valores, en el mismo orden de construcción). */
+function sinCambios(a: unknown, b: unknown): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+/**
+ * Vista local derivada de un consumo (sin escribirla): `servidor` (o `base_local`) + las ediciones
+ * en cola + el último resultado + sus validaciones y novedades. El reemplazo del snapshot la usa para
+ * escribir cada consumo UNA sola vez (ADR 0022).
+ */
+export async function consumoDerivado(userId: string, c: ConsumoLocal): Promise<ConsumoLocal> {
+  const id = c.id;
   const cola = await mutacionesEnColaDeEntidad(userId, 'consumos', id);
   let servidor: Consumo | null = c.servidor;
   let diferido: Consumo | null = c.servidor_diferido;
+  let obsoleto = c.servidor_obsoleto === true;
   if (cola.length === 0 && diferido !== null) {
-    servidor = masReciente(servidor, diferido);
+    // ADR 0022: si `servidor` es de antes de un reinicio, el diferido (época actual) lo reemplaza.
+    servidor = adoptarServidor(servidor, obsoleto, diferido);
     diferido = null;
+    obsoleto = false;
   }
 
   let campos = servidor !== null ? camposDe(servidor) : camposDe(c.base_local ?? c);
@@ -175,6 +208,7 @@ export async function recalcularConsumo(userId: string, id: string): Promise<voi
     dia_bogota: diaBogota(clientCreatedAt),
     servidor,
     servidor_diferido: diferido,
+    ...campoObsoleto(c.servidor_obsoleto, obsoleto),
     version: versionServidor,
     estado_local: estado,
     requiere_novedad: requiereNovedad,
@@ -184,7 +218,7 @@ export async function recalcularConsumo(userId: string, id: string): Promise<voi
     error_sync: errorSync,
     conflicto_servidor: estado === 'conflicto' ? c.conflicto_servidor : null,
   };
-  await db.consumos.put(actualizado);
+  return actualizado;
 }
 
 function estadoSimple(
@@ -209,12 +243,14 @@ export async function recalcularNovedad(userId: string, id: string): Promise<voi
   const enCola = await entidadTieneCola(userId, 'novedades', id);
   let servidor = n.servidor;
   let diferido = n.servidor_diferido;
+  let obsoleto = n.servidor_obsoleto === true;
   if (!enCola && diferido !== null) {
-    servidor = masReciente(servidor, diferido);
+    servidor = adoptarServidor(servidor, obsoleto, diferido);
     diferido = null;
+    obsoleto = false;
   }
   const estado = estadoSimple(enCola, n.ultimo_resultado, servidor !== null);
-  await db.novedades.put({
+  const nueva: NovedadLocal = {
     ...n,
     ...(servidor !== null
       ? {
@@ -227,12 +263,16 @@ export async function recalcularNovedad(userId: string, id: string): Promise<voi
       : {}),
     servidor,
     servidor_diferido: diferido,
+    ...campoObsoleto(n.servidor_obsoleto, obsoleto),
     estado_local: estado,
     error_sync:
       estado === 'rechazado_sync' || estado === 'conflicto'
         ? (n.ultimo_resultado?.error ?? null)
         : null,
-  });
+  };
+  if (!sinCambios(nueva, n)) {
+    await db.novedades.put(nueva);
+  }
 }
 
 export async function recalcularValidacion(userId: string, id: string): Promise<void> {
@@ -243,12 +283,14 @@ export async function recalcularValidacion(userId: string, id: string): Promise<
   const enCola = await entidadTieneCola(userId, 'validaciones', id);
   let servidor = v.servidor;
   let diferido = v.servidor_diferido;
+  let obsoleto = v.servidor_obsoleto === true;
   if (!enCola && diferido !== null) {
-    servidor = masReciente(servidor, diferido);
+    servidor = adoptarServidor(servidor, obsoleto, diferido);
     diferido = null;
+    obsoleto = false;
   }
   const estado = estadoSimple(enCola, v.ultimo_resultado, servidor !== null);
-  await db.validaciones.put({
+  const nueva: ValidacionLocal = {
     ...v,
     ...(servidor !== null
       ? {
@@ -261,12 +303,16 @@ export async function recalcularValidacion(userId: string, id: string): Promise<
       : {}),
     servidor,
     servidor_diferido: diferido,
+    ...campoObsoleto(v.servidor_obsoleto, obsoleto),
     estado_local: estado,
     error_sync:
       estado === 'rechazado_sync' || estado === 'conflicto'
         ? (v.ultimo_resultado?.error ?? null)
         : null,
-  });
+  };
+  if (!sinCambios(nueva, v)) {
+    await db.validaciones.put(nueva);
+  }
 }
 
 /**

@@ -798,6 +798,64 @@ describe('aplicarResultados', () => {
     });
   });
 
+  it('M6: un conflicto adopta la copia del servidor aunque su versión sea menor que la local', async () => {
+    const { id } = await registrarConsumoLocal(A, entradaConsumo());
+    let lote = await enviar(A);
+    const base = consumoServidor({
+      id,
+      registrado_por: A,
+      order_id: ORDEN,
+      cantidad: 5,
+      version: 5,
+      updated_at: '2026-10-29T17:00:00.000Z',
+    });
+    await aplicarResultados(A, lote, [
+      resultado(lote, 0, { resultado: 'aplicada', servidor: { ...base } }),
+    ]);
+    await editarConsumoLocal(A, { id, cantidad: 2 });
+    lote = await enviar(A);
+    // Tras una restauración el servidor tiene un estado anterior (versión menor).
+    const servidor = { ...base, cantidad: 4, version: 4, updated_at: '2026-10-29T16:00:00.000Z' };
+    await aplicarResultados(A, lote, [
+      resultado(lote, 0, {
+        resultado: 'conflicto',
+        servidor: { consumo: servidor, version_servidor: 4 },
+      }),
+    ]);
+    expect(await db.consumos.get([A, id])).toMatchObject({
+      estado_local: 'conflicto',
+      cantidad: 4,
+      version: 4,
+      servidor: { version: 4, cantidad: 4 },
+    });
+    const nueva = await editarConsumoLocal(A, { id, cantidad: 3 });
+    expect((await mutacion(nueva.mutation_id)).payload).toMatchObject({ version: 4 });
+  });
+
+  it('M6: un rechazo con el estado actual del servidor (CONSUMO_NO_PENDIENTE) también lo adopta', async () => {
+    const { id } = await registrarConsumoLocal(A, entradaConsumo());
+    let lote = await enviar(A);
+    const base = consumoServidor({ id, registrado_por: A, order_id: ORDEN, version: 5 });
+    await aplicarResultados(A, lote, [
+      resultado(lote, 0, { resultado: 'aplicada', servidor: { ...base } }),
+    ]);
+    await editarConsumoLocal(A, { id, cantidad: 2 });
+    lote = await enviar(A);
+    const servidor = { ...base, estado: 'aprobado' as const, version: 4 };
+    await aplicarResultados(A, lote, [
+      resultado(lote, 0, {
+        resultado: 'rechazada',
+        code: 'CONSUMO_NO_PENDIENTE',
+        servidor: { ...servidor },
+      }),
+    ]);
+    expect(await db.consumos.get([A, id])).toMatchObject({
+      estado_local: 'rechazado_sync',
+      version: 4,
+      servidor: { estado: 'aprobado', version: 4 },
+    });
+  });
+
   it('conflicto en una creación (colisión de id): nunca adopta la entidad ajena', async () => {
     const { id } = await registrarConsumoLocal(A, entradaConsumo({ cantidad: 3 }));
     const lote = await enviar(A);

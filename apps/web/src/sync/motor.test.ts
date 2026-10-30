@@ -614,3 +614,211 @@ describe('indicador global durante la sync', () => {
     expect(textos).not.toContain('En línea · 2 por sincronizar');
   });
 });
+
+describe('snapshot en un área temporal (M5) y autoridad del servidor (M6)', () => {
+  const M1 = uuidv7();
+  const M2 = uuidv7();
+
+  function material(id: string, nombre: string): Record<string, unknown> {
+    return {
+      id,
+      codigo: `MP-${nombre}`,
+      nombre,
+      unidad: 'kg',
+      costo_unitario_cop: 1,
+      activo: true,
+    };
+  }
+
+  function orden(id: string, codigo: string): Record<string, unknown> {
+    return {
+      id,
+      codigo,
+      linea: 'Fundición',
+      estado: 'en_proceso',
+      fecha_inicio: null,
+      fecha_fin: null,
+      creada_por: uuidv7(),
+      created_at: '2026-10-29T12:00:00.000Z',
+      updated_at: '2026-10-29T12:00:00.000Z',
+    };
+  }
+
+  function catalogoInicial(): void {
+    servidor.upsert('production_orders', ORDEN, orden(ORDEN, 'OP-1'));
+    servidor.upsert('materials', M1, material(M1, 'Arena'));
+    servidor.upsert('materials', M2, material(M2, 'Coque'));
+    servidor.upsert('order_supervisors', `${ORDEN}:${ana.id}`, {
+      order_id: ORDEN,
+      user_id: ana.id,
+      activo: true,
+    });
+  }
+
+  function snapshotsInicial(): URLSearchParams[] {
+    return servidor.peticiones
+      .filter((p) => p.ruta === '/api/v1/sync/snapshot' && p.query.get('alcance') === 'inicial')
+      .map((p) => p.query);
+  }
+
+  it('M5: la red se cae a mitad del snapshot tras una restauración; se conserva todo, se registra offline y luego se reanuda', async () => {
+    catalogoInicial();
+    const sesion = sesionFalsa(servidor, ana);
+    const m = motor(sesion);
+    await m.sincronizar('apertura');
+    expect(await db.ordenes.count()).toBe(1);
+    expect(await db.materiales.count()).toBe(2);
+    expect(await db.asignaciones.count()).toBe(1);
+    const antes = await leerMetaSync(ana.id);
+
+    servidor.restaurar('epoca-2');
+    servidor.upsert('materials', M2, material(M2, 'Coque fino'));
+    servidor.tamSnapshot = 1;
+    servidor.fallarSnapshotEnPagina = 2;
+    const resumen = await m.sincronizar('intervalo');
+    expect(resumen.error).toMatchObject({ code: null });
+    expect(resumen.paginas_snapshot).toBe(1);
+
+    // Nada del estado anterior se perdió: órdenes, materiales y asignaciones siguen disponibles.
+    expect(await db.ordenes.get([ana.id, ORDEN])).toMatchObject({ codigo: 'OP-1' });
+    expect(await db.materiales.count()).toBe(2);
+    expect(await db.materiales.get([ana.id, M2])).toMatchObject({ nombre: 'Coque' });
+    expect(await db.asignaciones.count()).toBe(1);
+    // El cursor y la época solo cambian con el reemplazo completo.
+    expect(await leerMetaSync(ana.id)).toMatchObject({
+      cursor: antes.cursor,
+      epoca: 'epoca-1',
+      requiere_snapshot: true,
+    });
+
+    // Sin conexión, el supervisor sigue registrando contra los catálogos que tiene.
+    sesion.modo = 'offline';
+    const registro = await registrarConsumoLocal(ana.id, consumo({ material_id: M1 }));
+    expect(await db.outbox.get(registro.mutation_id)).toMatchObject({ estado: 'pendiente' });
+    expect(await m.sincronizar('local')).toMatchObject({ ejecutada: false, omitida: 'offline' });
+
+    // Al volver la red se reanuda desde la página guardada (no desde cero) y se reemplaza todo.
+    sesion.modo = 'online';
+    const desde = snapshotsInicial().length;
+    const segunda = await m.sincronizar('online');
+    expect(segunda).toMatchObject({ error: null, epoca_cambiada: true, aplicadas: 1 });
+    const reanudadas = snapshotsInicial().slice(desde);
+    expect(reanudadas[0]?.get('pagina')).not.toBeNull();
+    expect(reanudadas).toHaveLength(3);
+    expect(await db.materiales.get([ana.id, M2])).toMatchObject({ nombre: 'Coque fino' });
+    expect(await db.ordenes.count()).toBe(1);
+    expect(await leerMetaSync(ana.id)).toMatchObject({
+      epoca: 'epoca-2',
+      requiere_snapshot: false,
+      acciones: [],
+    });
+    expect(servidor.entidades('consumptions').map((c) => c.id)).toEqual([registro.id]);
+    expect(await db.outbox.get(registro.mutation_id)).toMatchObject({ estado: 'aplicada' });
+  });
+
+  it('M5: un token de página rechazado al reanudar vuelve a empezar desde la primera página', async () => {
+    catalogoInicial();
+    const m = motor(sesionFalsa(servidor, ana));
+    await m.sincronizar('apertura');
+    servidor.restaurar('epoca-2');
+    servidor.tamSnapshot = 1;
+    servidor.fallarSnapshotEnPagina = 3;
+    expect((await m.sincronizar('intervalo')).error).toMatchObject({ code: null });
+
+    servidor.rechazarPaginaSnapshot = 1;
+    const desde = snapshotsInicial().length;
+    expect((await m.sincronizar('intervalo')).error).toBeNull();
+    const pedidas = snapshotsInicial().slice(desde);
+    expect(pedidas[0]?.get('pagina')).not.toBeNull();
+    expect(pedidas[1]?.get('pagina')).toBeNull();
+    expect(await db.materiales.count()).toBe(2);
+    expect(await leerMetaSync(ana.id)).toMatchObject({ epoca: 'epoca-2', acciones: [] });
+  });
+
+  it('M5: con el tope de páginas agotado, la siguiente sync reanuda en lugar de empezar de cero', async () => {
+    catalogoInicial();
+    const m = new MotorSync({
+      sesion: sesionFalsa(servidor, ana),
+      estado,
+      locks: null,
+      ahora: () => reloj,
+      aleatorio: () => 0,
+      maxPaginasSnapshot: 2,
+    });
+    servidor.tamSnapshot = 1;
+    const primera = await m.sincronizar('apertura');
+    expect(primera.error).toMatchObject({ code: 'ERROR_INTERNO' });
+    expect(await db.materiales.count()).toBe(0);
+    const segunda = await m.sincronizar('intervalo');
+    expect(segunda.error).toBeNull();
+    expect(snapshotsInicial().map((q) => q.get('pagina') === null)).toEqual([
+      true,
+      false,
+      false,
+      false,
+    ]);
+    expect(await db.materiales.count()).toBe(2);
+    expect(await db.ordenes.count()).toBe(1);
+  });
+
+  it('M6: tras una restauración, el consumo propio aprobado vuelve a pendiente y la validación que el servidor ya no tiene desaparece', async () => {
+    const m = motor(sesionFalsa(servidor, ana));
+    const { id, mutation_id } = await registrarConsumoLocal(ana.id, consumo());
+    await m.sincronizar('apertura');
+    const creado = { ...servidor.entidades('consumptions')[0]! };
+    // El jefe aprueba en línea: el servidor escribe la validación y el consumo v2.
+    const validacionId = uuidv7();
+    servidor.upsert('validations', validacionId, {
+      id: validacionId,
+      consumption_id: id,
+      decision: 'aprobado',
+      motivo: null,
+      validado_por: uuidv7(),
+      client_created_at: '2026-10-29T16:00:00.000Z',
+      server_received_at: '2026-10-29T16:00:01.000Z',
+      created_at: '2026-10-29T16:00:01.000Z',
+      updated_at: '2026-10-29T16:00:01.000Z',
+    });
+    servidor.upsert('consumptions', id, { ...creado, estado: 'aprobado', version: 2 });
+    await m.sincronizar('intervalo');
+    expect(await db.consumos.get([ana.id, id])).toMatchObject({
+      estado_local: 'aprobado',
+      version: 2,
+    });
+
+    // La creación ya salió de la retención: nada propio pendiente sobre este consumo.
+    await db.outbox.delete(mutation_id);
+    // Restauración a un punto anterior a la aprobación.
+    servidor.restaurar('epoca-2');
+    servidor.upsert('consumptions', id, { ...creado }, false);
+    const resumen = await m.sincronizar('intervalo');
+    expect(resumen).toMatchObject({ error: null, epoca_cambiada: true });
+    expect(await db.consumos.get([ana.id, id])).toMatchObject({
+      estado_local: 'sincronizado',
+      version: 1,
+      servidor: { estado: 'pendiente', version: 1 },
+      perdido_en_restauracion: false,
+    });
+    expect(await db.validaciones.get([ana.id, validacionId])).toBeUndefined();
+  });
+
+  it('M6: con la creación aún en retención, se reenvía y termina con el estado del servidor', async () => {
+    const m = motor(sesionFalsa(servidor, ana));
+    const { id, mutation_id } = await registrarConsumoLocal(ana.id, consumo());
+    await m.sincronizar('apertura');
+    const creado = { ...servidor.entidades('consumptions')[0]! };
+    servidor.upsert('consumptions', id, { ...creado, estado: 'aprobado', version: 2 });
+    await m.sincronizar('intervalo');
+    expect(await db.consumos.get([ana.id, id])).toMatchObject({ estado_local: 'aprobado' });
+
+    servidor.restaurar('epoca-2');
+    const resumen = await m.sincronizar('intervalo');
+    expect(resumen).toMatchObject({ error: null, epoca_cambiada: true, aplicadas: 1 });
+    expect(await db.outbox.get(mutation_id)).toMatchObject({ estado: 'aplicada' });
+    expect(await db.consumos.get([ana.id, id])).toMatchObject({
+      estado_local: 'sincronizado',
+      version: 1,
+      servidor: { estado: 'pendiente', version: 1 },
+    });
+  });
+});

@@ -135,6 +135,13 @@ export interface ConsumoLocal extends CamposConsumo {
    * vista local; se adopta cuando la cola de la entidad se vacía (si es más reciente).
    */
   servidor_diferido: Consumo | null;
+  /**
+   * `servidor` es de antes de un reinicio o cambio de época y la entidad tenía mutaciones en cola
+   * (ADR 0022): se conserva como base de esas mutaciones, pero ya no se compara por versión; el
+   * siguiente estado del servidor (respuesta del push o `servidor_diferido`) lo reemplaza.
+   * Opcional: las filas anteriores no lo tienen (= `false`). No es índice.
+   */
+  servidor_obsoleto?: boolean;
   /** Versión del servidor (copia de `servidor.version`), o `null` si nunca llegó al servidor. */
   version: number | null;
   estado_local: EstadoLocal;
@@ -149,9 +156,8 @@ export interface ConsumoLocal extends CamposConsumo {
   conflicto_servidor: Record<string, unknown> | null;
   actualizado_at: string;
   /**
-   * Consumo propio sincronizado que se conservó al reiniciar (cambio de época o `reiniciar`) y que
-   * el snapshot aún no confirmó. Si el snapshot completo no lo devuelve, pasa a
-   * `perdido_en_restauracion` (ADR 0016, M1). Opcional: las filas anteriores no lo tienen.
+   * Obsoleto desde la ADR 0022 (el reemplazo del snapshot decide directamente si un consumo propio
+   * se perdió). Se conserva por las filas anteriores; el reemplazo lo deja en `false`.
    */
   verificar_en_snapshot?: boolean;
   /**
@@ -171,6 +177,8 @@ export interface NovedadLocal {
   client_created_at: string;
   servidor: Novedad | null;
   servidor_diferido: Novedad | null;
+  /** Como `ConsumoLocal.servidor_obsoleto` (ADR 0022). */
+  servidor_obsoleto?: boolean;
   estado_local: EstadoLocalSimple;
   ultimo_resultado: UltimoResultado | null;
   error_sync: ErrorSync | null;
@@ -219,6 +227,8 @@ export interface ValidacionLocal {
   client_created_at: string;
   servidor: Validacion | null;
   servidor_diferido: Validacion | null;
+  /** Como `ConsumoLocal.servidor_obsoleto` (ADR 0022). */
+  servidor_obsoleto?: boolean;
   estado_local: EstadoLocalSimple;
   ultimo_resultado: UltimoResultado | null;
   error_sync: ErrorSync | null;
@@ -306,6 +316,35 @@ export interface MetaSync {
   motivo_snapshot: 'epoca' | 'reiniciar' | null;
   /** Órdenes con `hidratar` pendiente (snapshot de la orden). */
   hidrataciones: string[];
+}
+
+// ---------------------------------------------------------------------------------------------
+// Área temporal del snapshot (ADR 0022)
+// ---------------------------------------------------------------------------------------------
+
+/** Entidad de una página del snapshot `inicial`, guardada tal como llegó (ya validada por Zod). */
+export interface EntidadSnapshotLocal {
+  user_id: string;
+  entidad: string;
+  id: string;
+  datos: Record<string, unknown>;
+}
+
+/** Progreso de la descarga del snapshot `inicial` de un usuario (uno por usuario). */
+export interface ProgresoSnapshot {
+  user_id: string;
+  alcance: 'inicial';
+  /** Época de la PRIMERA página: todas las páginas deben traer la misma. */
+  epoca: string;
+  /** Cursor de la primera página (ADR 0005 regla 7); se guarda en `meta` solo con el reemplazo. */
+  cursor: number;
+  /** Token de la siguiente página, o `null` si ya se guardó la última. */
+  siguiente_pagina: string | null;
+  paginas: number;
+  /** Ya se guardó la última página: falta solo el reemplazo (que no necesita red). */
+  completo: boolean;
+  iniciado_at: string;
+  actualizado_at: string;
 }
 
 /**

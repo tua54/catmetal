@@ -6,6 +6,7 @@ export {
   NOMBRE_DB,
   ESQUEMA_V1,
   ESQUEMA_V2,
+  ESQUEMA_V3,
   db,
   obtenerInstalacionId,
   claveEntidad,
@@ -18,10 +19,19 @@ export {
   aplicarCambios,
   aplicarEntidades,
   completarHidratacion,
-  completarSnapshot,
   leerMetaSync,
   type AccionMotor,
   type EntidadSync,
   type ResultadoAplicarCambios,
 } from './aplicar-cambios';
+export {
+  completarSnapshot,
+  descartarSnapshot,
+  guardarPaginaSnapshot,
+  leerProgresoSnapshot,
+  MAX_EDAD_SNAPSHOT_MS,
+  progresoVigente,
+  type ResultadoCompletarSnapshot,
+  type ResultadoPaginaSnapshot,
+} from './snapshot-temporal';
 export { nombreCorto, textoEvento } from './trazabilidad';

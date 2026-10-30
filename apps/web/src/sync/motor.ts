@@ -12,6 +12,8 @@
 //      backoff. 403 `AUTOR_NO_COINCIDE` → se detiene y se pide la contraseña.
 //   4. Pull en bucle mientras `hay_mas` (o tras un snapshot), atendiendo `hidratar`, `reiniciar` y el
 //      cambio de época (snapshot + reenvío de las reencoladas). Primer arranque → snapshot inicial.
+//      El snapshot `inicial` baja a un área temporal y se reanuda entre syncs; el estado local solo
+//      se reemplaza cuando está completo (ADR 0022, M5).
 //   5. Subida de fotos de novedades ya aplicadas. Nunca bloquea los registros.
 //   6. Purga de aplicadas > 7 días y evento de trazabilidad.
 
@@ -23,7 +25,6 @@ import {
   syncPushResponseSchema,
   type CodigoError,
   type Perfil,
-  type SnapshotResponse,
 } from '@catmetal/shared';
 import { ZodError } from 'zod';
 import {
@@ -44,10 +45,16 @@ import {
   aplicarCambios,
   aplicarEntidades,
   completarHidratacion,
-  completarSnapshot,
   leerMetaSync,
   type AccionMotor,
 } from '../datos/aplicar-cambios';
+import {
+  completarSnapshot,
+  descartarSnapshot,
+  guardarPaginaSnapshot,
+  leerProgresoSnapshot,
+  progresoVigente,
+} from '../datos/snapshot-temporal';
 import {
   aMutacion,
   aplicarResultados,
@@ -161,7 +168,10 @@ const MOTIVOS_RECONEXION: readonly MotivoSync[] = [
 /** Señal que nunca se aborta (sesiones sin `senalDeSesion`, por ejemplo en pruebas). */
 const SIN_SENAL = new AbortController().signal;
 
-/** El snapshot no terminó dentro del tope de páginas: error reintentable (M4). */
+/**
+ * El snapshot no terminó (tope de páginas o la época cambió dos veces a mitad de camino): error
+ * reintentable (M4). Lo ya descargado queda en el área temporal y la próxima sync reanuda.
+ */
 class SnapshotIncompleto extends Error {
   override readonly name = 'SnapshotIncompleto';
 
@@ -594,7 +604,12 @@ export class MotorSync {
 
   async #pull(userId: string, resumen: ResumenSync): Promise<void> {
     let meta = await leerMetaSync(userId);
-    if (meta.epoca === null && meta.cursor === 0) {
+    const inicial = meta.epoca === null && meta.cursor === 0;
+    if (!inicial && !meta.acciones.some((a) => a.tipo === 'snapshot')) {
+      // Una descarga guardada que ya nadie necesita (no debería pasar): se descarta.
+      await descartarSnapshot(userId);
+    }
+    if (inicial) {
       // Primer arranque: el snapshot es mucho más barato que recorrer todo el audit_log.
       await this.#snapshot(userId, resumen, { alcance: 'inicial' });
       meta = await leerMetaSync(userId);
@@ -646,52 +661,104 @@ export class MotorSync {
     userId: string,
     resumen: ResumenSync,
     consulta: { alcance: 'inicial' } | { alcance: 'orden'; order_id: string },
-    intentosPorEpoca = 1,
   ): Promise<void> {
+    if (consulta.alcance === 'inicial') {
+      await this.#snapshotInicial(userId, resumen);
+      return;
+    }
+    // Hidratación de una orden: solo agrega datos, se aplica directo página a página.
     let pagina: string | null = null;
-    let primera: SnapshotResponse | null = null;
     const maxPaginas = this.#opciones.maxPaginasSnapshot ?? MAX_PAGINAS_SNAPSHOT;
     for (let n = 0; n < maxPaginas; n += 1) {
       this.#verificarSesion(userId);
-      const parametros = new URLSearchParams({ alcance: consulta.alcance });
-      if (consulta.alcance === 'orden') {
-        parametros.set('order_id', consulta.order_id);
-      }
+      const parametros = new URLSearchParams({
+        alcance: 'orden',
+        order_id: consulta.order_id,
+      });
       if (pagina !== null) {
         parametros.set('pagina', pagina);
       }
       const respuesta = snapshotResponseSchema.parse(
         await this.#peticion(userId, `/sync/snapshot?${parametros.toString()}`),
       );
-      primera ??= respuesta;
       this.#verificarAutor(userId);
       await aplicarEntidades(userId, respuesta.entidades);
       resumen.paginas_snapshot += 1;
       pagina = respuesta.siguiente_pagina;
       if (pagina === null) {
-        break;
+        return;
       }
     }
-    if (pagina !== null) {
-      // M4: se agotó el tope de páginas y el servidor aún tiene más. Nunca se completa un snapshot
-      // a medias (marcaría como perdidos consumos que no se alcanzaron a leer): la acción sigue
-      // persistida en `meta` y se reintenta en la próxima sincronización.
-      throw new SnapshotIncompleto();
+    // M4: se agotó el tope y el servidor aún tiene más: la hidratación sigue pendiente en `meta`.
+    throw new SnapshotIncompleto();
+  }
+
+  /**
+   * Snapshot `inicial` (arranque, `reiniciar` o cambio de época) en el área temporal (ADR 0022):
+   * reanuda la descarga guardada si sigue vigente, guarda cada página en una transacción y, con la
+   * última, reemplaza el estado local en UNA transacción (`completarSnapshot`). Si se interrumpe,
+   * los datos vivos quedan intactos. Empieza de cero UNA vez por sync si una página trae otra época
+   * o el servidor rechaza el token de página; nunca mezcla épocas.
+   */
+  async #snapshotInicial(userId: string, resumen: ResumenSync): Promise<void> {
+    const maxPaginas = this.#opciones.maxPaginasSnapshot ?? MAX_PAGINAS_SNAPSHOT;
+    let progreso = await leerProgresoSnapshot(userId);
+    if (progreso !== undefined && !progresoVigente(progreso, this.#ahora())) {
+      await descartarSnapshot(userId);
+      progreso = undefined;
     }
-    if (consulta.alcance === 'inicial' && primera !== null) {
-      this.#verificarAutor(userId);
-      // El cursor es el de la PRIMERA página (MAX(seq) leído antes del estado, ADR 0005 regla 7).
-      const acciones = await completarSnapshot(userId, {
-        cursor: primera.cursor,
-        epoca: primera.epoca,
-      });
-      if (acciones.length > 0) {
-        // La época cambió entre el pull y el snapshot: se reencoló todo; un único reintento.
-        resumen.epoca_cambiada = true;
-        if (intentosPorEpoca > 0) {
-          await this.#snapshot(userId, resumen, consulta, intentosPorEpoca - 1);
+    let completo = progreso?.completo === true;
+    let pagina: string | null = completo ? null : (progreso?.siguiente_pagina ?? null);
+    let reiniciado = false;
+    const empezarDeCero = async (): Promise<void> => {
+      if (reiniciado) {
+        throw new SnapshotIncompleto();
+      }
+      reiniciado = true;
+      await descartarSnapshot(userId);
+      pagina = null;
+    };
+    for (let n = 0; !completo; n += 1) {
+      if (n >= maxPaginas) {
+        // M4: tope agotado. Lo descargado se conserva; la próxima sync reanuda desde aquí.
+        throw new SnapshotIncompleto();
+      }
+      this.#verificarSesion(userId);
+      const parametros = new URLSearchParams({ alcance: 'inicial' });
+      if (pagina !== null) {
+        parametros.set('pagina', pagina);
+      }
+      let respuesta;
+      try {
+        respuesta = snapshotResponseSchema.parse(
+          await this.#peticion(userId, `/sync/snapshot?${parametros.toString()}`),
+        );
+      } catch (error) {
+        if (pagina !== null && error instanceof ErrorApi && error.code === 'VALIDACION') {
+          // Token de página rechazado (p. ej. otra versión del Worker): se empieza de cero.
+          await empezarDeCero();
+          continue;
         }
+        throw error;
       }
+      this.#verificarAutor(userId);
+      const guardada = await guardarPaginaSnapshot(userId, respuesta, this.#ahora().toISOString());
+      if (guardada.resultado === 'epoca_distinta') {
+        // La época cambió a mitad de la descarga (otra restauración): lo guardado no sirve.
+        await empezarDeCero();
+        continue;
+      }
+      resumen.paginas_snapshot += 1;
+      pagina = respuesta.siguiente_pagina;
+      completo = guardada.completo;
+    }
+    this.#verificarAutor(userId);
+    const { epoca_cambiada } = await completarSnapshot(userId, {
+      ahora: this.#ahora().toISOString(),
+    });
+    if (epoca_cambiada) {
+      // Se confirmó otra época: el motor reenvía las mutaciones reencoladas.
+      resumen.epoca_cambiada = true;
     }
   }
 

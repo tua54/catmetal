@@ -175,6 +175,10 @@ export function extraerEntidades(servidor: unknown): EntidadesServidor {
  * Devuelve el más reciente de dos estados del servidor de la misma entidad: mayor `version` y, a
  * igual versión, mayor o igual `updated_at` (gana `nuevo` en el empate). Evita que una respuesta
  * vieja haga retroceder la vista local.
+ *
+ * Solo compara estados de la MISMA época (ADR 0022): las versiones de antes y después de una
+ * restauración no son comparables. Por eso el reemplazo del snapshot no la usa (el servidor manda)
+ * y un `servidor` marcado `servidor_obsoleto` se reemplaza sin comparar (ver `adoptarServidor`).
  */
 export function masReciente<T extends { version?: number; updated_at?: string }>(
   actual: T | null,
@@ -192,4 +196,17 @@ export function masReciente<T extends { version?: number; updated_at?: string }>
     return vNuevo > vActual ? nuevo : actual;
   }
   return (nuevo.updated_at ?? '') >= (actual.updated_at ?? '') ? nuevo : actual;
+}
+
+/**
+ * Estado que queda en `servidor` al recibir `nuevo` de una fuente de la época actual (pull o push
+ * `aplicada`): si el actual es de antes de un reinicio (`obsoleto`, ADR 0022), gana `nuevo` sin
+ * comparar versiones; si no, el más reciente.
+ */
+export function adoptarServidor<T extends { version?: number; updated_at?: string }>(
+  actual: T | null,
+  obsoleto: boolean | undefined,
+  nuevo: T,
+): T {
+  return obsoleto === true ? nuevo : (masReciente(actual, nuevo) ?? nuevo);
 }

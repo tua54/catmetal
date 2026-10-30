@@ -1,6 +1,15 @@
+import Dexie from 'dexie';
 import { esUuidV7, uuidv7 } from '@catmetal/shared';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { CatmetalDb, claveEntidad, db, NOMBRE_DB, obtenerInstalacionId } from './db';
+import {
+  CatmetalDb,
+  claveEntidad,
+  db,
+  ESQUEMA_V1,
+  ESQUEMA_V2,
+  NOMBRE_DB,
+  obtenerInstalacionId,
+} from './db';
 import { ErrorDatosLocales } from './errores';
 import {
   limpiarDb,
@@ -16,10 +25,10 @@ beforeEach(async () => {
 });
 
 describe('esquema Dexie', () => {
-  it('abre catmetal-mp v2: las tablas de la ADR 0012 más los candados (tarea 3.4)', async () => {
+  it('abre catmetal-mp v3: las tablas de la ADR 0012, los candados (tarea 3.4) y el área temporal del snapshot (ADR 0022)', async () => {
     await db.open();
     expect(db.name).toBe(NOMBRE_DB);
-    expect(db.verno).toBe(2);
+    expect(db.verno).toBe(3);
     expect(db.tables.map((t) => t.name).sort()).toEqual(
       [
         'asignaciones',
@@ -35,6 +44,8 @@ describe('esquema Dexie', () => {
         'perfiles',
         'planeados',
         'settings',
+        'snapshot_entidades',
+        'snapshot_progreso',
         'trazabilidad',
         'usuarios',
         'validaciones',
@@ -45,13 +56,62 @@ describe('esquema Dexie', () => {
     expect(db.outbox.schema.idxByName['[user_id+estado+seq_local]']).toBeDefined();
     expect(db.outbox.schema.idxByName.seq_local?.unique).toBe(true);
     expect(db.outbox.schema.idxByName.claves?.multi).toBe(true);
+    expect(db.snapshot_entidades.schema.primKey.keyPath).toEqual(['user_id', 'entidad', 'id']);
   });
 
   it('permite instancias con otro nombre (pruebas aisladas)', async () => {
     const otra = new CatmetalDb(`prueba-${uuidv7()}`);
     await otra.open();
-    expect(otra.verno).toBe(2);
+    expect(otra.verno).toBe(3);
     await otra.delete();
+  });
+
+  it('la actualización de v2 a v3 no pierde datos (outbox, fotos ni particiones de otros usuarios)', async () => {
+    const nombre = `migracion-${uuidv7()}`;
+    const A = uuidv7();
+    const B = uuidv7();
+    // Una base v2 como la de los navegadores en producción.
+    const v2 = new Dexie(nombre);
+    v2.version(1).stores(ESQUEMA_V1);
+    v2.version(2).stores(ESQUEMA_V2);
+    await v2.open();
+    const foto = new Uint8Array([1, 2, 3]).buffer;
+    await v2.table('outbox').add({
+      mutation_id: 'm1',
+      seq_local: 1,
+      estado: 'pendiente',
+      user_id: A,
+      consumo_id: 'c1',
+      claves: [`${A}|consumos|c1`],
+    });
+    await v2.table('consumos').bulkAdd([
+      { user_id: A, id: 'c1', order_id: 'o1', dia_bogota: 'd', estado_local: 'pendiente_sync' },
+      { user_id: B, id: 'c2', order_id: 'o1', dia_bogota: 'd', estado_local: 'sincronizado' },
+    ]);
+    await v2.table('evidencias').add({
+      user_id: A,
+      id: 'e1',
+      incident_id: 'n1',
+      estado_subida: 'pendiente',
+      datos: foto,
+    });
+    await v2.table('ordenes').add({ user_id: B, id: 'o1', estado: 'en_proceso' });
+    await v2.table('meta').add({ user_id: B, cursor: 7, epoca: 'epoca-1' });
+    v2.close();
+
+    const v3 = new CatmetalDb(nombre);
+    await v3.open();
+    expect(v3.verno).toBe(3);
+    expect(await v3.outbox.get('m1')).toMatchObject({ user_id: A, estado: 'pendiente' });
+    expect(await v3.consumos.count()).toBe(2);
+    expect(await v3.consumos.get([B, 'c2'])).toMatchObject({ estado_local: 'sincronizado' });
+    const e = await v3.evidencias.get([A, 'e1']);
+    expect(new Uint8Array(e!.datos!)).toEqual(new Uint8Array([1, 2, 3]));
+    expect(await v3.ordenes.get([B, 'o1'])).toBeDefined();
+    expect(await v3.meta.get(B)).toMatchObject({ cursor: 7, epoca: 'epoca-1' });
+    expect(await v3.snapshot_entidades.count()).toBe(0);
+    expect(await v3.snapshot_progreso.count()).toBe(0);
+    await v3.delete();
   });
 
   it('claveEntidad incluye el usuario', () => {

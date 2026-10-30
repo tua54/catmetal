@@ -34,7 +34,7 @@ import {
 } from '@catmetal/shared';
 import type { Table } from 'dexie';
 import { leerBlob } from '../lib/blob';
-import { claveEntidad, db, rangoDe, tablasDeDatos } from './db';
+import { claveEntidad, db, rangoDe, tablasDeDatos, tablasDeSnapshot } from './db';
 import {
   camposDe,
   estaEnCola,
@@ -927,12 +927,13 @@ export async function aplicarResultados(
           actualizada_at: iso,
         });
         if (conflictoSobreEntidadExistente(m) && r.servidor !== undefined) {
-          // `CONSUMO_NO_PENDIENTE` trae el consumo actual (ya validado): la vista lo refleja.
+          // `CONSUMO_NO_PENDIENTE` trae el consumo actual (ya validado): la vista lo refleja. Es el
+          // estado que el servidor acaba de leer: se adopta sin comparar versiones (ADR 0022, M6).
           afectadas.push(
             ...(await guardarEntidadesServidor(
               userId,
               extraerEntidades(r.servidor),
-              'propio',
+              'actual',
               iso,
             )),
           );
@@ -953,11 +954,13 @@ export async function aplicarResultados(
           actualizada_at: iso,
         });
         if (conflictoSobreEntidadExistente(m)) {
+          // El conflicto trae la versión ACTUAL del servidor: se adopta aunque sea menor que la local
+          // (tras una restauración las versiones de antes no son comparables; ADR 0022, M6).
           afectadas.push(
             ...(await guardarEntidadesServidor(
               userId,
               extraerEntidades(r.servidor),
-              'propio',
+              'actual',
               iso,
             )),
           );
@@ -1117,7 +1120,8 @@ export async function puedeBorrarDatosDeUsuario(userId: string): Promise<EstadoB
  *
  * SE BORRAN: las aplicadas más viejas que la retención, las demás entidades del usuario (lo ajeno
  * y lo propio ya fuera de la retención: el snapshot lo vuelve a traer), los catálogos (órdenes,
- * planes, asignaciones, materiales, settings, usuarios) y la trazabilidad del usuario.
+ * planes, asignaciones, materiales, settings, usuarios), la trazabilidad del usuario y su descarga
+ * de snapshot a medias (área temporal, ADR 0022).
  */
 export async function borrarDatosDeUsuario(
   userId: string,
@@ -1126,7 +1130,7 @@ export async function borrarDatosDeUsuario(
   const limite = new Date(
     (opciones.ahora ?? new Date()).getTime() - RETENCION_MUTACIONES_APLICADAS_DIAS * MS_POR_DIA,
   ).toISOString();
-  return db.transaction('rw', tablasDeDatos(), async () => {
+  return db.transaction('rw', [...tablasDeDatos(), ...tablasDeSnapshot()], async () => {
     const estado = await puedeBorrarDatosDeUsuario(userId);
     if (!estado.puede) {
       throw new ErrorDatosLocales('PENDIENTES_LOCALES');
@@ -1179,6 +1183,11 @@ export async function borrarDatosDeUsuario(
       .where('[user_id+ts]')
       .between(...rango)
       .delete();
+    await db.snapshot_entidades
+      .where(':id')
+      .between(...rango)
+      .delete();
+    await db.snapshot_progreso.delete(userId);
     const meta = await db.meta.get(userId);
     if (meta !== undefined) {
       // Se conserva la época (para detectar una restauración al volver); el estado sincronizado se
