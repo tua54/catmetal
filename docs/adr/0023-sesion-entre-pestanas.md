@@ -45,3 +45,41 @@ Se adopta la opción 2.
 ## Cómo revertir
 
 Quitar la suscripción al canal y la emisión de mensajes. La revalidación del motor se puede conservar, porque es independiente.
+
+## Enmienda 1 — Inactividad compartida entre pestañas (correcciones v1.2, ítem A2)
+
+- Fecha: 2026-10-30.
+
+### Contexto
+
+Cada pestaña tenía su propio vigilante de inactividad (`apps/web/src/auth/inactividad.ts`) y `bloquear()` siempre avisaba a las demás. Si el supervisor trabajaba 10 min en la pestaña B, el temporizador de la pestaña A, olvidada en segundo plano, vencía y bloqueaba a B en medio de un registro.
+
+### Opciones consideradas
+
+1. **Que `bloquear()` no avise a las demás pestañas.** Una pestaña olvidada nunca dejaría de mostrar datos aunque nadie use la tablet en ninguna: contradice la decisión original.
+2. **Que la última actividad sea del usuario, no de la pestaña.** Las pestañas se comunican su actividad y solo bloquean si ninguna tuvo actividad en los últimos 10 min.
+
+### Decisión
+
+Se adopta la opción 2.
+
+1. **Aviso `actividad`.** El canal admite un tipo nuevo, `{ v: 1, tipo: 'actividad', user_id, origen, at }`, sin secretos. `at` es la hora (ms) de la última interacción de la pestaña que emite.
+   - Límite de frecuencia: como mucho un aviso cada 5 s por pestaña, con envío **al final** del intervalo (el último `at` de una ráfaga siempre se emite). Así, cuando vence el plazo, todas las pestañas conocen la última interacción exacta.
+2. **Marca compartida.** Con cada aviso se escribe también la clave `catmetal-sesion-actividad` en `localStorage`, con `{ user_id, at }` (sin secretos). Sirve a una pestaña que estuvo congelada en segundo plano, a una recién abierta y a los navegadores sin `BroadcastChannel`.
+3. **Regla de bloqueo.** La última actividad de una pestaña es el máximo entre la propia, la de los avisos recibidos del mismo usuario y la de la marca compartida (los valores en el futuro se ignoran). Una pestaña solo bloquea, y solo avisa `bloqueo`, si ese máximo tiene 10 min o más. Antes de bloquear, siempre relee la marca compartida.
+4. **Vuelta de segundo plano.** Al volver a `visible`, la pestaña relee la marca compartida antes de decidir.
+5. **Motivo del bloqueo.** El aviso `bloqueo` lleva `motivo: 'inactividad' | 'revocacion'`.
+   - Con `inactividad`, la pestaña que lo recibe no se bloquea si **ella misma** tuvo una interacción dentro del plazo. En ese caso responde con un aviso `actividad`. Esto cubre la ventana de, como mucho, 5 s en que el emisor no conocía la última interacción.
+   - Con `revocacion` (S-09), o sin `motivo` (una pestaña con el código anterior), la pestaña se bloquea siempre, como antes. Es el lado conservador.
+6. Una pestaña con el código anterior ignora el tipo `actividad`, porque no lo conoce. La convivencia de versiones dura hasta que se recarga la pestaña vieja.
+
+### Consecuencias
+
+- Una pestaña en segundo plano ya no bloquea a quien trabaja en otra.
+- Sin actividad en ninguna pestaña, todas se bloquean igual que antes, en menos de 2 s.
+- Una pestaña que bloqueó por un aviso tardío puede quedar bloqueada mientras otra sigue activa. Es el comportamiento ya aceptado en las consecuencias originales.
+- La E2E `e2e/sesion-multipestana.spec.ts` cambia: comprueba que, con actividad en B, A no bloquea, y que sin actividad en ninguna, ambas se bloquean en menos de 2 s.
+
+### Cómo revertir
+
+Quitar el tipo `actividad`, la marca compartida y el campo `motivo`, y volver a la regla por pestaña.
