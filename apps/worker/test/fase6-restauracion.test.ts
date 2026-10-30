@@ -326,6 +326,9 @@ describe('restauración del backup de R2 (M4)', () => {
       .first();
     expect(validacionB).toBeNull();
     expect(await db.prepare('SELECT COUNT(*) AS n FROM refresh_tokens').first()).toEqual({ n: 0 });
+    // S-06: `login_cupos` no viaja al backup; la base restaurada empieza sin cupos.
+    expect(manifest.tablas.map((t) => t.tabla)).not.toContain('login_cupos');
+    expect(await db.prepare('SELECT COUNT(*) AS n FROM login_cupos').first()).toEqual({ n: 0 });
     expect(await db.prepare('SELECT MAX(seq) AS s FROM audit_log').first()).toEqual({
       s: escenario.corte,
     });
@@ -401,6 +404,11 @@ const DEV = '01900000-0000-7000-8000-0000000000d1';
 interface Sintetico {
   filas: Record<string, Fila[]>;
   manifest: Record<string, unknown>;
+}
+
+/** Entradas `tablas` del manifest sintético. */
+function tablasDe(s: Sintetico): { tabla: string }[] {
+  return s.manifest.tablas as { tabla: string }[];
 }
 
 /** Fila de auditoría sintética (el seq se asigna al armar el backup). */
@@ -562,17 +570,55 @@ describe('núcleo de la restauración (ADR 0021)', () => {
     await esperarRechazo(() => planDe(saltada), 'INTEGRIDAD');
   });
 
-  it('un parcial sin sync_mutations ni login_cupos se restaura sin esas filas', async () => {
+  // S-06: `login_cupos` ya no está en el backup, así que este caso solo deja incompleta
+  // `sync_mutations` (antes también `login_cupos`).
+  it('un parcial sin sync_mutations se restaura sin esas filas', async () => {
     const s = sintetico(
       { users: [usuario(U1)] },
       [auditoriaDe('users', U1, null, {})],
       [],
-      ['sync_mutations', 'login_cupos'],
+      ['sync_mutations'],
     );
     const plan = await planDe(s);
     expect(insertsDe(plan, 'sync_mutations')).toEqual([]);
     expect(insertsDe(plan, 'login_cupos')).toEqual([]);
     expect(plan.informe.sync_mutations.tabla_omitida).toBe(true);
+    expect(plan.informe.login_cupos_omitida).toBe(true);
+    expect(insertsDe(plan, 'users')).toHaveLength(1);
+  });
+
+  // S-06 (docs/auditoria/seguridad-correcciones.md): el HMAC de la IP no se conserva en R2.
+  it('S-06: un manifest sin login_cupos se restaura y deja la tabla vacía', async () => {
+    const s = sintetico({ users: [usuario(U1)] }, [auditoriaDe('users', U1, null, {})], []);
+    s.manifest.tablas = tablasDe(s).filter((t) => t.tabla !== 'login_cupos');
+    delete s.filas.login_cupos;
+    const plan = await planDe(s);
+    expect(insertsDe(plan, 'login_cupos')).toEqual([]);
+    expect(plan.informe.login_cupos_omitida).toBe(true);
+    expect(plan.verificacion.find((v) => v.nombre === 'V9_conteo_login_cupos')?.sql).toContain(
+      '0 AS esperadas',
+    );
+  });
+
+  it('S-06: un manifest anterior que sí trae login_cupos se acepta, pero sus filas no se importan', async () => {
+    const cupo = {
+      user_id: U1,
+      origen: 'g',
+      fallos: 1,
+      ventana_inicio: ANTES,
+      bloqueado_hasta: null,
+      reserva_id: 'r',
+      created_at: ANTES,
+      updated_at: ANTES,
+    };
+    const s = sintetico({ users: [usuario(U1)] }, [auditoriaDe('users', U1, null, {})], []);
+    s.manifest.tablas = [
+      ...tablasDe(s).filter((t) => t.tabla !== 'login_cupos'),
+      { tabla: 'login_cupos', estado: 'completa', filas: 1 },
+    ];
+    s.filas.login_cupos = [cupo];
+    const plan = await planDe(s);
+    expect(insertsDe(plan, 'login_cupos')).toEqual([]);
     expect(plan.informe.login_cupos_omitida).toBe(true);
     expect(insertsDe(plan, 'users')).toHaveLength(1);
   });
@@ -644,25 +690,15 @@ describe('núcleo de la restauración (ADR 0021)', () => {
     ]);
   });
 
-  it('excluye un usuario creado tras el corte, con sus cupos', async () => {
-    const cupo = {
-      user_id: U2,
-      origen: 'g',
-      fallos: 1,
-      ventana_inicio: DESPUES,
-      bloqueado_hasta: null,
-      reserva_id: 'r',
-      created_at: DESPUES,
-      updated_at: DESPUES,
-    };
+  // S-06: sin `login_cupos` en el backup, ya no hay cupos que excluir con el usuario.
+  it('excluye un usuario creado tras el corte', async () => {
     const s = sintetico(
-      { users: [usuario(U1), usuario(U2)], login_cupos: [cupo, { ...cupo, user_id: U1 }] },
+      { users: [usuario(U1), usuario(U2)] },
       [auditoriaDe('users', U1, null, {})],
       [auditoriaDe('users', U2, null, { id: U2 }, 'usuario.crear')],
     );
     const plan = await planDe(s);
     expect(plan.informe.tablas.users).toMatchObject({ excluidas: 1, importadas: 1 });
-    expect(plan.informe.tablas.login_cupos).toMatchObject({ excluidas: 1, importadas: 1 });
     expect(plan.informe.revisar_seguridad[0]).toMatchObject({
       entidad_id: U2,
       tipo: 'creado_tras_el_corte_no_restaurado',

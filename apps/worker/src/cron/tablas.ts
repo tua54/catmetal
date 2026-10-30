@@ -11,8 +11,9 @@
 //   (sin Sessions API ni réplicas de lectura de D1; ADR 0021, P5).
 //
 // `columnas` (ADR 0020) se usa para estimar en SQL el tamaño de cada fila (`octet_length`) y acotar
-// la página por bytes. La prueba `fase6-cron-backup.test.ts` verifica que esta lista cubre todas las
-// tablas del esquema y que `pk` y `columnas` son exactamente los de cada una.
+// la página por bytes. La prueba `fase6-cron-backup.test.ts` verifica que esta lista, junto con
+// `TABLAS_EXCLUIDAS_BACKUP`, cubre todas las tablas del esquema y que `pk` y `columnas` son
+// exactamente los de cada una.
 
 export interface TablaBackup {
   readonly nombre: string;
@@ -135,19 +136,6 @@ export const TABLAS_BACKUP: readonly TablaBackup[] = [
     ],
   },
   {
-    nombre: 'login_cupos',
-    pk: ['user_id', 'origen'],
-    columnas: [
-      'user_id',
-      'origen',
-      'fallos',
-      'ventana_inicio',
-      'bloqueado_hasta',
-      'reserva_id',
-      ...MARCAS,
-    ],
-  },
-  {
     nombre: 'devices',
     pk: ['id'],
     columnas: [
@@ -223,6 +211,18 @@ export const TABLAS_BACKUP: readonly TablaBackup[] = [
 ];
 
 /**
+ * Tablas del esquema que NO se exportan a R2, a propósito (lista explícita: la prueba de cobertura
+ * exige que toda tabla esté en `TABLAS_BACKUP` o aquí).
+ *
+ * - `login_cupos` (S-06 de docs/auditoria/seguridad-correcciones.md, ADR 0018): su `origen`
+ *   `ip:<hmac>` es un dato personal seudonimizado (con el secreto, el espacio IPv4 se recorre por
+ *   fuerza bruta; Ley 1581). En D1 vive como mucho unas 24 h (purga del mantenimiento); en el
+ *   backup se conservaría lo que dure su retención. Es estado técnico efímero: una base restaurada
+ *   empieza sin cupos (`scripts/restauracion-nucleo.mjs` la deja vacía).
+ */
+export const TABLAS_EXCLUIDAS_BACKUP: readonly string[] = ['login_cupos'];
+
+/**
  * Tablas que pueden quedar `incompleta` en un backup `parcial` sin impedir la restauración (ADR
  * 0021, 4.1). Debe coincidir con `INCOMPLETAS_ADMITIDAS` de scripts/restauracion-nucleo.mjs (lo
  * comprueba `fase6-cron-aislamiento.test.ts`). Con otra tabla incompleta, el día no es restaurable
@@ -230,6 +230,5 @@ export const TABLAS_BACKUP: readonly TablaBackup[] = [
  */
 export const INCOMPLETAS_ADMITIDAS_RESTAURACION: readonly string[] = [
   'sync_mutations',
-  'login_cupos',
   'refresh_tokens',
 ];

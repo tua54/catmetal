@@ -234,7 +234,7 @@ Procedimiento (ADR 0021, que reemplaza el de la revisión de esquema H9). La bas
    ```
 10. **Aplique las migraciones posteriores** a `ultima_migracion`, si las hay, ya desde la rama actual.
 11. **Ponga la base en servicio.** Apunte el binding del entorno a la base nueva (`database_id` en `wrangler.jsonc`), despliegue y verifique (secciones 9.3 y 9.4).
-    - **Avise a planta: todos deben iniciar sesión otra vez con conexión**, porque `refresh_tokens` no se restaura. El inicio de sesión sin conexión de la tablet y su cola de pendientes no se ven afectados: lo pendiente se envía después de ese inicio de sesión.
+    - **Avise a planta: todos deben iniciar sesión otra vez con conexión**, porque `refresh_tokens` no se restaura. Los cupos de login (`login_cupos`) tampoco se respaldan (S-06): la base restaurada empieza sin cupos ni bloqueos. El inicio de sesión sin conexión de la tablet y su cola de pendientes no se ven afectados: lo pendiente se envía después de ese inicio de sesión.
 12. **Rehaga** lo que el informe lista como hecho por REST en la ventana (por ejemplo, las decisiones del jefe y los cambios de usuarios) y revise los rechazos.
     - **Seguridad (S-04):** `users` vuelve a su valor exportado. Una desactivación, una baja de rol o un restablecimiento de contraseña hechos **después** de exportar `users` y antes del desastre no aparecen en `revisar_seguridad`. Reaplíquelos desde la base dañada (Time Travel de solo lectura) o desde Workers Logs.
     - Si la restauración se debe a un incidente de seguridad, **rote `JWT_SECRET` y `REFRESH_SECRET`** (sección 3) antes de reabrir. Eso invalida las sesiones y las cookies de dispositivo `mp_dispositivo` (ADR 0018), que dependen de `REFRESH_SECRET`.

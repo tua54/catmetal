@@ -48,21 +48,26 @@ export interface EntradaDispositivo {
 // ---------------------------------------------------------------------------------------------
 // HMAC con claves derivadas de REFRESH_SECRET (una por etiqueta: firma de la cookie, IP)
 // ---------------------------------------------------------------------------------------------
+//
+// S-05 (docs/auditoria/seguridad-correcciones.md): las claves se derivan con HKDF-SHA-256 (RFC 5869)
+// y la etiqueta como `info`, no con HMAC(REFRESH_SECRET, etiqueta): así no comparten primitivo ni
+// clave con `hashRefreshToken` (HMAC-SHA-256 directo con REFRESH_SECRET). Sal vacía (RFC 5869
+// §3.1: el secreto ya es aleatorio y de alta entropía).
 
 const clavesDerivadas = new Map<string, Promise<CryptoKey>>();
+const SAL_VACIA = new Uint8Array(0);
 
 async function derivarClave(secreto: string, etiqueta: string): Promise<CryptoKey> {
-  const base = await crypto.subtle.importKey(
-    'raw',
-    codificador.encode(secreto),
-    { name: 'HMAC', hash: 'SHA-256' },
+  const base = await crypto.subtle.importKey('raw', codificador.encode(secreto), 'HKDF', false, [
+    'deriveKey',
+  ]);
+  return crypto.subtle.deriveKey(
+    { name: 'HKDF', hash: 'SHA-256', salt: SAL_VACIA, info: codificador.encode(etiqueta) },
+    base,
+    { name: 'HMAC', hash: 'SHA-256', length: 256 },
     false,
     ['sign'],
   );
-  const derivada = await crypto.subtle.sign('HMAC', base, codificador.encode(etiqueta));
-  return crypto.subtle.importKey('raw', derivada, { name: 'HMAC', hash: 'SHA-256' }, false, [
-    'sign',
-  ]);
 }
 
 function claveDerivada(secreto: string, etiqueta: string): Promise<CryptoKey> {

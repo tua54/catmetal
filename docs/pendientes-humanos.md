@@ -55,3 +55,4 @@ Los comandos exactos, en orden, están en `docs/despliegue.md` (secciones 2 a 6)
 ## Seguridad (revisión de las correcciones v1.1)
 
 - **S-08 (anterior a la v1.1)**: `mp_refresh` se lee con `getCookie` (una sola aparición) y solo se borra la del host. Un subdominio hermano de `catmetal.com` podría plantar otra con `Domain=` para forzar un cierre de sesión o fijar una sesión. Mitigación recomendada: no delegar subdominios de `catmetal.com` a terceros, o servir la app desde un dominio propio. Si no, aplicar la misma lectura robusta de `mp_dispositivo` (ADR 0018) a `mp_refresh` en una versión futura.
+- **Crecimiento de `audit_log` (S-01, ADR 0018)**: los bloqueos de login se auditan todos (spec §5 d), como máximo unas 5 filas por cuenta cada 15 min si hay un ataque sostenido. Conviene una alerta en Workers Logs si `tamano_base` o el conteo diario de `audit_log` crecen más de lo esperado.

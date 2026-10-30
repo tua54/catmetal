@@ -13,7 +13,7 @@ import {
   type ResultadoBackup,
 } from '../src/cron/backup';
 import { Presupuesto } from '../src/cron/presupuesto';
-import { TABLAS_BACKUP } from '../src/cron/tablas';
+import { TABLAS_BACKUP, TABLAS_EXCLUIDAS_BACKUP } from '../src/cron/tablas';
 import {
   completas,
   filasDeTabla,
@@ -62,7 +62,10 @@ beforeAll(async () => {
 });
 
 describe('tablas del backup', () => {
-  it('cubre todas las tablas del esquema, una sola vez', async () => {
+  // Toda tabla del esquema se exporta o está en la lista EXPLÍCITA de excluidas (hoy solo
+  // `login_cupos`, S-06 de docs/auditoria/seguridad-correcciones.md). Una tabla nueva que no esté en
+  // ninguna de las dos hace fallar esta prueba.
+  it('cubre todas las tablas del esquema, una sola vez, salvo las excluidas a propósito', async () => {
     const { results } = await env.DB.prepare(
       `SELECT name FROM sqlite_master
        WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%'
@@ -71,7 +74,9 @@ describe('tablas del backup', () => {
     ).all<{ name: string }>();
     const nombres = TABLAS_BACKUP.map((t) => t.nombre);
     expect(new Set(nombres).size).toBe(nombres.length);
-    expect([...nombres].sort()).toEqual(results.map((r) => r.name));
+    expect(nombres.filter((n) => TABLAS_EXCLUIDAS_BACKUP.includes(n))).toEqual([]);
+    expect([...TABLAS_EXCLUIDAS_BACKUP]).toEqual(['login_cupos']);
+    expect([...nombres, ...TABLAS_EXCLUIDAS_BACKUP].sort()).toEqual(results.map((r) => r.name));
   });
 
   it('pagina por la clave primaria exacta de cada tabla', async () => {
@@ -113,7 +118,6 @@ describe('tablas del backup', () => {
       'order_planned_materials',
       'order_supervisors',
       'refresh_tokens',
-      'login_cupos',
       'devices',
       'settings',
       'production_orders',

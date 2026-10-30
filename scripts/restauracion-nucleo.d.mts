@@ -20,6 +20,7 @@ export const MAX_BYTES_SENTENCIA: number;
 export const MAX_FILAS_SENTENCIA: number;
 export const MARGEN_NO_APLICADAS_MS: number;
 export const INCOMPLETAS_ADMITIDAS: string[];
+export const NO_EXPORTADAS: string[];
 export const TABLAS: Record<string, DefinicionTabla>;
 export const ORDEN_IMPORTACION: string[];
 export const TABLAS_AUDITADAS: string[];

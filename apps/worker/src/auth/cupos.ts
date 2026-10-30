@@ -216,8 +216,47 @@ function auditoriaBloqueo(
 }
 
 /**
- * Reserva en el cupo del dispositivo conocido (dos sentencias): upsert condicional con RETURNING y
- * su auditoría si esta reserva lo bloqueó. Devuelve null si el cupo está bloqueado.
+ * Incremento de `g` ligado a una reserva: solo si la fila `origenReserva` quedó con ESTA reserva, y
+ * solo si `g` no tiene un bloqueo vigente (el WHERE del upsert). Nunca condiciona la reserva previa:
+ * un `g` bloqueado simplemente no cambia.
+ */
+function sentenciaIncrementoGlobal(
+  db: D1Database,
+  userId: string,
+  origenReserva: string,
+  reservaId: string,
+  t: Tiempos,
+): D1PreparedStatement {
+  return db
+    .prepare(
+      `INSERT INTO login_cupos (${COLUMNAS_CUPO})
+       SELECT ?1, ?8, 1, ?3, CASE WHEN 1 >= ?5 THEN ?6 ELSE NULL END, ?7, ?3, ?3
+       WHERE EXISTS (SELECT 1 FROM login_cupos
+         WHERE user_id = ?1 AND origen = ?2 AND reserva_id = ?7)
+       ${AL_CONFLICTO}`,
+    )
+    .bind(
+      userId,
+      origenReserva,
+      t.ahora,
+      t.limiteVentana,
+      MAX_INTENTOS_LOGIN_GLOBAL,
+      t.hasta,
+      reservaId,
+      ORIGEN_GLOBAL,
+    );
+}
+
+/**
+ * Reserva en el cupo del dispositivo conocido (cuatro sentencias en un batch):
+ * 1. upsert condicional de la fila `d:` con RETURNING (solo si no tiene un bloqueo vigente; `g` NO
+ *    la condiciona: propiedad (a) de la spec §5);
+ * 2. S-02: el fallo reservado también cuenta en `g`, si `g` no está bloqueado. Así el total de
+ *    adivinanzas por cuenta y ventana queda acotado (20 en `g`, más 5 por cada entrada válida de
+ *    la cookie mientras `g` está bloqueado), y los fallos del dispositivo adelantan el bloqueo de
+ *    los orígenes desconocidos;
+ * 3. y 4. auditorías de los bloqueos (dispositivo y global) que haya fijado esta reserva.
+ * Devuelve null si el cupo del dispositivo está bloqueado.
  */
 export async function reservarDispositivo(
   db: D1Database,
@@ -235,6 +274,7 @@ export async function reservarDispositivo(
          RETURNING fallos`,
       )
       .bind(userId, origen, t.ahora, t.limiteVentana, MAX_INTENTOS_LOGIN, t.hasta, reservaId),
+    sentenciaIncrementoGlobal(db, userId, origen, reservaId, t),
     auditoriaBloqueo(
       db,
       'dispositivo',
@@ -242,6 +282,14 @@ export async function reservarDispositivo(
       MAX_INTENTOS_LOGIN,
       t,
       bloqueadaPorReserva(userId, origen, reservaId),
+    ),
+    auditoriaBloqueo(
+      db,
+      'global',
+      userId,
+      MAX_INTENTOS_LOGIN_GLOBAL,
+      t,
+      bloqueadaPorReserva(userId, ORIGEN_GLOBAL, reservaId),
     ),
   ]);
   if ((upsert?.results.length ?? 0) !== 1) {
@@ -255,7 +303,9 @@ export async function reservarDispositivo(
  * 1. upsert de la fila `ip:` solo si la IP Y `g` tienen cupo (`INSERT … SELECT … WHERE`: el WHERE
  *    en el SELECT es obligatorio en SQLite para que `ON CONFLICT` se lea como upsert);
  * 2. incremento de `g` solo si la fila `ip:` quedó con esta reserva;
- * 3. y 4. auditorías de los bloqueos que haya fijado esta reserva.
+ * 3. y 4. auditorías de los bloqueos que haya fijado esta reserva (spec §5 (d): todo bloqueo se
+ *    audita). Volumen acotado por `g`: como máximo 4 bloqueos `origen` y 1 `global` por cuenta y
+ *    ventana de 15 min (S-01, riesgo residual aceptado).
  * Se reservan los dos cupos o ninguno: una IP bloqueada no consume `g`, y sin cupo global no se
  * crean filas de IP. Devuelve null si no hay reserva.
  */
@@ -287,24 +337,7 @@ export async function reservarOrigenDesconocido(
         reservaId,
         ORIGEN_GLOBAL,
       ),
-    db
-      .prepare(
-        `INSERT INTO login_cupos (${COLUMNAS_CUPO})
-         SELECT ?1, ?8, 1, ?3, CASE WHEN 1 >= ?5 THEN ?6 ELSE NULL END, ?7, ?3, ?3
-         WHERE EXISTS (SELECT 1 FROM login_cupos
-           WHERE user_id = ?1 AND origen = ?2 AND reserva_id = ?7)
-         ${AL_CONFLICTO}`,
-      )
-      .bind(
-        userId,
-        origen,
-        t.ahora,
-        t.limiteVentana,
-        MAX_INTENTOS_LOGIN_GLOBAL,
-        t.hasta,
-        reservaId,
-        ORIGEN_GLOBAL,
-      ),
+    sentenciaIncrementoGlobal(db, userId, origen, reservaId, t),
     auditoriaBloqueo(
       db,
       'origen',
@@ -368,7 +401,7 @@ function auditoriaDesbloqueo(
  * auditoría referencia):
  * - reinicia SOLO el cupo del origen usado (`d:` o `ip:`) y, si estaba bloqueado (la reserva de
  *   este mismo login lo bloqueó al ser el 5.º intento), audita el desbloqueo antes del UPDATE;
- * - el global `g` NO se reinicia (si no, cada login legítimo le regalaría al atacante otros 20
+ * - el global `g` (al que suman las reservas de ambos tipos, S-02) NO se reinicia (si no, cada login legítimo le regalaría al atacante otros 20
  *   intentos). Solo se descuenta el +1 de ESTA reserva, que no fue un fallo, si `g` no está
  *   bloqueado; un `g` bloqueado se deja tal cual (vence con su ventana). No se compara la
  *   ventana: con reservas concurrentes, la que abrió la ventana puede tener una hora posterior a
@@ -394,16 +427,15 @@ export function sentenciasReinicioTrasLogin(
       )
       .bind(ahora, reserva.userId, reserva.origen),
   ];
-  if (reserva.tipo === 'origen') {
-    sentencias.push(
-      db
-        .prepare(
-          `UPDATE login_cupos SET fallos = fallos - 1, updated_at = ?
-           WHERE user_id = ? AND origen = ? AND fallos > 0 AND bloqueado_hasta IS NULL`,
-        )
-        .bind(ahora, reserva.userId, ORIGEN_GLOBAL),
-    );
-  }
+  // S-02: las reservas del dispositivo conocido también suman en `g`; se descuentan igual.
+  sentencias.push(
+    db
+      .prepare(
+        `UPDATE login_cupos SET fallos = fallos - 1, updated_at = ?
+         WHERE user_id = ? AND origen = ? AND fallos > 0 AND bloqueado_hasta IS NULL`,
+      )
+      .bind(ahora, reserva.userId, ORIGEN_GLOBAL),
+  );
   return sentencias;
 }
 

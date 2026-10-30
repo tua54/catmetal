@@ -11,7 +11,8 @@
 // - `users` y `devices` (auditoría parcial) conservan su valor exportado, el más reciente;
 // - `sync_mutations` aplicadas solo se conservan si su efecto existe; las no aplicadas, solo si se
 //   procesaron más de 15 min antes del corte (las demás van al informe);
-// - `login_cupos` se importa tal cual; `refresh_tokens` NO se restaura (todos inician sesión otra vez);
+// - `login_cupos` no viaja al backup (S-06, ADR 0018): la base restaurada empieza sin cupos; si un
+//   manifest anterior la trae, se ignora. `refresh_tokens` NO se restaura (todos inician sesión otra vez);
 // - `audit_log` se importa hasta C.
 //
 // Entrega el SQL de restauración sentencia por sentencia (con guardia, borrado y recreación de los
@@ -25,7 +26,12 @@ export const MAX_FILAS_SENTENCIA = 100;
 /** Margen entre la hora del corte y la de proceso de una mutación no aplicada (ADR 0021, 4.3). */
 export const MARGEN_NO_APLICADAS_MS = 15 * 60_000;
 /** Tablas que pueden faltar en un backup `parcial` sin impedir la restauración. */
-export const INCOMPLETAS_ADMITIDAS = ['sync_mutations', 'login_cupos', 'refresh_tokens'];
+export const INCOMPLETAS_ADMITIDAS = ['sync_mutations', 'refresh_tokens'];
+/**
+ * Tablas del esquema que el backup NO exporta (`TABLAS_EXCLUIDAS_BACKUP` de
+ * apps/worker/src/cron/tablas.ts). Nunca se importan: quedan vacías, y la verificación V9 lo exige.
+ */
+export const NO_EXPORTADAS = ['login_cupos'];
 
 const M = ['created_at', 'updated_at'];
 
@@ -81,20 +87,6 @@ export const TABLAS = {
     clase: 'ultimo_valor',
     pk: ['id'],
     columnas: ['id', 'user_id', 'instalacion_id', 'nombre', 'user_agent', 'ultimo_sync_at', ...M],
-    booleanas: [],
-  },
-  login_cupos: {
-    clase: 'operativa',
-    pk: ['user_id', 'origen'],
-    columnas: [
-      'user_id',
-      'origen',
-      'fallos',
-      'ventana_inicio',
-      'bloqueado_hasta',
-      'reserva_id',
-      ...M,
-    ],
     booleanas: [],
   },
   refresh_tokens: {
@@ -244,7 +236,6 @@ export const ORDEN_IMPORTACION = [
   'production_orders',
   'settings',
   'devices',
-  'login_cupos',
   'order_supervisors',
   'order_planned_materials',
   'consumptions',
@@ -646,7 +637,8 @@ export async function restaurarEnStreaming(entrada) {
     refresh_tokens_omitidos: completa('refresh_tokens')
       ? Number(entradas.get('refresh_tokens').filas)
       : 0,
-    login_cupos_omitida: !completa('login_cupos'),
+    // S-06: siempre; un manifest anterior que la traiga se ignora.
+    login_cupos_omitida: true,
     cambios_tras_el_corte: [],
     rechazos_tras_el_corte: [],
     revisar_seguridad: [],
@@ -840,21 +832,7 @@ export async function restaurarEnStreaming(entrada) {
     );
   }
 
-  // 4. login_cupos: tal cual, salvo las filas de usuarios que no se restauran.
-  {
-    const cuenta = contar('login_cupos');
-    const insertador = new Insertador('login_cupos', escribir);
-    for await (const fila of filasDe('login_cupos')) {
-      cuenta.exportadas += 1;
-      if (usuarios.has(fila.user_id)) {
-        cuenta.importadas += 1;
-        await insertador.agregar(fila);
-      } else {
-        cuenta.excluidas += 1;
-      }
-    }
-    await insertador.cerrar();
-  }
+  // 4. login_cupos: no está en el backup (S-06). Queda vacía.
 
   // 5. sync_mutations: aplicadas solo con su efecto; no aplicadas solo si son anteriores al corte.
   {
@@ -1018,7 +996,7 @@ function valoresEsperados(triggers) {
 }
 
 /** Tablas que deben estar vacías en una base recién migrada (todas salvo settings y audit_log). */
-const VACIAS_EN_BASE_NUEVA = [...ORDEN_IMPORTACION, 'refresh_tokens'].filter(
+const VACIAS_EN_BASE_NUEVA = [...ORDEN_IMPORTACION, 'refresh_tokens', ...NO_EXPORTADAS].filter(
   (t) => t !== 'settings' && t !== 'audit_log',
 );
 /** Claves que siembra la migración 0002 (en orden alfabético). */
@@ -1160,8 +1138,11 @@ SELECT 'sobra', m.name FROM sqlite_master AS m
 UNION ALL
 SELECT 'guardia', name FROM sqlite_master WHERE name = '_restauracion_guardia'`,
   });
-  for (const tabla of [...ORDEN_IMPORTACION, 'refresh_tokens']) {
-    const esperadas = tabla === 'refresh_tokens' ? 0 : informe.tablas[tabla].importadas;
+  for (const tabla of [...ORDEN_IMPORTACION, 'refresh_tokens', ...NO_EXPORTADAS]) {
+    const esperadas =
+      tabla === 'refresh_tokens' || NO_EXPORTADAS.includes(tabla)
+        ? 0
+        : informe.tablas[tabla].importadas;
     consultas.push({
       nombre: `V9_conteo_${tabla}`,
       sql: `SELECT COUNT(*) AS filas, ${String(esperadas)} AS esperadas FROM ${tabla}
