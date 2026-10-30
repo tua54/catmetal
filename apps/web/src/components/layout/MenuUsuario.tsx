@@ -9,6 +9,14 @@ import { nombreBotonCuenta } from '../ui/clases';
 interface Pendientes {
   mutaciones: number;
   evidencias: number;
+  /** Fotos que el servidor no aceptó (B9): se conservan, pero no se envían solas. */
+  fotos_bloqueadas: number;
+}
+
+function textoBloqueadas(fotos: number): string {
+  return fotos === 1
+    ? '1 foto que el servidor no aceptó'
+    : `${fotos} fotos que el servidor no aceptó`;
 }
 
 function textoPendientes({ mutaciones, evidencias }: Pendientes): string {
@@ -73,11 +81,13 @@ export function MenuUsuario() {
       return;
     }
     try {
-      const { mutaciones, evidencias } = await puedeBorrarDatosDeUsuario(usuario.id);
-      setConfirmando({ mutaciones, evidencias });
+      const { mutaciones, evidencias, fotos_bloqueadas } = await puedeBorrarDatosDeUsuario(
+        usuario.id,
+      );
+      setConfirmando({ mutaciones, evidencias, fotos_bloqueadas });
     } catch {
       // Si no se pudo contar, se asume lo más prudente: que hay pendientes (no se borra nada).
-      setConfirmando({ mutaciones: 1, evidencias: 0 });
+      setConfirmando({ mutaciones: 1, evidencias: 0, fotos_bloqueadas: 0 });
     }
   }
 
@@ -86,13 +96,18 @@ export function MenuUsuario() {
     try {
       const resultado = await cerrarSesion();
       const pendientes = textoPendientes(resultado.pendientes);
-      mostrar(
+      const bloqueadas = resultado.pendientes.fotos_bloqueadas;
+      const mensajes = [
         pendientes
-          ? {
-              tono: 'advertencia',
-              titulo: 'Sesión cerrada',
-              mensaje: `Sus ${pendientes} sin sincronizar siguen guardados en esta tablet. Se enviarán cuando vuelva a iniciar sesión con conexión.`,
-            }
+          ? `Sus ${pendientes} sin sincronizar siguen guardados en esta tablet. Se enviarán cuando vuelva a iniciar sesión con conexión.`
+          : null,
+        bloqueadas > 0
+          ? `${bloqueadas === 1 ? 'La foto' : `Las ${bloqueadas} fotos`} que el servidor no aceptó siguen guardadas en esta tablet.`
+          : null,
+      ].filter((m): m is string => m !== null);
+      mostrar(
+        mensajes.length > 0
+          ? { tono: 'advertencia', titulo: 'Sesión cerrada', mensaje: mensajes.join(' ') }
           : { tono: 'exito', titulo: 'Sesión cerrada' },
       );
       void navegar(RUTAS.login, { replace: true });
@@ -108,7 +123,10 @@ export function MenuUsuario() {
     }
   }
 
-  const conPendientes = confirmando !== null && confirmando.mutaciones + confirmando.evidencias > 0;
+  const porEnviar = confirmando !== null && confirmando.mutaciones + confirmando.evidencias > 0;
+  // B9: una foto que el servidor no aceptó tampoco se borra al cerrar sesión.
+  const conBloqueadas = confirmando !== null && confirmando.fotos_bloqueadas > 0;
+  const conPendientes = porEnviar || conBloqueadas;
 
   return (
     <div ref={refContenedor} className="relative">
@@ -165,13 +183,24 @@ export function MenuUsuario() {
         descripcion={
           conPendientes ? (
             <>
-              <p className="font-semibold text-warning-800">
-                Tiene {textoPendientes(confirmando)} sin sincronizar.
-              </p>
-              <p className="mt-2">
-                No se borran: se conservan en esta tablet y se enviarán cuando usted vuelva a
-                iniciar sesión con conexión. Nadie más puede enviarlos con su sesión.
-              </p>
+              {porEnviar && (
+                <p className="font-semibold text-warning-800">
+                  Tiene {textoPendientes(confirmando)} sin sincronizar.
+                </p>
+              )}
+              {conBloqueadas && (
+                <p className="font-semibold text-warning-800">
+                  Tiene {textoBloqueadas(confirmando.fotos_bloqueadas)}.
+                </p>
+              )}
+              {porEnviar ? (
+                <p className="mt-2">
+                  No se borran: se conservan en esta tablet y se enviarán cuando usted vuelva a
+                  iniciar sesión con conexión. Nadie más puede enviarlos con su sesión.
+                </p>
+              ) : (
+                <p className="mt-2">No se borran: se conservan en esta tablet.</p>
+              )}
             </>
           ) : (
             <p>

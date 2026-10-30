@@ -1046,6 +1046,15 @@ export async function contarEvidenciasPendientes(userId: string): Promise<number
   return db.evidencias.where('[user_id+estado_subida]').equals([userId, 'pendiente']).count();
 }
 
+/**
+ * Fotos `bloqueada` del usuario (B9): el servidor no las aceptó (413/415/400 o `EVIDENCIA_YA_SUBIDA`
+ * con otro sha), así que nunca llegaron allí y la copia local es la única. Ya no se reintentan, pero
+ * cuentan como pendientes para no borrarlas.
+ */
+export async function contarEvidenciasBloqueadas(userId: string): Promise<number> {
+  return db.evidencias.where('[user_id+estado_subida]').equals([userId, 'bloqueada']).count();
+}
+
 export interface PendientesDeUsuario {
   user_id: string;
   /** Nombre del perfil cacheado, si existe. */
@@ -1119,15 +1128,27 @@ export async function purgarAplicadasAntiguas(
 export interface EstadoBorrado {
   puede: boolean;
   mutaciones: number;
+  /** Fotos por subir. */
   evidencias: number;
+  /** Fotos que el servidor no aceptó y nunca llegaron allí (B9): tampoco se borran. */
+  fotos_bloqueadas: number;
 }
 
-/** Cerrar sesión solo borra los datos del usuario si no tiene pendientes (§5). */
+/**
+ * Cerrar sesión (y la retención automática) solo borra los datos del usuario si no tiene pendientes
+ * (§5): mutaciones en cola, fotos por subir ni fotos bloqueadas que nunca llegaron al servidor (B9).
+ */
 export async function puedeBorrarDatosDeUsuario(userId: string): Promise<EstadoBorrado> {
   return db.transaction('r', [db.outbox, db.evidencias], async () => {
     const mutaciones = await contarPendientes(userId);
     const evidencias = await contarEvidenciasPendientes(userId);
-    return { puede: mutaciones === 0 && evidencias === 0, mutaciones, evidencias };
+    const fotosBloqueadas = await contarEvidenciasBloqueadas(userId);
+    return {
+      puede: mutaciones === 0 && evidencias === 0 && fotosBloqueadas === 0,
+      mutaciones,
+      evidencias,
+      fotos_bloqueadas: fotosBloqueadas,
+    };
   });
 }
 

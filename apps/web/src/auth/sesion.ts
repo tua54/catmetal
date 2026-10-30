@@ -114,8 +114,11 @@ export interface ResultadoCierre {
   servidor_notificado: boolean;
   /** Se borraron los datos locales del usuario (solo si no tenía pendientes). */
   datos_borrados: boolean;
-  /** Pendientes que impidieron borrar: la UI debe advertir al usuario. */
-  pendientes: { mutaciones: number; evidencias: number };
+  /**
+   * Pendientes que impidieron borrar: la UI debe advertir al usuario. `fotos_bloqueadas` son
+   * fotos que el servidor no aceptó y nunca llegaron allí (B9): se conservan aunque no se reenvíen solas.
+   */
+  pendientes: { mutaciones: number; evidencias: number; fotos_bloqueadas: number };
 }
 
 export interface AvisoPendientes {
@@ -883,7 +886,7 @@ export class GestorSesion {
       return {
         servidor_notificado: false,
         datos_borrados: false,
-        pendientes: { mutaciones: 0, evidencias: 0 },
+        pendientes: { mutaciones: 0, evidencias: 0, fotos_bloqueadas: 0 },
       };
     }
     // Las demás pestañas descartan su sesión YA (no esperan la revocación ni el candado de sync).
@@ -927,7 +930,11 @@ export class GestorSesion {
     return {
       servidor_notificado: notificado,
       datos_borrados: borrados,
-      pendientes: { mutaciones: pendientes.mutaciones, evidencias: pendientes.evidencias },
+      pendientes: {
+        mutaciones: pendientes.mutaciones,
+        evidencias: pendientes.evidencias,
+        fotos_bloqueadas: pendientes.fotos_bloqueadas,
+      },
     };
   }
 

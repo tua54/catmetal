@@ -1018,6 +1018,7 @@ describe('retención y cierre de sesión', () => {
       puede: false,
       mutaciones: 1,
       evidencias: 0,
+      fotos_bloqueadas: 0,
     });
     await expect(borrarDatosDeUsuario(A)).rejects.toMatchObject({ code: 'PENDIENTES_LOCALES' });
     expect(await db.consumos.get([A, rechazado.id])).toBeDefined();
@@ -1071,6 +1072,7 @@ describe('retención y cierre de sesión', () => {
       puede: false,
       mutaciones: 0,
       evidencias: 1,
+      fotos_bloqueadas: 0,
     });
     expect(r.consumo_id).toBeDefined();
   });

@@ -400,7 +400,7 @@ describe('cerrarSesion', () => {
     expect(r).toEqual({
       servidor_notificado: true,
       datos_borrados: true,
-      pendientes: { mutaciones: 0, evidencias: 0 },
+      pendientes: { mutaciones: 0, evidencias: 0, fotos_bloqueadas: 0 },
     });
     const [logout] = servidor.peticionesA('/api/v1/auth/logout');
     expect(logout!.credenciales).toBe('omit');
@@ -451,7 +451,7 @@ describe('cerrarSesion', () => {
     expect(await gestor().cerrarSesion()).toEqual({
       servidor_notificado: false,
       datos_borrados: false,
-      pendientes: { mutaciones: 0, evidencias: 0 },
+      pendientes: { mutaciones: 0, evidencias: 0, fotos_bloqueadas: 0 },
     });
   });
 });

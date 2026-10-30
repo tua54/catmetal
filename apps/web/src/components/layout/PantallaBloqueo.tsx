@@ -71,7 +71,8 @@ function ContenidoBloqueo() {
     setSaliendo(true);
     try {
       const { pendientes } = await cerrarSesion();
-      const total = pendientes.mutaciones + pendientes.evidencias;
+      // B9: las fotos que el servidor no aceptó también se conservan (y se avisa).
+      const total = pendientes.mutaciones + pendientes.evidencias + pendientes.fotos_bloqueadas;
       mostrar(
         total > 0
           ? {
