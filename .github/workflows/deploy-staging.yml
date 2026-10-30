@@ -38,6 +38,8 @@ jobs:
   desplegar:
     name: Desplegar a staging
     needs: calidad
+    # B8: además de la política de ramas del environment, el job solo corre desde main.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: staging
     env:

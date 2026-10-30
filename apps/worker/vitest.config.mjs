@@ -38,6 +38,15 @@ function archivosFuente(directorio) {
   });
 }
 
+// Workflows de GitHub Actions para la prueba estática de B8 (despliegue solo desde main).
+const DIRECTORIO_WORKFLOWS = '../../.github/workflows';
+const workflows = readdirSync(DIRECTORIO_WORKFLOWS)
+  .filter((nombre) => extname(nombre) === '.yml')
+  .map((nombre) => ({
+    ruta: `.github/workflows/${nombre}`,
+    contenido: readFileSync(join(DIRECTORIO_WORKFLOWS, nombre), 'utf8'),
+  }));
+
 const archivosRevisados = DIRECTORIOS_REVISADOS.flatMap(archivosFuente).map((ruta) => ({
   ruta: relative('../..', ruta).replaceAll('\\', '/'),
   contenido: readFileSync(ruta, 'utf8'),
@@ -55,6 +64,7 @@ export default defineConfig({
           ...SECRETOS_DE_PRUEBA,
           TEST_MIGRATIONS: migraciones,
           TEST_ARCHIVOS_FUENTE: archivosRevisados,
+          TEST_WORKFLOWS: workflows,
         },
       },
     }),
