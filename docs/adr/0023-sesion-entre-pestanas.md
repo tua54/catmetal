@@ -40,7 +40,7 @@ Se adopta la opción 2.
 
 - Las pestañas convergen en menos de 2 s, en la práctica en el mismo tick del navegador.
 - Una pestaña bloqueada pide la contraseña aunque la otra siga activa. Para tablets compartidas es el comportamiento conservador correcto.
-- En navegadores sin `BroadcastChannel` ni `storage` entre pestañas, sigue valiendo la revalidación del motor.
+- En navegadores sin `BroadcastChannel` ni `storage` entre pestañas, la revalidación del motor no detecta que **otra** pestaña cerró sesión, porque compara contra la memoria de su propia pestaña. Lo que impide enviar con la identidad anterior es el servidor: `autenticar` exige una familia vigente y el logout la revoca, el login de otro usuario en la misma instalación revoca las familias ajenas (F4-06) y `AUTOR_NO_COINCIDE` rechaza un lote de otro autor. Corregido tras la revisión de seguridad (S-10).
 
 ## Cómo revertir
 

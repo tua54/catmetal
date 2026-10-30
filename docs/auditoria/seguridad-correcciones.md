@@ -87,7 +87,7 @@ Ningún hallazgo bloquea el cierre de P1.
 
 ## Pendiente
 
-- **M7** (ADR 0023): sin revisar porque estaba en curso. De esa revisión depende también una parte de S-03. Ver la sección de seguimiento abajo.
+- **M7** (ADR 0023): revisado en el seguimiento de abajo.
 
 ## Fuera de alcance
 
@@ -95,6 +95,44 @@ Ningún hallazgo bloquea el cierre de P1.
 - La implementación del script de restauración de M4 (solo se revisó el diseño).
 - `pnpm audit`, CSP y cabeceras, que no cambiaron.
 - El binding de Rate Limiting en un entorno real.
+
+## Seguimiento: M7 (commit `ea2b5df`)
+
+Revisión de solo lectura del mismo revisor, sobre los archivos del árbol de trabajo. M7 está bien implementado: no hay secretos en los mensajes, no se puede escalar privilegios por el canal y ninguna mutación sale con la identidad anterior. Resultado: 0 críticos, 0 altos, 0 medios, 1 bajo, 3 informativos. **La parte "sin verificar" de S-03 queda resuelta: se confirma (S-09).**
+
+### S-09 · Bajo · M7 / S-03 — Tras una revocación del servidor, la pestaña sigue mostrando los datos con el perfil y los permisos anteriores
+
+- **Dónde:** `apps/web/src/auth/sesion.ts:400-405` (`#perderSesionDelServidor`), `apps/web/src/auth/cliente-api.ts:227-229` y `apps/web/src/components/layout/AvisosSesion.tsx:40-53`.
+- **Qué pasa:** ante `SESION_REVOCADA`, la pestaña olvida el token y publica `modo: 'offline'` con `requiere_contrasena: true`. Conserva `usuario` y `permisos` anteriores, y la UI solo muestra un aviso: la partición sigue visible. Las revocaciones del servidor no se difunden por el canal.
+- **Escenario:** a un jefe le bajan el rol o lo desactivan, y su pestaña abierta en la tablet compartida sigue mostrando pantallas de jefe y consumos ajenos.
+- **No hay riesgo en el servidor:** sigue rechazando toda lectura y toda mutación.
+- **Sin verificar:** si un usuario desactivado puede volver a entrar sin conexión con su verificador local (ADR 0017).
+- **Recomendación:** ante una revocación de una petición autenticada, bloquear la app con desbloqueo **en línea** y emitir `bloqueo` por el canal. Si el perfil nuevo pierde permisos, purgar lo ajeno sin pendientes (S-03).
+
+### S-10 · Info · M7 — La ADR 0023 atribuía al motor una defensa que da el servidor
+
+- **Dónde:** `docs/adr/0023-sesion-entre-pestanas.md:43`.
+- **Descripción:** sin `BroadcastChannel` ni `storage`, la revalidación del motor no detecta un logout de **otra** pestaña. Lo que lo impide es el servidor: familia vigente, F4-06 y `AUTOR_NO_COINCIDE`.
+- **Recomendación:** corregir el texto.
+
+### S-11 · Info · M7 — Un mensaje falsificado desde el mismo origen solo puede cerrar o bloquear sesiones
+
+- **Dónde:** `apps/web/src/auth/sesion.ts:329-358`.
+- **Descripción:** el manejador nunca adopta una identidad ni un dato del mensaje. Como mucho es una denegación de servicio local, y se acepta.
+
+### S-12 · Info · B5 — El cliente todavía no enviaba `X-Version-Cliente`
+
+- **Riesgo:** operativo. Si se sube `VERSION_MINIMA_CLIENTE` a 2 antes de que el cliente mande la cabecera, todas las tablets reciben 426.
+- **Recomendación:** dejar la advertencia en `docs/despliegue.md` hasta cerrar B5.
+
+### Verificaciones de M7 sin hallazgos
+
+- **Mensajes:** `{v, tipo, user_id, origen, at}`, sin tokens, contraseñas ni perfil (lo afirma una prueba). La forma se valida, y cada pestaña ignora los suyos.
+- **Otros orígenes:** no pueden enviar mensajes; `BroadcastChannel` y `localStorage` están acotados al origen.
+- **Emisión:** `logout` antes de esperar la revocación, `bloqueo` y `cambio-usuario` (en línea y sin conexión). No hay reenvío, así que no hay bucles.
+- **Recepción:** descarta el token, aborta la sync en vuelo y bloquea con `bloqueo`. No borra datos.
+- **Motor:** `#verificarAntesDeEnviar` corre después de cada `await` y justo antes del `fetch`, sin `await` en medio. Comprueba que el lote sea del usuario de la sesión, y `devolverAPendiente` deja el lote pendiente si no salió nada (`motor.ts:336-396` y `:559-604`).
+- **`X-Hora-Dispositivo`:** solo una hora ISO, solo en las escrituras, y sin uso para autorizar.
 
 ## Estado de los hallazgos (orquestador)
 

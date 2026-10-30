@@ -120,6 +120,7 @@ npx wrangler deploy --env staging
   - Token mínimo y con caducidad: permisos de cuenta Workers Scripts, D1, Workers R2 Storage y Workers KV Storage (edición), Account Settings (lectura); de zona, Workers Routes solo si usa `routes`.
   - GitHub: Settings → Environments → `staging` con revisores obligatorios, sin auto-aprobación y política de ramas de despliegue (solo `main`); secretos `CLOUDFLARE_API_TOKEN` y `CLOUDFLARE_ACCOUNT_ID` solo en ese environment.
 - **Producción** no tiene workflow automático: se despliega a mano con `npx wrangler deploy --env production` tras validar staging.
+- **Versión mínima del cliente (B5, ADR 0026).** `VERSION_MINIMA_CLIENTE` (`vars` de `wrangler.jsonc`) vale `"1"` y no bloquea a nadie. **No la suba a 2 o más** hasta confirmar que todas las tablets corren una versión que manda `X-Version-Cliente` (la v1.1 completa). Si no, todas reciben 426 y dejan de sincronizar; los pendientes se conservan, pero no salen (S-12). Un valor mal escrito vale 1 y no bloquea.
 - **Primer despliegue de la v1.1 sobre una base con sesiones (B1).** Las familias de refresh vencen ahora a los 30 días del login con contraseña, aunque se hayan rotado. Las familias que ya tengan más de 30 días piden la contraseña en su siguiente refresco, en un inicio de sesión masivo que ocurre una sola vez. El outbox de las tablets no se pierde: las mutaciones esperan a la nueva sesión. Conviene avisar a los supervisores antes de desplegar.
 
 ### Verificación después de desplegar
