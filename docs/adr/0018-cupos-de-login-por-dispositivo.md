@@ -132,6 +132,25 @@ Se adopta la opción 3.
 - El desbloqueo del admin audita un `login_cupos.desbloqueado` por cada tipo con bloqueo vigente.
 - Una IP que no se puede interpretar se usa tal cual, en minúsculas.
 
+## Enmienda (revisión de seguridad de las correcciones, `docs/auditoria/seguridad-correcciones.md`)
+
+**S-01: volumen de auditoría acotado y aceptado.** Se mantiene la regla de la spec §5 (d): todo bloqueo y desbloqueo se audita. La recomendación de auditar un solo bloqueo `origen` por ventana se descarta, porque la spec tiene precedencia sobre un hallazgo de severidad baja.
+- El volumen lo acota `g`: sin cupo global no hay reserva, ni fila de IP, ni auditoría.
+- Por cuenta y ventana de 15 min hay como máximo 4 bloqueos `origen` y 1 `global` (≤ 5 filas, unas 480 al día por cuenta), más 1 por cada dispositivo conocido cuya cookie se use para fallar. Las cuentas inexistentes no generan filas.
+- Se acepta como riesgo residual. Queda como mejora operativa avisar si `audit_log` crece más de N filas al día (`docs/pendientes-humanos.md`).
+
+**S-02: los fallos del dispositivo conocido cuentan en `g`.** La reserva `d:` suma también 1 en `g`, en el mismo batch y ligada a su `reserva_id`, si `g` no está bloqueado. Si eso agota `g`, se audita el bloqueo `global`. `g` **nunca** condiciona la reserva `d:`: con `g` agotado por terceros, el dispositivo conocido sigue entrando, así que se mantiene la propiedad (a).
+- El login correcto, desde cualquier tipo de origen, descuenta su propia unidad de `g` y nunca lo reinicia.
+- Cota por cuenta y ventana: como máximo 20 fallos en `g`, más 5 por cada entrada válida de `mp_dispositivo` mientras `g` está bloqueado.
+- Riesgo residual: las entradas no se invalidan al cambiar la contraseña. Queda como evolución firmar un dato que cambie con la contraseña, o la opción 4.
+
+**S-05: separación de claves.** Las claves de la firma de `mp_dispositivo` y del HMAC de la IP se derivan con HKDF-SHA-256 (RFC 5869) a partir de `REFRESH_SECRET`, con sal vacía e `info` = `mp-dispositivo-v1` o `mp-ip-v1`. Ya no comparten primitivo ni clave con `hashRefreshToken`. Ningún entorno tenía entradas emitidas.
+
+**S-06: `login_cupos` fuera del backup.** `origen = ip:<hmac>` es un dato personal seudonimizado (Ley 1581).
+- La tabla no se exporta a R2: está en `TABLAS_EXCLUIDAS_BACKUP` (`cron/tablas.ts`), y la prueba de cobertura exige que toda tabla esté exportada o en esa lista. En D1 vive como mucho unas 24 h.
+- La restauración la deja vacía (`NO_EXPORTADAS`, comprobado por V9 y por la guardia), y acepta un manifest anterior que la traiga sin importar sus filas.
+- Esto enmienda la ADR 0021: `login_cupos` deja de ser una tabla operativa del backup.
+
 ## Cómo revertir
 
 Volver al bloqueo por cuenta de la ADR 0008, punto 6: restaurar `reservarIntento` sobre `users` y dejar de emitir y leer `mp_dispositivo`. La tabla `login_cupos` puede quedar sin uso. Revertir **no** es recomendable porque reabre el abuso M1.

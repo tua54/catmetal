@@ -3,6 +3,7 @@
 - Estado: aceptado
 - Fecha: 2026-10-30
 - Fase: correcciones-v1.1 (ítem M4)
+- Enmendado por: la enmienda S-06 de la ADR 0018 (revisión de seguridad de las correcciones). `login_cupos` ya no se exporta ni se restaura: donde esta ADR la nombra como tabla del backup o como operativa incompleta admitida, rige la enmienda.
 - Enmienda:
   - ADR 0014: orden de exportación ("hijos antes que padres" deja de aplicar a `audit_log`) y procedimiento de restauración de H9.
   - ADR 0016, punto 4: significado de `seq_final`.

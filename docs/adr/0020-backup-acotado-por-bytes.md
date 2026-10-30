@@ -3,6 +3,7 @@
 - Estado: aceptado
 - Fecha: 2026-10-30
 - Fase: correcciones-v1.1 (ítem M3)
+- Enmendado por: la enmienda S-06 de la ADR 0018 (revisión de seguridad de las correcciones). `login_cupos` ya no se exporta ni se restaura: donde esta ADR la nombra como tabla del backup o como operativa incompleta admitida, rige la enmienda.
 - Enmienda:
   - ADR 0014: la paginación de 500 filas y la regla "manifest solo si el backup está completo".
   - ADR 0016, punto 4: la página de 2000 filas medida con filas de ~6 KB.
