@@ -70,4 +70,15 @@ Fuentes externas citadas por el revisor: workers-sdk #6088 y #11087 (trackers), 
 
 ## Estado de los hallazgos (orquestador)
 
-Se completa al corregir; ver la sección siguiente.
+| Id | Estado |
+|---|---|
+| R-01 | RESUELTO (b89f69f): restauración en streaming. Ensayo con 597 MiB: código 0, pico de RSS de 288 MiB. |
+| R-02 | RESUELTO (b89f69f): `verificacion.sql` aborta sola. Falta confirmar en staging el comportamiento de `--file` en remoto (pendiente humano). |
+| R-03 | RESUELTO (b89f69f): respaldo con `length(CAST AS BLOB)` y log `backup_no_restaurable`. Falta confirmar `octet_length` en staging. |
+| R-04 | RESUELTO (b89f69f). |
+| R-05 | RESUELTO (b89f69f). |
+| R-06 | DOCUMENTADO (`docs/despliegue.md` §9.2 paso 7). Verificación pendiente en staging. |
+| R-07 | DOCUMENTADO (`docs/despliegue.md` §9.2 y `docs/notas-plataforma.md`). |
+| R-08 | ACEPTADO (informativo): la API ya acotaba a 100. |
+| R-09 | ACEPTADO (informativo): tablas pequeñas. |
+| R-10 | RESUELTO (b89f69f): la restauración recorta `respuesta_json`. |
