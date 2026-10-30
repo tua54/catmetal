@@ -221,9 +221,9 @@ describe('validación del snapshot', () => {
       'xyz',
       aBase64Url(new TextEncoder().encode('no es json')),
       aBase64Url(new TextEncoder().encode('[1,2]')),
-      codificarPagina({ cursor: -1, entidad: 'materials', ultimo_id: 'a' }),
-      codificarPagina({ cursor: 1, entidad: 'audit_log', ultimo_id: 'a' }),
-      codificarPagina({ cursor: 1, entidad: 'materials', ultimo_id: "' OR 1=1 --" }),
+      codificarPagina({ cursor: -1, entidad: 'materials', ultimo_id: 'a', ...deJefe() }),
+      codificarPagina({ cursor: 1, entidad: 'audit_log', ultimo_id: 'a', ...deJefe() }),
+      codificarPagina({ cursor: 1, entidad: 'materials', ultimo_id: "' OR 1=1 --", ...deJefe() }),
     ];
     for (const pagina of malas) {
       await esperarError(
@@ -237,20 +237,33 @@ describe('validación del snapshot', () => {
     await esperarError(
       await snapshotDe(
         jefe.token,
-        `alcance=orden&order_id=${orden}&pagina=${codificarPagina({ cursor: 1, entidad: 'materials', ultimo_id: 'a' })}`,
+        `alcance=orden&order_id=${orden}&pagina=${codificarPagina({ cursor: 1, entidad: 'materials', ultimo_id: 'a', ...deJefe() })}`,
       ),
       400,
       'VALIDACION',
     );
   });
 
-  it('el token de página es base64url de { cursor, entidad, ultimo_id }', () => {
+  it('el token de página es base64url de { cursor, entidad, ultimo_id, user_id, rol }', () => {
     const token = codificarPagina({
       cursor: 42,
       entidad: 'order_supervisors',
       ultimo_id: `${uuidv7()}:${uuidv7()}`,
+      ...deJefe(),
     });
     expect(token).toMatch(/^[A-Za-z0-9_-]+$/);
-    expect(decodificarPagina(token)).toMatchObject({ cursor: 42, entidad: 'order_supervisors' });
+    expect(decodificarPagina(token)).toMatchObject({
+      cursor: 42,
+      entidad: 'order_supervisors',
+      ...deJefe(),
+    });
   });
 });
+
+/**
+ * Identidad del jefe para los tokens fabricados (A6, ADR 0029): así una página manipulada se
+ * rechaza por lo que se quiere probar (cursor, entidad, `ultimo_id`) y no por ser de otro usuario.
+ */
+function deJefe(): { user_id: string; rol: 'jefe' } {
+  return { user_id: jefe.usuario.id, rol: 'jefe' };
+}

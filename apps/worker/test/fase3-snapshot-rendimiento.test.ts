@@ -226,12 +226,19 @@ describe('compatibilidad del token de página', () => {
     );
   });
 
-  it('un token sin versión de otra entidad sigue valiendo (su significado no cambió)', async () => {
-    const r = await snapshotDe(
-      supervisor.token,
-      `alcance=inicial&pagina=${viejo({ cursor: 1, entidad: 'materials', ultimo_id: 'a' })}`,
-    );
-    expect(r.status, await r.clone().text()).toBe(200);
+  // A6 (ADR 0029): desde la versión 3 el token lleva `user_id` y `rol`; uno sin versión o de la
+  // versión 2 (sin identidad) ya no vale para ninguna entidad: el cliente reinicia el snapshot.
+  it('un token sin versión o de la versión 2 de otra entidad también se rechaza (A6)', async () => {
+    for (const token of [
+      viejo({ cursor: 1, entidad: 'materials', ultimo_id: 'a' }),
+      viejo({ version: 2, cursor: 1, entidad: 'materials', ultimo_id: 'a' }),
+    ]) {
+      await esperarError(
+        await snapshotDe(supervisor.token, `alcance=inicial&pagina=${token}`),
+        400,
+        'VALIDACION',
+      );
+    }
   });
 
   it('una versión desconocida se rechaza; la actual se acepta', async () => {
@@ -243,7 +250,13 @@ describe('compatibilidad del token de página', () => {
       400,
       'VALIDACION',
     );
-    const actual = codificarPagina({ cursor: 1, entidad: 'validations', ultimo_id: 'a' });
+    const actual = codificarPagina({
+      cursor: 1,
+      entidad: 'validations',
+      ultimo_id: 'a',
+      user_id: supervisor.usuario.id,
+      rol: 'supervisor',
+    });
     const r = await snapshotDe(supervisor.token, `alcance=inicial&pagina=${actual}`);
     expect(r.status).toBe(200);
   });

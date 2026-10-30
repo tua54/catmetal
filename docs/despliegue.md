@@ -127,6 +127,8 @@ npx wrangler deploy --env staging
 - **Producción** no tiene workflow automático: se despliega a mano con `npx wrangler deploy --env production` tras validar staging.
 - **Versión mínima del cliente (B5, ADR 0026).** `VERSION_MINIMA_CLIENTE` (`vars` de `wrangler.jsonc`) vale `"1"` y no bloquea a nadie. **No la suba a 2 o más** hasta confirmar que todas las tablets corren una versión que manda `X-Version-Cliente` (la v1.1 completa). Si no, todas reciben 426 y dejan de sincronizar; los pendientes se conservan, pero no salen (S-12). Un valor mal escrito vale 1 y no bloquea.
 - **Primer despliegue de la v1.1 sobre una base con sesiones (B1).** Las familias de refresh vencen ahora a los 30 días del login con contraseña, aunque se hayan rotado. Las familias que ya tengan más de 30 días piden la contraseña en su siguiente refresco, en un inicio de sesión masivo que ocurre una sola vez. El outbox de las tablets no se pierde: las mutaciones esperan a la nueva sesión. Conviene avisar a los supervisores antes de desplegar.
+- **Primer despliegue de la v1.2 (A6, ADR 0029).** El token de página del snapshot pasa a la versión 3, ligada al usuario y al rol. Una descarga de snapshot que esté a medias en una tablet se rechaza una vez y vuelve a empezar desde cero, sin tocar el outbox ni los datos vivos. Los clientes v1.1 ya lo manejan así.
+- **Orden en la v1.2**: aplique la migración 0009 (§4) y despliegue el Worker inmediatamente después.
 
 ### Verificación después de desplegar
 

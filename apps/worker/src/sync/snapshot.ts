@@ -10,8 +10,11 @@
 //   `MAX(seq)` es el `cursor` de todas las páginas (viaja en el token); todo lo que se lee después
 //   (otras entidades u otras páginas) es estado igual o más nuevo, y lo escrito con un `seq` mayor
 //   llega luego por el pull (aplicarlo otra vez es idempotente).
-// - Token de página opaco: base64url de `{ version, cursor, entidad, ultimo_id }`, validado al
-//   recibirlo (ver `VERSION_TOKEN_PAGINA`).
+// - Token de página opaco: base64url de `{ version, cursor, entidad, ultimo_id, user_id, rol }`,
+//   validado al recibirlo (ver `VERSION_TOKEN_PAGINA`). A6 (ADR 0029): `user_id` y `rol` son los del
+//   actor que lo pidió; al continuar deben coincidir con la sesión actual (mismo usuario y mismo rol
+//   ACTUAL), para que una descarga no mezcle dos alcances en el área temporal del cliente. Sin
+//   firma: no controla acceso (cada página se filtra con la visibilidad actual del actor).
 // - Aquí la visibilidad SÍ va en el `WHERE` (no hay un cursor de auditoría que avanzar): mismas
 //   reglas que el pull (`entidades.ts`).
 // - Alcance `orden`: solo las entidades de esa orden; exige poder verla (si no, 404, también en
@@ -21,6 +24,8 @@ import {
   ENTIDADES_SYNC,
   type EntidadSnapshot,
   MAX_ENTIDADES_SNAPSHOT,
+  type Rol,
+  ROLES,
   type SnapshotQuery,
   type SnapshotResponse,
 } from '@catmetal/shared';
@@ -43,18 +48,26 @@ export interface TokenPagina {
   entidad: string;
   /** Id (o id compuesto, o clave) de la última entidad entregada de `entidad`. */
   ultimo_id: string;
+  /** Usuario que pidió el snapshot (A6, ADR 0029). */
+  user_id: string;
+  /** Rol de ese usuario al emitir el token (A6, ADR 0029). */
+  rol: Rol;
 }
 
 const PATRON_ID = /^[A-Za-z0-9_.-]{1,64}(:[A-Za-z0-9_.-]{1,64})?$/;
+const PATRON_USUARIO = /^[A-Za-z0-9-]{1,64}$/;
 
 /**
- * Versión del token (revisión de la Fase 3, M5). Desde la versión 2, el `ultimo_id` de
- * `validations` es el id del CONSUMO (paginación por `consumption_id`), no el de la validación.
- * Los tokens sin versión (emitidos antes) siguen valiendo para las demás entidades, cuyo
- * significado no cambió; los de `validations` se rechazan con 400 `VALIDACION` (el cliente
- * reinicia el snapshot). Solo afecta a un snapshot que estaba a mitad de camino durante el despliegue.
+ * Versión del token.
+ * - 2 (revisión de la Fase 3, M5): el `ultimo_id` de `validations` es el id del CONSUMO
+ *   (paginación por `consumption_id`), no el de la validación.
+ * - 3 (A6, ADR 0029): el token lleva `user_id` y `rol` del actor.
+ * Solo se acepta la versión actual: un token sin versión o de la versión 2 (emitido por un
+ * servidor anterior, sin identidad) se rechaza con el mismo 400 `VALIDACION` (campo `pagina`) que
+ * un token inválido, y el cliente reinicia el snapshot una vez. Solo afecta a un snapshot que
+ * estaba a mitad de camino durante el despliegue.
  */
-export const VERSION_TOKEN_PAGINA = 2;
+export const VERSION_TOKEN_PAGINA = 3;
 
 export function codificarPagina(token: TokenPagina): string {
   return aBase64Url(
@@ -78,11 +91,15 @@ export function decodificarPagina(texto: string): TokenPagina | null {
   if (typeof valor !== 'object' || valor === null || Array.isArray(valor)) {
     return null;
   }
-  const { cursor, entidad, ultimo_id: ultimoId, version } = valor as Record<string, unknown>;
-  if (version !== undefined && version !== VERSION_TOKEN_PAGINA) {
-    return null;
-  }
-  if (version === undefined && entidad === 'validations') {
+  const {
+    cursor,
+    entidad,
+    ultimo_id: ultimoId,
+    user_id: userId,
+    rol,
+    version,
+  } = valor as Record<string, unknown>;
+  if (version !== VERSION_TOKEN_PAGINA) {
     return null;
   }
   if (
@@ -92,11 +109,20 @@ export function decodificarPagina(texto: string): TokenPagina | null {
     typeof entidad !== 'string' ||
     !(ENTIDADES_SYNC as readonly string[]).includes(entidad) ||
     typeof ultimoId !== 'string' ||
-    !PATRON_ID.test(ultimoId)
+    !PATRON_ID.test(ultimoId) ||
+    typeof userId !== 'string' ||
+    !PATRON_USUARIO.test(userId) ||
+    typeof rol !== 'string' ||
+    !(ROLES as readonly string[]).includes(rol)
   ) {
     return null;
   }
-  return { cursor, entidad, ultimo_id: ultimoId };
+  return { cursor, entidad, ultimo_id: ultimoId, user_id: userId, rol: rol as Rol };
+}
+
+/** El token se emitió para este mismo usuario con su rol ACTUAL (A6, ADR 0029). */
+function esDelActor(token: TokenPagina, ctx: Contexto): boolean {
+  return token.user_id === ctx.actor.id && token.rol === ctx.actor.rol;
 }
 
 const SUBCONSULTA_ASIGNADAS =
@@ -192,7 +218,9 @@ function sentenciaPagina(
 export async function snapshot(ctx: Contexto, query: SnapshotQuery): Promise<SnapshotResponse> {
   const descriptores =
     query.alcance === 'orden' ? DESCRIPTORES.filter((d) => d.columnaOrden !== null) : DESCRIPTORES;
-  const token = query.pagina === undefined ? null : decodificarPagina(query.pagina);
+  const decodificado = query.pagina === undefined ? null : decodificarPagina(query.pagina);
+  // Un token de otro usuario o de otro rol es, para esta sesión, un token inválido (mismo 400).
+  const token = decodificado !== null && esDelActor(decodificado, ctx) ? decodificado : null;
   const inicio = token === null ? 0 : descriptores.findIndex((d) => d.entidad === token.entidad);
   if (query.pagina !== undefined && (token === null || inicio < 0)) {
     throw new ErrorApi('VALIDACION', [{ campo: 'pagina', mensaje: 'La página no es válida.' }]);
@@ -256,7 +284,13 @@ export async function snapshot(ctx: Contexto, query: SnapshotQuery): Promise<Sna
     entidades,
     siguiente_pagina:
       hayMas && ultimo !== null
-        ? codificarPagina({ cursor, entidad: ultimo.entidad, ultimo_id: ultimo.valor })
+        ? codificarPagina({
+            cursor,
+            entidad: ultimo.entidad,
+            ultimo_id: ultimo.valor,
+            user_id: ctx.actor.id,
+            rol: ctx.actor.rol,
+          })
         : null,
   };
 }
