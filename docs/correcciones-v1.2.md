@@ -63,6 +63,8 @@ Este documento es **el alcance de la sesión v1.2**. Cada ítem trae:
 
 ### A3. Con la versión mínima subida, el logout de un cliente viejo recibe 426
 
+- **Estado**: RESUELTO (`30641d4`). ADR 0026, enmienda 1.
+
 - **Dónde**: `apps/worker/src/middleware/version-cliente.ts:20-29`, que se aplica a todo `/api/v1/*`.
 - **Aceptación**:
   - `POST /auth/logout` queda fuera de la exigencia de versión mínima, para que un cliente desactualizado siempre pueda revocar su familia.
@@ -71,15 +73,21 @@ Este documento es **el alcance de la sesión v1.2**. Cada ítem trae:
 
 ### A4. Un 426 que llega a través de `/auth/refresh` durante el push cuenta un intento y aplica espera
 
+- **Estado**: RESUELTO (`6775a8a`).
+
 - **Dónde**: `apps/web/src/sync/motor.ts:604` → `:396`, y `apps/web/src/auth/sesion.ts:867`.
 - **Aceptación**: si el refresh dentro de un push responde `CLIENTE_DESACTUALIZADO`, el lote vuelve a `pendiente` **sin contar el intento ni aplicar espera**, como promete el ADR 0026. Hay una prueba.
 
 ### A5. Un login correcto puede bloquear el tope global `g`
 
+- **Estado**: RESUELTO (`d0bdf03`). ADR 0018, enmienda 2.
+
 - **Dónde**: `apps/worker/src/auth/cupos.ts:223-248` y `:431-438`.
 - **Aceptación**: un login correcto desde un dispositivo conocido no suma al tope global de orígenes desconocidos, o lo descuenta antes de evaluar el bloqueo. Un login correcto nunca deja `g` bloqueado. Hay una prueba.
 
 ### A6. Un snapshot reanudado vuelve a meter datos ajenos que la purga de S-03 ya había borrado
+
+- **Estado**: PARCIAL: servidor RESUELTO (`77f0612`, ADR 0029); cliente en curso.
 
 - **Dónde**: `apps/web/src/auth/sesion.ts:531` (`purgarAjenosSinVisibilidad`), `apps/web/src/datos/snapshot-temporal.ts:272` y `apps/worker/src/sync/snapshot.ts:195`.
 - **Aceptación**:
@@ -96,6 +104,8 @@ Este documento es **el alcance de la sesión v1.2**. Cada ítem trae:
   - Hay pruebas que simulan la cuota agotada.
 
 ### A8. Solo se reconoce como conocido un dispositivo que tenga la cookie
+
+- **Estado**: RESUELTO (`11965e0`). ADR 0018, enmienda 2; `docs/despliegue.md` §3.
 
 - **Dónde**: `apps/worker/src/auth/dispositivo.ts:10` y `apps/worker/src/rutas/auth.ts:258-261`.
 - **Aceptación**:
