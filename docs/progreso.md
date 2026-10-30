@@ -111,3 +111,8 @@ No se usan `mvc-dotnet-developer`, `angular-developer` ni `orchestrator`.
 
 - Ejecutada adelantada en paralelo con la Fase 4: 5.1–5.2 pantallas del jefe (`react-developer`), 5.3 administración (`react-developer`), 5.4 E2E (`test-engineer`).
 - Cierre: mismos gates que la Fase 4. Evidencia: `docs/evidencia/fase-5.md`.
+
+### Fase 6 — Endurecimiento y despliegue (en curso)
+
+- Adelantadas y confirmadas: 6.1 cron de backup; 6.4 `docs/despliegue.md`, `deploy-staging.yml` (solo manual) y `scripts/crear-admin-sql.mjs`; `wrangler.jsonc` sin invocation logs, producción sin workers.dev ni preview URLs.
+- En curso: 6.3 instalabilidad, Lighthouse y axe automatizados (`test-engineer`); 6.2 endurecimiento de la UI (`ui-ux-designer`); M5 rendimiento del snapshot (`general-purpose`).
