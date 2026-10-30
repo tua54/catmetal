@@ -269,3 +269,18 @@ Pruebas existentes que hay que **corregir** porque afirman justamente el comport
 1. Volver a llamar a `reiniciarEstadoSincronizado` en `cambiarEpoca` y en `reiniciar`, y aplicar las páginas con `aplicarEntidades` como en la v1. Las funciones se recuperan de la historia de git.
 2. Quitar los modos `actual` y `autoridad` y el campo `servidor_obsoleto` de las reglas de `upsert*` y `recalcular*`. Las filas que lo tengan se pueden ignorar, porque es opcional.
 3. **No quitar la versión 3 de Dexie**: los navegadores ya la tienen. Basta con dejar de usar las tablas `snapshot_*`. Si hay que borrarlas, se agrega una versión 4 que las declare `null`.
+
+## Enmienda 1 — Cuota de almacenamiento agotada (correcciones v1.2, ítem A7)
+
+- Fecha: 2026-10-30.
+
+**Contexto.** Si guardar una página en el área temporal o el reemplazo (`completarSnapshot`) falla con `QuotaExceededError`, la tablet queda con un área temporal que no puede completar: cada sync reintenta la misma descarga y vuelve a fallar, y el push del outbox, que va en la misma sync, puede quedar bloqueado detrás.
+
+**Decisión.**
+
+1. Ante `QuotaExceededError` (o el error de Dexie que lo envuelve) al guardar una página o al reemplazar, se **descarta el área temporal** del usuario. El estado vivo no se toca: la transacción del reemplazo es atómica y, si falla, no aplicó nada.
+2. El snapshot se reintenta con la espera exponencial que ya usa el motor para los errores transitorios, nunca en un bucle inmediato.
+3. Se muestra un aviso claro y persistente mientras dure: **"Almacenamiento lleno: sincroniza o libera espacio"**.
+4. El push del outbox no espera a un snapshot que no se puede completar: si la época lo permite (no hay un cambio de época pendiente que obligue a reencolar primero, ADR 0009 y punto 5), el motor envía los pendientes antes o a pesar del fallo del snapshot. Enviar libera espacio, porque las mutaciones aplicadas dejan de ocupar el outbox y sus fotos.
+
+**Consecuencia.** La tablet sale sola del estado: sigue enviando lo pendiente, y el snapshot se completa cuando haya espacio.
