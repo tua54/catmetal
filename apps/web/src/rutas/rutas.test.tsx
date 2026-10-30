@@ -28,20 +28,29 @@ describe('guardas de sesión', () => {
 
 describe('redirección inicial por rol', () => {
   it.each([
-    ['supervisor', '/supervisor', 'Mis órdenes en proceso'],
-    ['jefe', '/jefe', 'Validación de consumos'],
-    ['admin', '/admin', 'Administración'],
-  ] as const)('%s → %s', async (rol, ruta, titulo) => {
+    ['supervisor', '/supervisor', 'Mis órdenes en proceso', 'Mis órdenes en proceso'],
+    ['jefe', '/jefe', 'Validación de consumos', 'Validación de Consumos'],
+    ['admin', '/admin', 'Administración', 'Administración'],
+  ] as const)('%s → %s', async (rol, ruta, titulo, tituloBarra) => {
     await entrarSinConexion(rol);
     const { router } = renderizarApp('/');
     expect(await h1(titulo)).toBeInTheDocument();
     expect(router.state.location.pathname).toBe(ruta);
     // La barra superior toma el título del `handle` de la ruta.
-    expect(screen.getByRole('banner')).toHaveTextContent(titulo);
-    // Jefe y admin aún tienen el marcador de pantalla en construcción (Fase 5).
-    if (rol !== 'supervisor') {
-      expect(screen.getByRole('heading', { name: 'Pantalla en construcción' })).toBeInTheDocument();
-    }
+    expect(screen.getByRole('banner')).toHaveTextContent(tituloBarra);
+    // Las pantallas de jefe y admin ya existen (Fase 5): ningún marcador "en construcción".
+    expect(
+      screen.queryByRole('heading', { name: 'Pantalla en construcción' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('admin con sesión sin conexión: explica que la pantalla necesita conexión', async () => {
+    await entrarSinConexion('admin');
+    renderizarApp('/admin');
+    expect(
+      await screen.findByRole('heading', { name: 'Esta pantalla necesita conexión' }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('navigation', { name: 'Secciones de administración' })).toBeVisible();
   });
 });
 

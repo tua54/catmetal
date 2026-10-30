@@ -6,7 +6,6 @@ import { PantallaCarga } from '../pages/comunes/PantallaCarga';
 import { RouteErrorPage } from '../pages/RouteErrorPage';
 import { EstadoSincronizacionPage } from '../pages/comunes/EstadoSincronizacionPage';
 import { LoginPage } from '../pages/comunes/LoginPage';
-import { PantallaEnConstruccion } from '../pages/comunes/PantallaEnConstruccion';
 import { InicioPorRol, RequiereArea, RequiereSesion } from './guardas';
 import { RaizApp } from './RaizApp';
 
@@ -103,18 +102,44 @@ export function crearRutas({ diseno }: OpcionesRutas): RouteObject[] {
                   path: 'jefe',
                   element: <RequiereArea area="jefe" />,
                   handle: {
-                    titulo: 'Validación de consumos',
+                    titulo: 'Validación de Consumos',
                     subtitulo: 'Panel del jefe · Rol: Aprobador',
                   } satisfies HandleRuta,
+                  // Pantallas del jefe en su propio fragmento (carga diferida por rol), como las
+                  // del supervisor: también quedan en el precache del Service Worker.
                   children: [
                     {
                       index: true,
-                      element: (
-                        <PantallaEnConstruccion
-                          titulo="Validación de consumos"
-                          descripcion="Aquí verá la cola de consumos por validar de cada orden."
-                        />
-                      ),
+                      lazy: async () => ({
+                        Component: (await import('../pages/jefe')).ValidacionPage,
+                      }),
+                    },
+                    {
+                      path: 'ordenes',
+                      handle: {
+                        titulo: 'Órdenes de producción',
+                        subtitulo: 'Panel del jefe · Gestión de órdenes',
+                      } satisfies HandleRuta,
+                      children: [
+                        {
+                          index: true,
+                          lazy: async () => ({
+                            Component: (await import('../pages/jefe')).OrdenesPage,
+                          }),
+                        },
+                        {
+                          path: 'nueva',
+                          lazy: async () => ({
+                            Component: (await import('../pages/jefe')).NuevaOrdenPage,
+                          }),
+                        },
+                        {
+                          path: ':id',
+                          lazy: async () => ({
+                            Component: (await import('../pages/jefe')).DetalleOrdenJefePage,
+                          }),
+                        },
+                      ],
                     },
                   ],
                 },
@@ -125,15 +150,55 @@ export function crearRutas({ diseno }: OpcionesRutas): RouteObject[] {
                     titulo: 'Administración',
                     subtitulo: 'Usuarios, materiales, asignaciones y tolerancia',
                   } satisfies HandleRuta,
+                  // Pantallas del admin en su propio fragmento (carga diferida por rol). Trabajan
+                  // contra el servidor: sin conexión explican que la necesitan.
                   children: [
                     {
-                      index: true,
-                      element: (
-                        <PantallaEnConstruccion
-                          titulo="Administración"
-                          descripcion="Aquí podrá gestionar usuarios, materiales, asignaciones y la tolerancia."
-                        />
-                      ),
+                      lazy: async () => ({
+                        Component: (await import('../pages/admin')).AdminLayout,
+                      }),
+                      children: [
+                        {
+                          index: true,
+                          handle: {
+                            titulo: 'Administración',
+                            subtitulo: 'Usuarios',
+                          } satisfies HandleRuta,
+                          lazy: async () => ({
+                            Component: (await import('../pages/admin')).UsuariosPage,
+                          }),
+                        },
+                        {
+                          path: 'materiales',
+                          handle: {
+                            titulo: 'Administración',
+                            subtitulo: 'Materiales',
+                          } satisfies HandleRuta,
+                          lazy: async () => ({
+                            Component: (await import('../pages/admin')).MaterialesPage,
+                          }),
+                        },
+                        {
+                          path: 'asignaciones',
+                          handle: {
+                            titulo: 'Administración',
+                            subtitulo: 'Asignación de supervisores',
+                          } satisfies HandleRuta,
+                          lazy: async () => ({
+                            Component: (await import('../pages/admin')).AsignacionesPage,
+                          }),
+                        },
+                        {
+                          path: 'tolerancia',
+                          handle: {
+                            titulo: 'Administración',
+                            subtitulo: 'Tolerancia',
+                          } satisfies HandleRuta,
+                          lazy: async () => ({
+                            Component: (await import('../pages/admin')).ToleranciaPage,
+                          }),
+                        },
+                      ],
                     },
                   ],
                 },
