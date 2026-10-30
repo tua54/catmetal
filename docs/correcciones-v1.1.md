@@ -146,6 +146,8 @@ Los cambios de la spec de esta ronda están en `docs/spec.md` §14 (v2.1).
 
 ### B4. Una subida concurrente de la misma foto puede borrar un objeto de R2 válido
 
+- **Estado**: RESUELTO (ea0f97d). ADR 0024. Prueba: `apps/worker/test/correcciones-b4-evidencias-concurrencia.test.ts`.
+
 - **Dónde**: `apps/worker/src/rutas/evidencias.ts:84-96`.
 - **Aceptación**: una subida que pierde la carrera nunca borra un objeto que otra ya confirmó en D1 (por ejemplo, con una clave por intento o un borrado condicional). Hay una prueba de concurrencia.
 
