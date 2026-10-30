@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  colaValidacionQuerySchema,
   idParamSchema,
   LIMITE_PAGINA_DEFECTO,
   LIMITE_PAGINA_MAXIMO,
@@ -60,6 +61,21 @@ describe('consultas', () => {
     expect(resultado.success).toBe(false);
     if (!resultado.success) {
       expect(resultado.error.issues[0]?.message).toBe('El estado de la orden no es válido.');
+    }
+  });
+});
+
+describe('colaValidacionQuerySchema', () => {
+  it('acepta filtros opcionales y convierte con_novedad', () => {
+    const orden = uuidv7();
+    expect(colaValidacionQuerySchema.parse({})).toEqual({});
+    expect(colaValidacionQuerySchema.parse({ orden, con_novedad: 'false', limite: '5' })).toEqual({
+      orden,
+      con_novedad: false,
+      limite: 5,
+    });
+    for (const query of [{ orden: 'x' }, { supervisor: '1' }, { con_novedad: 'si' }]) {
+      expect(colaValidacionQuerySchema.safeParse(query).success).toBe(false);
     }
   });
 });

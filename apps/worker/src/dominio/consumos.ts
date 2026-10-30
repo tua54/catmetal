@@ -13,7 +13,6 @@
 
 import {
   type Consumo,
-  type ConsumoDetallado,
   convertir,
   type CrearConsumo,
   type EditarConsumo,
@@ -24,6 +23,7 @@ import {
   type ListaConsumos,
   type MimeEvidencia,
   type Novedad,
+  type NovedadConEvidencias,
   type PaginacionQuery,
   sonConvertibles,
   tienePermiso,
@@ -527,6 +527,54 @@ export const COLUMNAS_EVIDENCIA_PUBLICAS =
   'id, incident_id, mime, tamano_bytes, sha256, subido, subido_at, created_at, updated_at';
 
 /**
+ * Lecturas de las novedades y de los metadatos de sus evidencias (sin `storage_key`) de una lista
+ * de consumos (`idsJson`: arreglo JSON de ids, un solo parámetro). Para un `db.batch()`.
+ */
+export function sentenciasNovedadesDe(
+  db: D1Database,
+  idsJson: string,
+): [D1PreparedStatement, D1PreparedStatement] {
+  return [
+    db
+      .prepare(
+        `SELECT id, consumption_id, tipo, descripcion, registrado_por, client_created_at,
+           server_received_at, created_at, updated_at
+         FROM incidents WHERE consumption_id IN (SELECT value FROM json_each(?)) ORDER BY id`,
+      )
+      .bind(idsJson),
+    db
+      .prepare(
+        `SELECT ${COLUMNAS_EVIDENCIA_PUBLICAS.split(', ')
+          .map((c) => `e.${c}`)
+          .join(', ')}
+         FROM evidences AS e JOIN incidents AS i ON i.id = e.incident_id
+         WHERE i.consumption_id IN (SELECT value FROM json_each(?)) ORDER BY e.id`,
+      )
+      .bind(idsJson),
+  ];
+}
+
+/** Agrupa el resultado de `sentenciasNovedadesDe` por consumo, con sus evidencias. */
+export function agruparNovedades(
+  novedades: D1Result | undefined,
+  evidencias: D1Result | undefined,
+): Map<string, NovedadConEvidencias[]> {
+  const evidenciasPorNovedad = new Map<string, Evidencia[]>();
+  for (const fila of (evidencias?.results ?? []) as FilaEvidencia[]) {
+    const lista = evidenciasPorNovedad.get(fila.incident_id) ?? [];
+    lista.push(evidenciaDe(fila));
+    evidenciasPorNovedad.set(fila.incident_id, lista);
+  }
+  const porConsumo = new Map<string, NovedadConEvidencias[]>();
+  for (const fila of (novedades?.results ?? []) as Novedad[]) {
+    const lista = porConsumo.get(fila.consumption_id) ?? [];
+    lista.push({ ...fila, evidencias: evidenciasPorNovedad.get(fila.id) ?? [] });
+    porConsumo.set(fila.consumption_id, lista);
+  }
+  return porConsumo;
+}
+
+/**
  * `GET /orders/:id/consumptions`: cursor por id. Supervisor con la orden asignada (y jefe/admin):
  * todos los consumos (P9); supervisor sin asignación: solo los suyos (ADR 0005 regla 2), y 404 si
  * no tiene ninguno (no se revela la orden). Incluye novedades, metadatos de evidencias, validación
@@ -561,22 +609,7 @@ export async function listarConsumosDeOrden(
     pagina.length === 0
       ? [undefined, undefined, undefined]
       : await ctx.db.batch([
-          ctx.db
-            .prepare(
-              `SELECT id, consumption_id, tipo, descripcion, registrado_por, client_created_at,
-                 server_received_at, created_at, updated_at
-               FROM incidents WHERE consumption_id IN (SELECT value FROM json_each(?)) ORDER BY id`,
-            )
-            .bind(ids),
-          ctx.db
-            .prepare(
-              `SELECT ${COLUMNAS_EVIDENCIA_PUBLICAS.split(', ')
-                .map((c) => `e.${c}`)
-                .join(', ')}
-               FROM evidences AS e JOIN incidents AS i ON i.id = e.incident_id
-               WHERE i.consumption_id IN (SELECT value FROM json_each(?)) ORDER BY e.id`,
-            )
-            .bind(ids),
+          ...sentenciasNovedadesDe(ctx.db, ids),
           ctx.db
             .prepare(
               `SELECT id, consumption_id, decision, motivo, validado_por, client_created_at,
@@ -585,18 +618,7 @@ export async function listarConsumosDeOrden(
             )
             .bind(ids),
         ]);
-  const evidenciasPorNovedad = new Map<string, Evidencia[]>();
-  for (const fila of (evidencias?.results ?? []) as FilaEvidencia[]) {
-    const lista = evidenciasPorNovedad.get(fila.incident_id) ?? [];
-    lista.push(evidenciaDe(fila));
-    evidenciasPorNovedad.set(fila.incident_id, lista);
-  }
-  const novedadesPorConsumo = new Map<string, ConsumoDetallado['novedades']>();
-  for (const fila of (novedades?.results ?? []) as Novedad[]) {
-    const lista = novedadesPorConsumo.get(fila.consumption_id) ?? [];
-    lista.push({ ...fila, evidencias: evidenciasPorNovedad.get(fila.id) ?? [] });
-    novedadesPorConsumo.set(fila.consumption_id, lista);
-  }
+  const novedadesPorConsumo = agruparNovedades(novedades, evidencias);
   const validacionPorConsumo = new Map(
     ((validaciones?.results ?? []) as Validacion[]).map((v) => [v.consumption_id, v]),
   );

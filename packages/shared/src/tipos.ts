@@ -260,3 +260,30 @@ export interface ListaConsumos {
   consumos: ConsumoDetallado[];
   siguiente_cursor: string | null;
 }
+
+/** Respuesta de `POST /consumptions/:id/approve` y `/reject`: el consumo ya decidido y su validación. */
+export interface ResultadoValidacion {
+  /** Con el estado de la decisión y `version + 1` (los aplica la base, ADR 0010). */
+  consumo: Consumo;
+  validacion: Validacion;
+}
+
+/** Elemento de la cola de validación del jefe (`GET /validations/queue`). */
+export interface ElementoCola extends Consumo {
+  material: { id: string; codigo: string; nombre: string };
+  supervisor: { id: string; nombre: string };
+  orden: { id: string; codigo: string };
+  /** `requiere_novedad` sin ninguna novedad: no se puede aprobar todavía. */
+  falta_novedad: boolean;
+  /** Registrado por quien consulta: no lo puede validar (S9, P1: "requiere otro jefe"). */
+  propio: boolean;
+  novedades: NovedadConEvidencias[];
+}
+
+/** Respuesta de `GET /validations/queue` (paginación por cursor: el `id` del último consumo). */
+export interface ColaValidacion {
+  elementos: ElementoCola[];
+  /** Total de consumos pendientes que cumplen los filtros (todas las páginas). */
+  pendientes: number;
+  siguiente_cursor: string | null;
+}

@@ -46,7 +46,18 @@ export const listarOrdenesQuerySchema = paginacionQuerySchema.extend({
   estado: z.enum(ESTADOS_ORDEN, { error: 'El estado de la orden no es válido.' }).optional(),
 });
 
+/**
+ * `GET /validations/queue?orden=&supervisor=&con_novedad=&cursor=&limite=`. `con_novedad=true`:
+ * consumos con alguna novedad o que la requieren; `false`: ni lo uno ni lo otro.
+ */
+export const colaValidacionQuerySchema = paginacionQuerySchema.extend({
+  orden: uuidV7Schema.optional(),
+  supervisor: uuidV7Schema.optional(),
+  con_novedad: booleanoQuerySchema.optional(),
+});
+
 export type PaginacionQuery = z.infer<typeof paginacionQuerySchema>;
+export type ColaValidacionQuery = z.infer<typeof colaValidacionQuerySchema>;
 export type IdParam = z.infer<typeof idParamSchema>;
 export type ListarMaterialesQuery = z.infer<typeof listarMaterialesQuerySchema>;
 export type ListarOrdenesQuery = z.infer<typeof listarOrdenesQuerySchema>;
