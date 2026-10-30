@@ -180,7 +180,8 @@ Volver al bloqueo por cuenta de la ADR 0008, punto 6: restaurar `reservarIntento
 1. Un `POST /auth/refresh` **exitoso** (rotación correcta, no la detección de reutilización ni ningún error) pone `mp_dispositivo` para el usuario de la sesión:
    - si la cookie presentada ya tiene una entrada válida de ese usuario, se conserva tal cual (mismo nonce, así no se reinicia su cupo `d:`) y solo se renueva el `Max-Age` de la cookie;
    - si no la tiene, se agrega una entrada nueva, igual que en el login correcto, respetando el máximo de 16 y las entradas válidas de otros usuarios.
-2. El refresh demuestra lo mismo que un login correcto previo en este navegador: tener un refresh token vigente de esa familia. No da acceso adicional: la cookie solo elige el cupo de login.
+2. El refresh demuestra que hubo un login correcto previo **de esa familia**: tener un refresh token vigente. No prueba que sea el mismo navegador, porque el refresh token no está ligado a él (corregido tras S-v12-01, `docs/auditoria/seguridad-v1.2.md`). No da acceso adicional: la cookie solo elige el cupo de login.
+   - **Una entrada por familia (S-v12-01).** Cuando el refresh tiene que agregar una entrada nueva, su nonce no es aleatorio: se deriva de forma determinista del `familia_id` con una clave derivada de `REFRESH_SECRET` (HKDF, etiqueta propia, como en S-05). Todas las rotaciones de una familia producen el mismo nonce y, por tanto, el mismo cupo `d:`. Quien robe un refresh token obtiene como mucho **un** cupo de dispositivo, igual que con un login, y no uno nuevo por cada rotación. El login correcto sigue emitiendo un nonce aleatorio.
 3. Logout sigue sin tocar la cookie.
 
 ### Rotar `REFRESH_SECRET`
