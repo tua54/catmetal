@@ -181,6 +181,48 @@ describe('token ligado al usuario del lote (F4-05)', () => {
   });
 });
 
+describe('revalidación de la identidad antes de cada envío (ADR 0023, M7)', () => {
+  it('si la identidad cambia entre armar el lote y enviarlo, no sale nada y el lote queda pendiente', async () => {
+    const r = await registrarConsumoLocal(ana.id, consumo());
+    const s = sesionLigada(ana);
+    const original = s.obtenerAccessToken.bind(s);
+    let llamadas = 0;
+    s.obtenerAccessToken = async (ligado: TokenEsperado = {}) => {
+      llamadas += 1;
+      const token = await original(ligado);
+      if (llamadas === 2) {
+        // El token del lote ya se pidió; mientras tanto otra pestaña cambió de usuario.
+        s.usuario = beto;
+      }
+      return token;
+    };
+    const resumen = await motor(s).sincronizar('online');
+    expect(resumen.error).toMatchObject({ code: 'AUTOR_NO_COINCIDE' });
+    expect(servidor.pushes()).toHaveLength(0);
+    // No quedó "enviando": nada salió, así que vuelve a pendiente para cuando Ana regrese.
+    expect(await db.outbox.get(r.mutation_id)).toMatchObject({ estado: 'pendiente' });
+    expect(await contarPendientes(ana.id)).toBe(1);
+  });
+
+  it('si otra pestaña cerró la sesión (sin usuario), no se envía y el lote queda pendiente', async () => {
+    const r = await registrarConsumoLocal(ana.id, consumo());
+    const s = sesionLigada(ana);
+    const original = s.obtenerAccessToken.bind(s);
+    let llamadas = 0;
+    s.obtenerAccessToken = async (ligado: TokenEsperado = {}) => {
+      llamadas += 1;
+      const token = await original(ligado);
+      if (llamadas === 2) {
+        s.usuario = null;
+      }
+      return token;
+    };
+    await motor(s).sincronizar('online');
+    expect(servidor.pushes()).toHaveLength(0);
+    expect(await db.outbox.get(r.mutation_id)).toMatchObject({ estado: 'pendiente' });
+  });
+});
+
 describe('vuelta a online tras un login offline (F4-12)', () => {
   /** Sesión offline que, al pedir el token, "adopta" la cookie como lo hace `GestorSesion`. */
   function sesionOffline(adopcion: 'mismo' | 'otro' | 'sin_red') {

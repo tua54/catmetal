@@ -12,6 +12,9 @@
 //   es <nombre>"; la sync puede seguir enviando lo ya encolado (la sesión es legítima).
 // - Límite del login offline (ADR 0017 §2–3): contador persistido por perfil, espera creciente desde
 //   el 5.º fallo, borrado del verificador al 10.º y ningún verificador para el admin.
+// - Entre pestañas (ADR 0023, M7): cerrar sesión, bloquear por inactividad o entrar con otro usuario
+//   se avisa por el canal de sesión (sin secretos); las demás pestañas descartan su sesión en memoria
+//   en el mismo tick (y vuelven al login o al bloqueo). No borran datos locales.
 
 import {
   loginSchema,
@@ -28,6 +31,7 @@ import {
   puedeBorrarDatosDeUsuario,
 } from '../datos/outbox';
 import type { PerfilLocal, VerificadorLocal } from '../datos/tipos';
+import { crearCanalSesion, type CanalSesion, type EventoSesion } from './canal-sesion';
 import {
   conCandado,
   DURACION_CANDADO_SYNC_MS,
@@ -150,6 +154,11 @@ export interface OpcionesSesion {
   ahora?: () => number;
   agenteUsuario?: string;
   candado?: { duracionMs?: number; intervaloMs?: number };
+  /**
+   * Canal entre pestañas (ADR 0023). Por defecto ninguno: la sesión única de la PWA (`sesion`) usa
+   * `crearCanalSesion()`; las pruebas pasan el suyo.
+   */
+  canal?: CanalSesion | null;
 }
 
 export const NOMBRE_CANDADO_REFRESH = 'catmetal-refresh';
@@ -243,9 +252,12 @@ export class GestorSesion {
   #cerrando = false;
   #actividadGuardadaEn = Number.NEGATIVE_INFINITY;
   readonly #oyentes = new Set<Oyente>();
+  readonly #canal: CanalSesion | null;
 
   constructor(opciones: OpcionesSesion = {}) {
     this.#opciones = opciones;
+    this.#canal = opciones.canal ?? null;
+    this.#canal?.escuchar((evento) => this.#alEventoDeOtraPestana(evento));
     this.api = crearClienteApi({
       base: opciones.base,
       fetch: opciones.fetch,
@@ -302,6 +314,51 @@ export class GestorSesion {
     for (const oyente of this.#oyentes) {
       oyente(this.#estado);
     }
+  }
+
+  // -------------------------------------------------------------------------------------------
+  // Otras pestañas (ADR 0023)
+  // -------------------------------------------------------------------------------------------
+
+  /**
+   * Otra pestaña cerró sesión, se bloqueó o entró con otro usuario. En el mismo tick: se descarta el
+   * access token, se corta la sync en vuelo (señal de sesión) y se publica el estado nuevo, con lo
+   * que la UI vuelve al login o al bloqueo. No se borran datos locales: lo decide la pestaña que
+   * cerró sesión, con la regla de pendientes (§5). Esta pestaña no reenvía el aviso.
+   */
+  #alEventoDeOtraPestana(evento: EventoSesion): void {
+    const actual = this.#estado.usuario;
+    if (actual === null) {
+      return;
+    }
+    const descartar = (): void => {
+      this.#olvidarToken();
+      this.#publicar(ESTADO_SIN_SESION);
+    };
+    switch (evento.tipo) {
+      case 'logout':
+        // Tablet compartida: tras un cierre de sesión en otra pestaña, ninguna sigue abierta.
+        descartar();
+        return;
+      case 'cambio-usuario':
+        // Otra persona entró (y la cookie de refresco ya es suya): esta pestaña vuelve al login.
+        if (evento.user_id !== actual.id) {
+          descartar();
+        }
+        return;
+      case 'bloqueo':
+        // Bloqueo del mismo usuario: esta pestaña también pide "Confirme que es <nombre>".
+        if (evento.user_id === actual.id && !this.#estado.bloqueada) {
+          this.#olvidarToken();
+          this.#renovarSenal();
+          this.#publicar({ ...this.#estado, bloqueada: true });
+        }
+        return;
+    }
+  }
+
+  #avisarOtrasPestanas(tipo: EventoSesion['tipo'], userId: string | null): void {
+    this.#canal?.emitir(tipo, userId);
   }
 
   #renovarSenal(): void {
@@ -543,6 +600,8 @@ export class GestorSesion {
       requiere_contrasena: false,
       bloqueada: false,
     });
+    // La cookie de refresco ya es de este usuario: las pestañas de otro usuario vuelven al login.
+    this.#avisarOtrasPestanas('cambio-usuario', respuesta.usuario.id);
     return this.#estado;
   }
 
@@ -570,6 +629,7 @@ export class GestorSesion {
       requiere_contrasena: false,
       bloqueada: false,
     });
+    this.#avisarOtrasPestanas('cambio-usuario', perfil.user_id);
     return this.#estado;
   }
 
@@ -577,10 +637,15 @@ export class GestorSesion {
   // Bloqueo por inactividad (ADR 0017 §1)
   // -------------------------------------------------------------------------------------------
 
-  /** Bloquea la sesión (inactividad o vuelta de segundo plano). La sync sigue. */
+  /**
+   * Bloquea la sesión (inactividad o vuelta de segundo plano). La sync de esta pestaña sigue. Las
+   * demás pestañas del mismo usuario también se bloquean (ADR 0023).
+   */
   bloquear(): void {
-    if (this.#estado.usuario !== null && !this.#estado.bloqueada) {
+    const usuario = this.#estado.usuario;
+    if (usuario !== null && !this.#estado.bloqueada) {
       this.#publicar({ ...this.#estado, bloqueada: true });
+      this.#avisarOtrasPestanas('bloqueo', usuario.id);
     }
   }
 
@@ -821,6 +886,8 @@ export class GestorSesion {
         pendientes: { mutaciones: 0, evidencias: 0 },
       };
     }
+    // Las demás pestañas descartan su sesión YA (no esperan la revocación ni el candado de sync).
+    this.#avisarOtrasPestanas('logout', usuario.id);
     const token = this.#enLinea() ? await this.obtenerAccessToken({ esperado: usuario.id }) : null;
     this.#cerrando = true;
     this.#renovarSenal();
@@ -875,8 +942,8 @@ export class GestorSesion {
   }
 }
 
-/** Sesión única de la PWA. */
-export const sesion = new GestorSesion();
+/** Sesión única de la PWA, con el canal entre pestañas (ADR 0023). */
+export const sesion = new GestorSesion({ canal: crearCanalSesion() });
 
 /** Cliente de la API con la sesión de la PWA (refresh automático ante 401, ligado al usuario). */
 export const clienteApi: ClienteApi = sesion.api;

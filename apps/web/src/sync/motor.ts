@@ -128,6 +128,14 @@ export interface OpcionesMotor {
   maxPaginasSnapshot?: number;
 }
 
+/**
+ * Opciones de una petición del motor. `cuerpoAlEnviar` se evalúa justo antes de cada `fetch` (por
+ * ejemplo, para `enviado_at` del push, ADR 0019).
+ */
+type OpcionesEnvio = Omit<OpcionesPeticion, 'bearer' | 'signal' | 'autenticar'> & {
+  cuerpoAlEnviar?: () => unknown;
+};
+
 /** Topes por sincronización (evitan bucles si el servidor se comporta mal). */
 const MAX_LOTES = 40;
 const MAX_RONDAS_PULL = 50;
@@ -144,9 +152,15 @@ const CODIGOS_DE_SESION: readonly CodigoError[] = [
 /** La sesión cambió durante la sincronización: se detiene sin enviar nada más. */
 class SesionCambiada extends Error {
   override readonly name = 'SesionCambiada';
+  /**
+   * Se detectó ANTES de enviar la petición (ADR 0023, M7): el servidor no recibió nada, así que el
+   * lote puede volver a `pendiente` en lugar de quedar `enviando`.
+   */
+  readonly sinEnviar: boolean;
 
-  constructor() {
+  constructor(sinEnviar = false) {
     super('La sesión cambió durante la sincronización.');
+    this.sinEnviar = sinEnviar;
   }
 }
 
@@ -328,6 +342,18 @@ export class MotorSync {
   }
 
   /**
+   * Justo antes de cada `fetch` (ADR 0023, M7): como `#verificarSesion`, pero marca que no se envió
+   * nada. Entre esta comprobación y el `fetch` no hay ningún `await`.
+   */
+  #verificarAntesDeEnviar(userId: string): void {
+    try {
+      this.#verificarSesion(userId);
+    } catch (error) {
+      throw error instanceof SesionCambiada ? new SesionCambiada(true) : error;
+    }
+  }
+
+  /**
    * Antes de escribir en la partición lo que llegó por la red: la sesión sigue siendo la del autor y
    * no se cerró (F4-05). Si solo perdió la sesión del servidor (`requiere_contrasena`), lo recibido
    * con su propio token sigue siendo suyo y se guarda.
@@ -343,14 +369,10 @@ export class MotorSync {
    * el auto-refresh del cliente (que tomaría la sesión que haya en ese momento). Ante 401 se
    * refresca UNA vez para ese mismo usuario. La sesión se revalida tras cada `await`.
    */
-  async #peticion(
-    userId: string,
-    ruta: string,
-    opciones: Omit<OpcionesPeticion, 'bearer' | 'signal' | 'autenticar'> = {},
-  ): Promise<unknown> {
+  async #peticion(userId: string, ruta: string, opciones: OpcionesEnvio = {}): Promise<unknown> {
     const sesion = this.#opciones.sesion;
     const token = await sesion.obtenerAccessToken({ esperado: userId });
-    this.#verificarSesion(userId);
+    this.#verificarAntesDeEnviar(userId);
     if (token === null) {
       throw new ErrorApi('NO_AUTENTICADO', 401);
     }
@@ -364,7 +386,8 @@ export class MotorSync {
         throw error;
       }
       const nuevo = await sesion.refrescar({ esperado: userId });
-      this.#verificarSesion(userId);
+      // El servidor respondió 401 sin procesar nada: el reintento todavía no salió.
+      this.#verificarAntesDeEnviar(userId);
       if (nuevo === null) {
         throw error;
       }
@@ -375,14 +398,18 @@ export class MotorSync {
   async #enviarCon(
     userId: string,
     ruta: string,
-    opciones: Omit<OpcionesPeticion, 'bearer' | 'signal' | 'autenticar'>,
+    opciones: OpcionesEnvio,
     token: string,
   ): Promise<unknown> {
     const senal = this.#senal;
+    const { cuerpoAlEnviar, ...resto } = opciones;
     let respuesta: unknown;
     try {
+      // Con `bearer`, el cliente no hace ningún `await` antes del `fetch`: el cuerpo calculado aquí
+      // (con `enviado_at`) es el de ESTE envío, también en el reintento tras un 401.
       respuesta = await this.#api().peticion<unknown>(ruta, {
-        ...opciones,
+        ...resto,
+        ...(cuerpoAlEnviar === undefined ? {} : { cuerpo: cuerpoAlEnviar() }),
         bearer: token,
         signal: senal,
       });
@@ -543,16 +570,36 @@ export class MotorSync {
 
       let resultados;
       try {
+        // M7: el lote es de `userId` y la sesión sigue siendo suya (otra pestaña pudo cerrarla o
+        // cambiar de usuario mientras se armaba el lote). `#peticion` vuelve a comprobarlo justo
+        // antes del `fetch`.
+        if (lote.some((m) => m.user_id !== userId)) {
+          throw new SesionCambiada(true);
+        }
+        this.#verificarAntesDeEnviar(userId);
         const respuesta = await this.#peticion(userId, '/sync/push', {
           metodo: 'POST',
           // La época conocida viaja en el sobre (ADR 0016, A1). Sin época (nunca hubo pull) se omite.
-          cuerpo: { user_id: userId, epoca: epoca ?? undefined, mutaciones: lote.map(aMutacion) },
+          // `enviado_at` (ADR 0019, M2): la hora del dispositivo justo antes de CADA `fetch`; nunca
+          // se guarda en el outbox.
+          cuerpoAlEnviar: () => ({
+            user_id: userId,
+            epoca: epoca ?? undefined,
+            enviado_at: this.#ahora().toISOString(),
+            mutaciones: lote.map(aMutacion),
+          }),
         });
         resultados = syncPushResponseSchema.parse(respuesta).resultados;
       } catch (error) {
         if (error instanceof SesionCambiada) {
-          // El lote queda `enviando`: vuelve a la cola con `recuperarEnviando` en la próxima sync de
-          // su autor y el servidor, idempotente, devuelve lo que ya hubiera aplicado.
+          if (error.sinEnviar) {
+            // No salió nada (M7): el lote vuelve a `pendiente` tal cual. Solo cambia el estado de
+            // las filas del outbox de su autor; nada de la red se escribe en la partición.
+            await devolverAPendiente(userId, lote, this.#ahora());
+            resumen.enviadas -= lote.length;
+          }
+          // Si ya estaba en vuelo, queda `enviando`: vuelve a la cola con `recuperarEnviando` en la
+          // próxima sync de su autor y el servidor, idempotente, devuelve lo que ya hubiera aplicado.
           throw error;
         }
         if (error instanceof ErrorApi && error.code === 'EPOCA_CAMBIADA') {

@@ -3,9 +3,14 @@
 //
 // La verificación se hace en el servidor, no en la UI: la API como jefe (`GET /orders/:id/consumptions`
 // y `GET /evidences/:id`).
+//
+// M2 (ADR 0019): cada push lleva `enviado_at` y cada escritura REST `X-Hora-Dispositivo` (la hora del
+// dispositivo AL ENVIAR), y la auditoría de lo registrado sin conexión queda con `alerta_reloj = 0`
+// aunque `client_created_at` sea anterior al envío.
 
-import { expect, test } from '@playwright/test';
-import { consumosDeOrden, getCrudoComoJefe } from './apoyo/api';
+import { expect, test, type Request } from '@playwright/test';
+import type { ListaAuditoria } from '../packages/shared/src/reportes';
+import { consumosDeOrden, getComoJefe, getCrudoComoJefe } from './apoyo/api';
 import {
   abrirRegistroDeConsumo,
   esperarTodoSincronizado,
@@ -34,6 +39,20 @@ test.describe('Registro sin conexión y sincronización al reconectar', () => {
       resina: loteUnico('RESINA'),
       catalizador: loteUnico('CATAL'),
     };
+    // En el contexto (no en la página): también ve lo que envíe el Service Worker.
+    const pushes: { enviado_at?: unknown; mutaciones?: unknown[] }[] = [];
+    const subidasDeFotos: { hora: string | null; enviadaAt: number }[] = [];
+    context.on('request', (peticion: Request) => {
+      if (peticion.method() === 'POST' && peticion.url().includes('/api/v1/sync/push')) {
+        pushes.push(JSON.parse(peticion.postData() ?? '{}') as (typeof pushes)[number]);
+      }
+      if (peticion.method() === 'PUT' && peticion.url().includes('/api/v1/evidences/')) {
+        subidasDeFotos.push({
+          hora: peticion.headers()['x-hora-dispositivo'] ?? null,
+          enviadaAt: Date.now(),
+        });
+      }
+    });
 
     // 1. Con conexión: login y primera sincronización (la orden llega a la tablet).
     await iniciarSesionPorUI(page, SUPERVISOR_1);
@@ -128,5 +147,42 @@ test.describe('Registro sin conexión y sincronización al reconectar', () => {
     expect(segmentosExif(cuerpo)).toBe(0);
     expect(cuerpo.includes('Exif')).toBe(false);
     expect(cuerpo.includes(MARCA_EXIF_FIXTURE)).toBe(false);
+
+    // 10. M2: la hora de envío viaja en cada push y en la subida de la foto.
+    const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+    const conMutaciones = pushes.filter((p) => (p.mutaciones?.length ?? 0) > 0);
+    expect(conMutaciones.length).toBeGreaterThan(0);
+    for (const push of pushes) {
+      expect(push.enviado_at).toMatch(ISO);
+    }
+    expect(subidasDeFotos).toHaveLength(1);
+    expect(subidasDeFotos[0]?.hora).toMatch(ISO);
+    // La hora de la cabecera es la del momento del envío (± 1 min), no la del registro.
+    expect(
+      Math.abs(Date.parse(subidasDeFotos[0]?.hora ?? '') - (subidasDeFotos[0]?.enviadaAt ?? 0)),
+    ).toBeLessThan(60_000);
+
+    // 11. La auditoría de lo registrado sin conexión no marca el reloj: `client_at` (la hora del
+    //     registro) es anterior a `server_at`, pero la alerta compara la hora de ENVÍO.
+    const entidades: [string, string][] = [
+      ...Object.values(lotes).map((lote): [string, string] => [
+        'consumptions',
+        consumos.find((c) => c.lote === lote)?.id ?? '',
+      ]),
+      ['incidents', novedad?.id ?? ''],
+    ];
+    for (const [entidad, id] of entidades) {
+      const { entradas } = await getComoJefe<ListaAuditoria>(
+        request,
+        `/audit?entidad=${entidad}&entidad_id=${id}`,
+      );
+      expect(entradas.length, `auditoría de ${entidad} ${id}`).toBeGreaterThan(0);
+      for (const entrada of entradas) {
+        expect(entrada.alerta_reloj, `alerta_reloj de ${entrada.accion} ${id}`).toBe(false);
+        if (entrada.client_at !== null) {
+          expect(Date.parse(entrada.client_at)).toBeLessThan(Date.parse(entrada.server_at));
+        }
+      }
+    }
   });
 });

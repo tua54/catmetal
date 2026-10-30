@@ -6,8 +6,16 @@
 // - Errores: el formato único `{ code, message, details }` se convierte en `ErrorApi`; un fallo de
 //   red o un tiempo de espera agotado es `ErrorRed` (sin conexión), para poder distinguirlos.
 // - Ante 401 `NO_AUTENTICADO` se intenta UN refresh y se reintenta la petición UNA vez.
+// - Toda escritura (método distinto de GET/HEAD) lleva `X-Hora-Dispositivo` con la hora del
+//   dispositivo en el momento de CADA `fetch`, también en el reintento (ADR 0019, M2). No es un
+//   secreto: el servidor la compara con la suya para `alerta_reloj`.
 
-import { esCodigoError, MENSAJES_ERROR, type CodigoError } from '@catmetal/shared';
+import {
+  CABECERA_HORA_DISPOSITIVO,
+  esCodigoError,
+  MENSAJES_ERROR,
+  type CodigoError,
+} from '@catmetal/shared';
 
 export const BASE_API = '/api/v1';
 const TIEMPO_ESPERA_MS = 20_000;
@@ -88,7 +96,12 @@ export interface ConfiguracionCliente {
   base?: string;
   fetch?: typeof fetch;
   proveedor?: ProveedorSesion;
+  /** Reloj del dispositivo para `X-Hora-Dispositivo` (por defecto, `Date.now`). */
+  ahora?: () => number;
 }
+
+/** Métodos que no escriben: no llevan la hora del dispositivo. */
+const METODOS_DE_LECTURA: readonly string[] = ['GET', 'HEAD'];
 
 async function leerError(respuesta: Response): Promise<ErrorApi> {
   let cuerpo: unknown = null;
@@ -147,6 +160,14 @@ export function crearClienteApi(configuracion: ConfiguracionCliente = {}): Clien
     if (token !== null) {
       cabeceras.set('Authorization', `Bearer ${token}`);
     }
+    const metodo = opciones.metodo ?? 'GET';
+    if (!METODOS_DE_LECTURA.includes(metodo)) {
+      // Justo antes del `fetch` (sin `await` de por medio): la hora del envío, no la del registro.
+      cabeceras.set(
+        CABECERA_HORA_DISPOSITIVO,
+        new Date((configuracion.ahora ?? Date.now)()).toISOString(),
+      );
+    }
 
     const control = new AbortController();
     const alAbortar = (): void => control.abort(opciones.signal?.reason);
@@ -157,7 +178,7 @@ export function crearClienteApi(configuracion: ConfiguracionCliente = {}): Clien
     );
     try {
       return await hacerFetch(`${base}${ruta}`, {
-        method: opciones.metodo ?? 'GET',
+        method: metodo,
         headers: cabeceras,
         body: cuerpo,
         credentials: opciones.credenciales ?? 'same-origin',

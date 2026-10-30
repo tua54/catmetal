@@ -265,6 +265,40 @@ describe('push, pull y fotos', () => {
   });
 });
 
+describe('hora del dispositivo al enviar (ADR 0019, M2)', () => {
+  it('cada push lleva enviado_at calculado justo antes de su fetch (también al reenviar) y no se guarda', async () => {
+    for (let i = 0; i < 30; i += 1) {
+      await registrarConsumoLocal(ana.id, consumo({ lote: `L-${i}` }));
+    }
+    reloj = Date.parse('2026-10-30T12:00:00.000Z');
+    // Cada petición que llega al servidor adelanta el reloj del dispositivo 1 minuto.
+    servidor.alRecibir = () => {
+      reloj += 60_000;
+    };
+    servidor.perderRespuestaPush = 1;
+    const m = motor(sesionFalsa(servidor, ana));
+    await m.sincronizar('online');
+    await m.sincronizar('intervalo');
+    const pushes = servidor.pushes();
+    expect(pushes.length).toBeGreaterThanOrEqual(3);
+    const horas = pushes.map((p) => (p.cuerpo as { enviado_at?: unknown }).enviado_at);
+    // La hora de cada envío es la del reloj en ese momento (antes de que el servidor lo adelante).
+    for (const hora of horas) {
+      expect(typeof hora).toBe('string');
+      expect(hora).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    }
+    expect(new Set(horas).size).toBe(horas.length);
+    expect(horas[0]).toBe('2026-10-30T12:00:00.000Z');
+    // El reenvío del lote cuya respuesta se perdió (mismas mutaciones) lleva una hora nueva.
+    const lotes = servidor.mutacionesPorPush().map((ids) => ids.join(','));
+    const reenvio = lotes.findIndex((ids, i) => i > 0 && ids === lotes[0]);
+    expect(reenvio).toBeGreaterThan(0);
+    expect(horas[reenvio]).not.toBe(horas[0]);
+    // Nunca se guarda en el outbox.
+    expect(JSON.stringify(await db.outbox.toArray())).not.toContain('enviado_at');
+  });
+});
+
 describe('robustez', () => {
   it('un rechazo no bloquea a las siguientes; la dependiente queda DEPENDENCIA_RECHAZADA', async () => {
     const malo = await registrarConsumoConNovedadLocal(ana.id, consumo({ lote: 'MALO' }), {

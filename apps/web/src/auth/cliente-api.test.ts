@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from 'vitest';
+import { CABECERA_HORA_DISPOSITIVO } from '@catmetal/shared';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { crearClienteApi, ErrorApi, ErrorRed, esErrorDeRed } from './cliente-api';
 import { urlDe } from './pruebas/servidor-falso';
 
@@ -241,5 +242,59 @@ describe('crearClienteApi', () => {
       code: 'NO_AUTENTICADO',
     });
     expect(llamadas).toHaveLength(0);
+  });
+});
+
+describe('hora del dispositivo al enviar (ADR 0019, M2)', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('cada escritura lleva X-Hora-Dispositivo con la hora del momento del fetch; las lecturas no', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-30T12:00:00.000Z'));
+    const { fetch, llamadas } = fetchFalso(() => respuesta({}));
+    const api = crearClienteApi({ fetch, proveedor: proveedor() });
+    for (const metodo of ['POST', 'PUT', 'PATCH', 'DELETE'] as const) {
+      await api.peticion('/x', { metodo, cuerpo: { a: 1 } });
+      vi.setSystemTime(new Date(Date.now() + 60_000));
+    }
+    // Sin autenticar (login, refresh) y con bearer explícito (logout) también.
+    await api.peticion('/auth/login', { metodo: 'POST', autenticar: false, cuerpo: {} });
+    await api.peticion('/auth/logout', { metodo: 'POST', bearer: 'tx', credenciales: 'omit' });
+    await api.peticion('/evidences/e1', {
+      metodo: 'PUT',
+      binario: { datos: 'x', tipo: 'image/jpeg' },
+    });
+    await api.peticion('/x');
+    await api.peticion('/x', { metodo: 'GET' });
+    expect(llamadas.map((l) => cabecera(l, CABECERA_HORA_DISPOSITIVO))).toEqual([
+      '2026-10-30T12:00:00.000Z',
+      '2026-10-30T12:01:00.000Z',
+      '2026-10-30T12:02:00.000Z',
+      '2026-10-30T12:03:00.000Z',
+      '2026-10-30T12:04:00.000Z',
+      '2026-10-30T12:04:00.000Z',
+      '2026-10-30T12:04:00.000Z',
+      null,
+      null,
+    ]);
+  });
+
+  it('el reintento tras un 401 lleva la hora de SU envío, no la del primero', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-30T12:00:00.000Z'));
+    const { fetch, llamadas } = fetchFalso((_llamada, numero) => {
+      if (numero === 1) {
+        vi.setSystemTime(new Date('2026-10-30T12:00:05.000Z'));
+        return errorApi('NO_AUTENTICADO', 401);
+      }
+      return respuesta({});
+    });
+    await crearClienteApi({ fetch, proveedor: proveedor() }).peticion('/x', { metodo: 'POST' });
+    expect(llamadas.map((l) => cabecera(l, CABECERA_HORA_DISPOSITIVO))).toEqual([
+      '2026-10-30T12:00:00.000Z',
+      '2026-10-30T12:00:05.000Z',
+    ]);
   });
 });
