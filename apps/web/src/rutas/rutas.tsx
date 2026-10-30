@@ -73,15 +73,29 @@ export function crearRutas({ diseno }: OpcionesRutas): RouteObject[] {
                     titulo: 'Mis órdenes en proceso',
                     subtitulo: 'Supervisor · Registro de consumo',
                   } satisfies HandleRuta,
+                  // Pantallas del supervisor en un fragmento aparte (carga diferida por rol): el
+                  // jefe y el admin no descargan el formulario ni el compresor de fotos. Los
+                  // fragmentos igual quedan en el precache del Service Worker (funcionan offline).
                   children: [
                     {
                       index: true,
-                      element: (
-                        <PantallaEnConstruccion
-                          titulo="Mis órdenes en proceso"
-                          descripcion="Aquí verá las órdenes asignadas en proceso y podrá registrar consumos."
-                        />
-                      ),
+                      lazy: async () => ({
+                        Component: (await import('../pages/supervisor')).MisOrdenesPage,
+                      }),
+                    },
+                    {
+                      path: 'ordenes/:id',
+                      handle: { titulo: 'Detalle de orden' } satisfies HandleRuta,
+                      lazy: async () => ({
+                        Component: (await import('../pages/supervisor')).DetalleOrdenPage,
+                      }),
+                    },
+                    {
+                      path: 'ordenes/:id/registrar',
+                      handle: { titulo: 'Registro de Consumo' } satisfies HandleRuta,
+                      lazy: async () => ({
+                        Component: (await import('../pages/supervisor')).RegistroConsumoPage,
+                      }),
                     },
                   ],
                 },

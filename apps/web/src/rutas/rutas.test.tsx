@@ -38,7 +38,10 @@ describe('redirección inicial por rol', () => {
     expect(router.state.location.pathname).toBe(ruta);
     // La barra superior toma el título del `handle` de la ruta.
     expect(screen.getByRole('banner')).toHaveTextContent(titulo);
-    expect(screen.getByRole('heading', { name: 'Pantalla en construcción' })).toBeInTheDocument();
+    // Jefe y admin aún tienen el marcador de pantalla en construcción (Fase 5).
+    if (rol !== 'supervisor') {
+      expect(screen.getByRole('heading', { name: 'Pantalla en construcción' })).toBeInTheDocument();
+    }
   });
 });
 

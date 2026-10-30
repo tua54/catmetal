@@ -1,4 +1,5 @@
 import { Outlet, useMatches, useNavigate } from 'react-router';
+import { useEncabezado } from '../../app/encabezado';
 import { useSesion } from '../../auth';
 import { AvisoActualizacion } from '../../pwa/AvisoActualizacion';
 import { RUTAS } from '../../rutas/acceso';
@@ -46,6 +47,7 @@ function PildoraSync() {
 export function AppLayout() {
   const matches = useMatches();
   const hayUsuario = useSesion((estado) => estado.usuario !== null);
+  const subtituloDinamico = useEncabezado((estado) => estado.subtitulo);
   const handle = [...matches]
     .reverse()
     .map((match) => match.handle)
@@ -62,7 +64,7 @@ export function AppLayout() {
 
       <BarraSuperior
         titulo={handle?.titulo ?? TITULO_POR_DEFECTO}
-        subtitulo={handle?.subtitulo ?? SUBTITULO_POR_DEFECTO}
+        subtitulo={subtituloDinamico ?? handle?.subtitulo ?? SUBTITULO_POR_DEFECTO}
         conexion={hayUsuario ? <PildoraSync /> : undefined}
         usuario={hayUsuario ? <MenuUsuario /> : undefined}
       />

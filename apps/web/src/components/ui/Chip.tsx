@@ -14,6 +14,7 @@ export type EstadoChip =
   | 'sincronizado'
   | 'validado'
   | 'rechazado'
+  | 'conflicto'
   | 'falta_novedad'
   | 'con_novedad'
   | 'pendientes';
@@ -55,6 +56,12 @@ const DEFINICIONES: Record<EstadoChip, Definicion> = {
     tono: 'rojo',
     texto: () => 'Rechazado',
     icono: <IconoXCirculo className={ICONO} />,
+  },
+  // El registro cambió en el servidor mientras se trabajaba sin conexión (§6, reglas de conflicto).
+  conflicto: {
+    tono: 'ambar',
+    texto: () => 'Conflicto',
+    icono: <IconoAdvertencia className={ICONO} />,
   },
   falta_novedad: {
     tono: 'ambar',

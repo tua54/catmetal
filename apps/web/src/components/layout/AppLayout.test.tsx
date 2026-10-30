@@ -35,21 +35,20 @@ describe('píldora de conexión', () => {
     act(() => useEstadoSync.setState({ conexion: 'en_linea', pendientes: 0, fotosPendientes: 0 }));
     const { router } = renderizarApp('/supervisor');
     await abrirSupervisor();
-    const barra = screen.getByRole('banner');
 
     expect(
-      within(barra).getByRole('button', { name: /^En línea, Todo sincronizado/ }),
+      await screen.findByRole('button', { name: /^En línea, Todo sincronizado/ }),
     ).toBeInTheDocument();
 
     act(() =>
       useEstadoSync.setState({ conexion: 'sin_conexion', pendientes: 2, fotosPendientes: 1 }),
     );
     expect(
-      within(barra).getByRole('button', { name: /^Sin conexión, 3 por sincronizar/ }),
+      await screen.findByRole('button', { name: /^Sin conexión, 3 por sincronizar/ }),
     ).toBeInTheDocument();
 
     act(() => useEstadoSync.setState({ conexion: 'en_linea', sincronizando: true }));
-    const pildora = within(barra).getByRole('button', { name: /^Sincronizando…/ });
+    const pildora = await screen.findByRole('button', { name: /^Sincronizando…/ });
 
     await usuario.click(pildora);
     expect(router.state.location.pathname).toBe('/sincronizacion');
