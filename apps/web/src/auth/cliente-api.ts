@@ -59,6 +59,16 @@ export interface TokenEsperado {
   esperado?: string;
 }
 
+/** Opciones al pedir o refrescar el token (las usa el motor de sync). */
+export interface OpcionesToken extends TokenEsperado {
+  /**
+   * A4 (ADR 0026, Enmienda 1): si el refresh responde 426 `CLIENTE_DESACTUALIZADO`, se lanza ese
+   * `ErrorApi` en lugar de devolver `null`. Así el motor lo trata como el 426 de su propia petición
+   * (sin contar intentos ni espera) y no como "sin sesión". Sin la marca, se devuelve `null`.
+   */
+  lanzarSiDesactualizado?: boolean;
+}
+
 /** Lo que el cliente necesita de la sesión. */
 export interface ProveedorSesion {
   /** Access token vigente (refrescándolo si está por vencer), o `null` si no hay sesión de servidor. */

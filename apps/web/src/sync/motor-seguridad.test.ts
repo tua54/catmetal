@@ -139,7 +139,8 @@ describe('token ligado al usuario del lote (F4-05)', () => {
     const resumen = await motor(s).sincronizar('online');
     expect(resumen).toMatchObject({ aplicadas: 1, error: null });
     expect(refrescar).toHaveBeenCalledTimes(1);
-    expect(refrescar).toHaveBeenCalledWith({ esperado: ana.id });
+    // A4: el motor pide además que un 426 del refresh se lance (no se confunda con "sin token").
+    expect(refrescar).toHaveBeenCalledWith({ esperado: ana.id, lanzarSiDesactualizado: true });
     expect(servidor.pushes()).toHaveLength(2);
   });
 

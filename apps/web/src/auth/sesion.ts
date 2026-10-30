@@ -61,7 +61,7 @@ import {
   ErrorApi,
   ErrorRed,
   type ClienteApi,
-  type TokenEsperado,
+  type OpcionesToken,
 } from './cliente-api';
 import {
   comprobarVerificador,
@@ -249,6 +249,14 @@ interface ResultadoRefresco {
   user_id: string;
 }
 
+/**
+ * A4: el refresh respondió 426 `CLIENTE_DESACTUALIZADO` (ADR 0026, Enmienda 1). No es una sesión
+ * inválida: la cookie sigue y la versión nueva hace su propio refresh.
+ */
+interface RefrescoDesactualizado {
+  desactualizado: ErrorApi;
+}
+
 /** Resultado de un intento contra el verificador local. */
 type IntentoLocal = 'ok' | 'fallo' | 'espera' | 'sin_verificador';
 
@@ -273,7 +281,7 @@ export class GestorSesion {
   /** Usuario al que pertenece `#token` (F4-05). */
   #tokenUsuario: string | null = null;
   #expiraEn = 0;
-  #refrescoEnCurso: Promise<ResultadoRefresco | null> | null = null;
+  #refrescoEnCurso: Promise<ResultadoRefresco | RefrescoDesactualizado | null> | null = null;
   /** Se aborta cada vez que cambia el usuario de la sesión o se cierra (la sync en vuelo se corta). */
   #control = new AbortController();
   /** `cerrarSesion` en curso: no se entregan más tokens. */
@@ -912,8 +920,12 @@ export class GestorSesion {
    * de la pestaña: N llamadas simultáneas hacen UNA petición. Devuelve el access token o `null`.
    * Con `esperado`, solo devuelve un token de ESE usuario (F4-05): si la sesión ya es de otra
    * persona, ni siquiera llama al servidor.
+   *
+   * Un 426 `CLIENTE_DESACTUALIZADO` (A4) devuelve `null` sin perder la sesión; con
+   * `lanzarSiDesactualizado` (el motor de sync), lanza ese `ErrorApi`. El cliente HTTP ya avisó a
+   * la app para que se actualice.
    */
-  refrescar(ligado: TokenEsperado = {}): Promise<string | null> {
+  refrescar(ligado: OpcionesToken = {}): Promise<string | null> {
     const { esperado } = ligado;
     if (esperado !== undefined && this.#estado.usuario?.id !== esperado) {
       return Promise.resolve(null);
@@ -928,12 +940,18 @@ export class GestorSesion {
       });
       this.#refrescoEnCurso = enCurso;
     }
-    return this.#refrescoEnCurso.then((r) =>
-      r !== null && (esperado === undefined || r.user_id === esperado) ? r.token : null,
-    );
+    return this.#refrescoEnCurso.then((r) => {
+      if (r !== null && 'desactualizado' in r) {
+        if (ligado.lanzarSiDesactualizado === true) {
+          throw r.desactualizado;
+        }
+        return null;
+      }
+      return r !== null && (esperado === undefined || r.user_id === esperado) ? r.token : null;
+    });
   }
 
-  async #refrescarConCandado(): Promise<ResultadoRefresco | null> {
+  async #refrescarConCandado(): Promise<ResultadoRefresco | RefrescoDesactualizado | null> {
     let respuesta: RespuestaSesion;
     try {
       respuesta = await this.api.peticion<RespuestaSesion>('/auth/refresh', {
@@ -941,6 +959,10 @@ export class GestorSesion {
         autenticar: false,
       });
     } catch (error) {
+      if (error instanceof ErrorApi && error.code === 'CLIENTE_DESACTUALIZADO') {
+        // A4: el servidor exige una versión más nueva (no procesó nada). La sesión NO se pierde.
+        return { desactualizado: error };
+      }
       if (error instanceof ErrorApi && error.status === 401) {
         // TOKEN_INVALIDO o SESION_REVOCADA: no hay sesión del servidor para este navegador.
         this.#perderSesionDelServidor();
@@ -1009,9 +1031,10 @@ export class GestorSesion {
   /**
    * Access token vigente del usuario de la sesión: refresca si le quedan menos de 30 s. `null` si no
    * hay usuario, si es de otro usuario que `esperado`, si la sesión es offline sin sesión del
-   * servidor recuperable, si se requiere contraseña o si la sesión se está cerrando.
+   * servidor recuperable, si se requiere contraseña o si la sesión se está cerrando. Con
+   * `lanzarSiDesactualizado`, el 426 de un refresh se lanza en lugar de devolver `null` (A4).
    */
-  async obtenerAccessToken(ligado: TokenEsperado = {}): Promise<string | null> {
+  async obtenerAccessToken(ligado: OpcionesToken = {}): Promise<string | null> {
     const usuario = this.#estado.usuario;
     if (usuario === null || this.#cerrando) {
       return null;
@@ -1029,7 +1052,10 @@ export class GestorSesion {
     if (this.#estado.requiere_contrasena) {
       return null;
     }
-    return this.refrescar({ esperado: usuario.id });
+    return this.refrescar({
+      esperado: usuario.id,
+      lanzarSiDesactualizado: ligado.lanzarSiDesactualizado === true,
+    });
   }
 
   /**

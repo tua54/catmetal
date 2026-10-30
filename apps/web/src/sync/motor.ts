@@ -20,7 +20,9 @@
 // 426 `CLIENTE_DESACTUALIZADO` (B5, ADR 0026) en CUALQUIER petición: la respuesta es de la petición
 // entera, no de una mutación. El motor se detiene sin rechazar ni reprogramar nada: el lote en vuelo
 // vuelve a `pendiente` tal cual y las fotos no cuentan el intento. El cliente HTTP ya avisó a la app,
-// que se actualiza sola; la próxima sync (con la versión nueva) lo envía todo.
+// que se actualiza sola; la próxima sync (con la versión nueva) lo envía todo. Lo mismo si el 426
+// llega en el refresh que el motor hace tras un 401 (A4, ADR 0026 Enmienda 1): la sesión lo lanza
+// (`lanzarSiDesactualizado`) en lugar de devolver "sin token", que contaría un intento y espera.
 
 import {
   MAX_MUTACIONES_POR_LOTE,
@@ -43,7 +45,7 @@ import {
   ErrorRed,
   type ClienteApi,
   type OpcionesPeticion,
-  type TokenEsperado,
+  type OpcionesToken,
 } from '../auth/cliente-api';
 import type { EstadoSesion } from '../auth/sesion';
 import {
@@ -113,10 +115,16 @@ export interface ResumenSync {
 export interface SesionParaSync {
   estado(): EstadoSesion;
   usuarioDeLaSesion(): Perfil | null;
-  /** Con `esperado`, nunca devuelve el token de otro usuario (F4-05). */
-  obtenerAccessToken(ligado?: TokenEsperado): Promise<string | null>;
-  /** Refresh ligado al usuario del lote, para reintentar UNA vez tras un 401. */
-  refrescar?(ligado: TokenEsperado): Promise<string | null>;
+  /**
+   * Con `esperado`, nunca devuelve el token de otro usuario (F4-05). Con `lanzarSiDesactualizado`,
+   * un 426 `CLIENTE_DESACTUALIZADO` del refresh se lanza como `ErrorApi` (A4).
+   */
+  obtenerAccessToken(ligado?: OpcionesToken): Promise<string | null>;
+  /**
+   * Refresh ligado al usuario del lote, para reintentar UNA vez tras un 401. Con
+   * `lanzarSiDesactualizado`, un 426 `CLIENTE_DESACTUALIZADO` se lanza como `ErrorApi` (A4).
+   */
+  refrescar?(ligado: OpcionesToken): Promise<string | null>;
   /** Se aborta cuando cambia o se cierra la sesión: corta las peticiones en vuelo. */
   senalDeSesion?(): AbortSignal;
   marcarRequiereContrasena(): void;
@@ -388,10 +396,15 @@ export class MotorSync {
    * Petición autenticada con un token ligado a `userId` (F4-05): nunca con el de otra persona ni con
    * el auto-refresh del cliente (que tomaría la sesión que haya en ese momento). Ante 401 se
    * refresca UNA vez para ese mismo usuario. La sesión se revalida tras cada `await`.
+   *
+   * A4: si el refresh (aquí o dentro de `obtenerAccessToken`) responde 426 `CLIENTE_DESACTUALIZADO`,
+   * se lanza ese `ErrorApi`, igual que el 426 de la propia petición: quien llama lo trata sin contar
+   * intentos ni aplicar espera.
    */
   async #peticion(userId: string, ruta: string, opciones: OpcionesEnvio = {}): Promise<unknown> {
     const sesion = this.#opciones.sesion;
-    const token = await sesion.obtenerAccessToken({ esperado: userId });
+    const ligado: OpcionesToken = { esperado: userId, lanzarSiDesactualizado: true };
+    const token = await sesion.obtenerAccessToken(ligado);
     this.#verificarAntesDeEnviar(userId);
     if (token === null) {
       throw new ErrorApi('NO_AUTENTICADO', 401);
@@ -405,7 +418,7 @@ export class MotorSync {
       ) {
         throw error;
       }
-      const nuevo = await sesion.refrescar({ esperado: userId });
+      const nuevo = await sesion.refrescar(ligado);
       // El servidor respondió 401 sin procesar nada: el reintento todavía no salió.
       this.#verificarAntesDeEnviar(userId);
       if (nuevo === null) {
@@ -655,7 +668,8 @@ export class MotorSync {
         }
         if (esClienteDesactualizado(error)) {
           // B5: el servidor no procesó nada (rechazó la petición entera, no una mutación). El lote
-          // vuelve a `pendiente` sin contar el intento ni backoff, y la sync se detiene.
+          // vuelve a `pendiente` sin contar el intento ni backoff, y la sync se detiene. A4: también
+          // si el 426 llegó en el refresh tras un 401 (el push tampoco se procesó).
           await devolverAPendiente(userId, lote, this.#ahora());
           resumen.enviadas -= lote.length;
           resumen.error = errorSyncDe(error);
