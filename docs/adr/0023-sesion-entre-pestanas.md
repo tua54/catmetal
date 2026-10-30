@@ -83,3 +83,12 @@ Se adopta la opción 2.
 ### Cómo revertir
 
 Quitar el tipo `actividad`, la marca compartida y el campo `motivo`, y volver a la regla por pestaña.
+
+### Notas de implementación (A2)
+
+- `GestorSesion` guarda la interacción propia, la actividad recibida y lee la marca; decide la respuesta a un `bloqueo`. El vigilante (`inactividad.ts`) lleva los temporizadores: el plazo y el aviso. Así comparten el mismo canal y el mismo `origen`, sin cambiar el arranque.
+- El aviso `actividad` sale al **final** de cada intervalo de 5 s (`INTERVALO_AVISO_ACTIVIDAD_MS`), con la última interacción de la ráfaga.
+- Un `bloqueo` con un `motivo` desconocido o mal formado se trata como "sin motivo": bloquea siempre. Un `actividad` mal formado (sin `user_id`, `at` no finito) se ignora.
+- La marca compartida no retrocede: no se sobrescribe con un `at` más viejo del mismo usuario, salvo que la existente sea del futuro.
+- Solo se avisan interacciones reales (`pointerdown`, `keydown` con la sesión activa). El reinicio del plazo al entrar o desbloquear es local.
+- "Dentro del plazo" es `0 ≤ ahora − interacción < 10 min`, la misma frontera con la que bloquea el vigilante.
