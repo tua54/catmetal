@@ -83,3 +83,17 @@ Se adopta la **opción (b)**, con una definición general de "marca".
 ## Cómo revertir
 
 Volver a las condiciones por valor en un commit `revert:`. La columna `escritura_id` puede quedarse: es anulable y nadie la lee fuera de estas condiciones. Las pruebas deterministas de A1 volverían a fallar, y eso documenta el riesgo que se reabre.
+
+## Notas de implementación (A1)
+
+Desvíos menores respecto del texto de la decisión, todos hacia el lado conservador:
+
+1. **`porPkNueva`** solo admite `refresh_tokens`, `materials` y `users` (tablas cuya PK genera el servidor), y hoy solo se usa en `refresh_tokens` (rotación y reintento de `emitirSucesor`).
+2. **`porReserva(userId, origen | null, reservaId, { bloqueada })`**: `origen` nulo cubre el reinicio del admin, que afecta varias filas del usuario; `bloqueada` exige además que esa escritura haya dejado un bloqueo.
+3. **Reinicios de cupos** en dos UPDATE: uno de desbloqueo, que fija un `reserva_id` nuevo y se audita, y otro que pone en 0 los fallos sin bloqueo, sin auditar. El efecto neto es el de antes.
+4. **`sentenciaDependiente(db, sql, parametros, condicion)`**: el SQL termina en el marcador `{condicion_de_escritura}`, una sola vez, y se sustituye por la condición. Lo usan la fila `aplicada` de `sync_mutations` (con `plan.aplicada`, obligatorio en el push), las hijas, la revocación de todas las sesiones y los reinicios de cupos.
+5. **Backup**: la consulta de página pasa de `t.*` a la lista explícita de `columnas`, necesario para no exportar `escritura_id` (`columnasTecnicas`). `scripts/restauracion-nucleo.mjs` no cambia: ya usa `columnas`.
+6. **`order_planned_materials.escritura_id`** existe pero ninguna escritura la fija: las filas planeadas se encadenan a la marca de la orden y nunca se actualizan. `material.crear`, `usuario.crear`, `sesion.inicio` y `dispositivo.registro` siguen con auditoría incondicional, porque son `INSERT … VALUES`, que aborta el batch entero si la fila ya existe.
+7. **Regla de orden en el login**: UPDATE del rehash, su auditoría, UPDATE del desbloqueo heredado, su auditoría.
+8. **La marca también es testigo de concurrencia optimista (N1).** Materiales, settings y asignaciones comparaban solo `updated_at` o el valor leído: con escrituras en el mismo milisegundo, o con un valor que vuelve al anterior (ABA), una edición basada en una lectura vieja se aplicaba con un `datos_antes` falso. Ahora la principal exige además `escritura_id IS <la leída>`. En `users` se agrega igual, como defensa. Efecto visible: un admin que edita a un usuario mientras ese usuario inicia sesión (rehash o desbloqueo heredado en el mismo instante) recibe 409 y reintenta.
+9. La lectura B11 de aprobar y rechazar queda `v.id = ? AND v.escritura_id = ? AND c.estado = ? AND c.version = ?`. `condicionAplicada` de `/sync/push` desaparece.
