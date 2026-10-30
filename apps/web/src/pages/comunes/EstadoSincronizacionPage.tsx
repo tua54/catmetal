@@ -18,12 +18,16 @@ import {
   consumosRechazados,
   db,
   leerMetaSync,
+  ErrorDatosLocales,
+  mutacionesAtascadas,
   mutacionesConProblema,
+  reenviarPerdido,
   type ConsumoLocal,
   type ErrorSync,
   type MaterialLocal,
   type MutacionOutbox,
 } from '../../datos';
+import { consumosPerdidos } from '../../features/consumos/consultas';
 import { textoIndicador, useEstadoSync, type ResumenSync } from '../../sync';
 
 const NOMBRE_MUTACION: Readonly<Record<MutacionOutbox['tipo'], string>> = {
@@ -46,6 +50,10 @@ interface DatosSincronizacion {
   pendientes: ConsumoLocal[];
   rechazadosPorJefe: ConsumoLocal[];
   problemas: MutacionOutbox[];
+  /** Consumos propios que el servidor perdió en una restauración (ADR 0016). */
+  perdidos: ConsumoLocal[];
+  /** Mutaciones en cola con 10 o más intentos fallidos transitorios. */
+  atascadas: MutacionOutbox[];
   /** Consumos afectados por las mutaciones con problema (por id). */
   consumos: Map<string, ConsumoLocal>;
   materiales: Map<string, MaterialLocal>;
@@ -53,16 +61,18 @@ interface DatosSincronizacion {
 }
 
 async function leerDatos(userId: string): Promise<DatosSincronizacion> {
-  const [pendientes, rechazados, problemas, meta] = await Promise.all([
+  const [pendientes, rechazados, problemas, meta, perdidos, atascadas] = await Promise.all([
     consumosPendientesDeSync(userId),
     consumosRechazados(userId),
     mutacionesConProblema(userId),
     leerMetaSync(userId),
+    consumosPerdidos(userId),
+    mutacionesAtascadas(userId),
   ]);
-  const idsConsumo = [...new Set(problemas.map((m) => m.consumo_id))];
+  const idsConsumo = [...new Set([...problemas, ...atascadas].map((m) => m.consumo_id))];
   const afectados = await db.consumos.bulkGet(idsConsumo.map((id) => [userId, id]));
   const consumos = new Map<string, ConsumoLocal>();
-  for (const consumo of [...pendientes, ...rechazados, ...afectados]) {
+  for (const consumo of [...pendientes, ...rechazados, ...perdidos, ...afectados]) {
     if (consumo !== undefined) {
       consumos.set(consumo.id, consumo);
     }
@@ -79,10 +89,18 @@ async function leerDatos(userId: string): Promise<DatosSincronizacion> {
     // Los rechazos del SERVIDOR al sincronizar ya están en `problemas` (con código y mensaje).
     rechazadosPorJefe: rechazados.filter((c) => c.estado_local === 'rechazado'),
     problemas,
+    perdidos,
+    atascadas,
     consumos,
     materiales,
     ultimoSync: meta.ultimo_sync_at,
   };
+}
+
+function textoAtascadas(cantidad: number): string {
+  return cantidad === 1
+    ? '1 registro no se ha podido enviar después de varios intentos. Avise a soporte.'
+    : `${cantidad} registros no se han podido enviar después de varios intentos. Avise a soporte.`;
 }
 
 function nombreMaterial(datos: DatosSincronizacion, consumo: ConsumoLocal): string {
@@ -106,9 +124,10 @@ export function EstadoSincronizacionPage() {
   const usuario = useSesion((estado) => estado.usuario);
   const requiereContrasena = useSesion((estado) => estado.requiere_contrasena);
   const estadoSync = useEstadoSync();
-  const { sincronizarAhora } = useSincronizacion();
+  const { sincronizarAhora, cambioLocal } = useSincronizacion();
   const { mostrar } = useAvisos();
   const [pedida, setPedida] = useState(false);
+  const [reenviando, setReenviando] = useState<string | null>(null);
 
   const userId = usuario?.id ?? null;
   const consulta = useCallback(
@@ -164,6 +183,33 @@ export function EstadoSincronizacionPage() {
     }
   }
 
+  async function reenviar(consumo: ConsumoLocal) {
+    if (userId === null) {
+      return;
+    }
+    setReenviando(consumo.id);
+    try {
+      await reenviarPerdido(userId, consumo.id);
+      cambioLocal();
+      mostrar({
+        tono: 'exito',
+        titulo: 'Registro puesto en cola para enviar',
+        mensaje: 'Se enviará al servidor en la próxima sincronización.',
+      });
+    } catch (causa) {
+      mostrar({
+        tono: 'error',
+        titulo: 'No se pudo enviar de nuevo',
+        mensaje:
+          causa instanceof ErrorDatosLocales
+            ? causa.message
+            : 'Ocurrió un error inesperado. El registro sigue guardado en esta tablet.',
+      });
+    } finally {
+      setReenviando(null);
+    }
+  }
+
   const ultimoSync = estadoSync.ultimoSync ?? datos?.ultimoSync ?? null;
   const rechazados = datos?.problemas.filter((m) => m.estado === 'rechazada') ?? [];
   const conflictos = datos?.problemas.filter((m) => m.estado === 'conflicto') ?? [];
@@ -205,6 +251,34 @@ export function EstadoSincronizacionPage() {
             </Aviso>
           )}
 
+          {estadoSync.atascadas > 0 && (
+            <Aviso tono="error" anunciar titulo={textoAtascadas(estadoSync.atascadas)}>
+              {datos && datos.atascadas.length > 0 && (
+                <ul
+                  aria-label="Registros que no se han podido enviar"
+                  className="mt-2 flex flex-col gap-3"
+                >
+                  {datos.atascadas.map((mutacion) => (
+                    <li key={mutacion.mutation_id} className="cifras text-[0.9375rem]">
+                      <span className="block font-semibold text-ink-950">
+                        {NOMBRE_MUTACION[mutacion.tipo]} ·{' '}
+                        {formatearFechaHora(mutacion.client_created_at)}
+                      </span>
+                      <span className="block">
+                        Último error:{' '}
+                        {mutacion.error
+                          ? mensajeErrorSync(mutacion.error)
+                          : 'sin respuesta del servidor'}
+                        {mutacion.error?.code ? ` (${mutacion.error.code})` : ''} ·{' '}
+                        {mutacion.intentos} intentos
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Aviso>
+          )}
+
           <Boton
             tamano="grande"
             anchoCompleto
@@ -230,6 +304,42 @@ export function EstadoSincronizacionPage() {
           )}
           {datos && (
             <>
+              {datos.perdidos.length > 0 && (
+                <Tarjeta titulo="Registros que el servidor perdió">
+                  <p className="text-ink-700">
+                    El servidor se restauró desde una copia anterior y ya no tiene estos registros.
+                    Siguen guardados en esta tablet: envíelos de nuevo.
+                  </p>
+                  <ul
+                    aria-label="Registros que el servidor perdió"
+                    className="mt-4 flex flex-col gap-3"
+                  >
+                    {datos.perdidos.map((consumo) => (
+                      <li
+                        key={consumo.id}
+                        className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-l-[6px] border-warning-500 bg-warning-100 p-4 text-ink-700"
+                      >
+                        <span className="cifras min-w-0">
+                          <span className="block font-semibold text-ink-950">
+                            {nombreMaterial(datos, consumo)}
+                          </span>
+                          {formatearCantidad(consumo.cantidad)} {consumo.unidad} · Lote{' '}
+                          {consumo.lote} · {formatearFechaHora(consumo.client_created_at)}
+                        </span>
+                        <Boton
+                          cargando={reenviando === consumo.id}
+                          textoCargando="Enviando…"
+                          aria-label={`Enviar de nuevo: ${nombreMaterial(datos, consumo)}, lote ${consumo.lote}`}
+                          onClick={() => void reenviar(consumo)}
+                        >
+                          Enviar de nuevo
+                        </Boton>
+                      </li>
+                    ))}
+                  </ul>
+                </Tarjeta>
+              )}
+
               <Tarjeta
                 titulo="Pendientes de enviar"
                 acciones={

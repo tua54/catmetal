@@ -105,6 +105,20 @@ export async function registrosDeHoyDeOrden(
   }));
 }
 
+/**
+ * Consumos propios que el servidor perdió tras una restauración (`perdido_en_restauracion`, ADR
+ * 0016): siguen en la tablet y se pueden enviar de nuevo con `reenviarPerdido`.
+ */
+export async function consumosPerdidos(userId: string): Promise<ConsumoLocal[]> {
+  const filas = await db.consumos
+    .where(':id')
+    .between(...rangoDe(userId))
+    .toArray();
+  return filas
+    .filter((c) => c.perdido_en_restauracion === true && c.registrado_por === userId)
+    .sort((a, b) => b.client_created_at.localeCompare(a.client_created_at));
+}
+
 /** Nombre del material para la UI (el catálogo local puede no tenerlo todavía). */
 export function nombreDeMaterial(registro: { material: MaterialLocal | null }): string {
   return registro.material?.nombre ?? 'Material sin catálogo local';

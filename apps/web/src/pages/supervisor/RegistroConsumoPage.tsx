@@ -5,7 +5,12 @@ import { useSubtituloBarra } from '../../app/encabezado';
 import { useConsultaLocal } from '../../app/useConsultaLocal';
 import { useSesion } from '../../auth';
 import { Aviso, EstadoVacio, Tarjeta, useAvisos } from '../../components/ui';
-import { novedadesDeConsumo, type ConsumoLocal } from '../../datos';
+import {
+  ErrorDatosLocales,
+  novedadesDeConsumo,
+  reenviarPerdido,
+  type ConsumoLocal,
+} from '../../datos';
 import {
   consumoConMaterial,
   datosDeOrden,
@@ -32,7 +37,9 @@ const PARAMETROS = {
 
 type Parametro = keyof typeof PARAMETROS;
 
-const PARAMETRO_DE_ACCION: Readonly<Record<Exclude<AccionElegida, 'justificar'>, Parametro>> = {
+const PARAMETRO_DE_ACCION: Readonly<
+  Record<Exclude<AccionElegida, 'justificar' | 'reenviar'>, Parametro>
+> = {
   editar: 'editar',
   corregir: 'corrige',
   registrarDeNuevo: 'copia',
@@ -144,10 +151,33 @@ export function RegistroConsumoPage() {
     mostrar({ tono: 'error', titulo: 'No se pudo guardar', mensaje });
   }
 
+  /** Consumo que el servidor perdió en una restauración: se vuelve a encolar (ADR 0016). */
+  async function reenviar(consumo: ConsumoLocal) {
+    try {
+      await reenviarPerdido(userId, consumo.id);
+      cambioLocal();
+      mostrar({
+        tono: 'exito',
+        titulo: 'Registro puesto en cola para enviar',
+        mensaje: 'Se enviará al servidor en la próxima sincronización.',
+      });
+    } catch (error) {
+      alFallar(
+        error instanceof ErrorDatosLocales
+          ? error.message
+          : 'Ocurrió un error inesperado. El registro sigue guardado en esta tablet.',
+      );
+    }
+  }
+
   function alElegir(accion: AccionElegida, consumo: ConsumoLocal) {
     setAbierto(null);
     if (accion === 'justificar') {
       setJustificando(consumo);
+      return;
+    }
+    if (accion === 'reenviar') {
+      void reenviar(consumo);
       return;
     }
     setParams({ [PARAMETRO_DE_ACCION[accion]]: consumo.id });

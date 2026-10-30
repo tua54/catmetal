@@ -15,6 +15,7 @@ export type EstadoChip =
   | 'validado'
   | 'rechazado'
   | 'conflicto'
+  | 'perdido'
   | 'falta_novedad'
   | 'con_novedad'
   | 'pendientes';
@@ -61,6 +62,12 @@ const DEFINICIONES: Record<EstadoChip, Definicion> = {
   conflicto: {
     tono: 'ambar',
     texto: () => 'Conflicto',
+    icono: <IconoAdvertencia className={ICONO} />,
+  },
+  // El servidor se restauró y ya no tiene el consumo; sigue en la tablet (ADR 0016).
+  perdido: {
+    tono: 'ambar',
+    texto: () => 'Perdido en el servidor',
     icono: <IconoAdvertencia className={ICONO} />,
   },
   falta_novedad: {

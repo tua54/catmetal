@@ -575,6 +575,36 @@ describe('Registros de hoy', () => {
     expect(edicion?.payload).not.toHaveProperty('lote');
   });
 
+  it('perdido en el servidor → chip accionable → enviar de nuevo (ADR 0016)', async () => {
+    const usuario = userEvent.setup();
+    const perdido = await sembrarConsumo(
+      { estado_local: 'sincronizado', perdido_en_restauracion: true },
+      { estado: 'pendiente' },
+      'L-PERD',
+    );
+    const { sincronizacion } = await abrirRegistro();
+
+    await usuario.click(
+      await screen.findByRole('button', {
+        name: /Perdido en el servidor, enviarlo de nuevo de Arena sílice/,
+      }),
+    );
+    const dialogo = screen.getByRole('dialog', { name: 'Arena sílice' });
+    expect(dialogo).toHaveTextContent('ya no tiene este registro');
+    expect(within(dialogo).queryByRole('button', { name: /Editar/ })).not.toBeInTheDocument();
+    await usuario.click(within(dialogo).getByRole('button', { name: 'Enviar de nuevo' }));
+
+    expect(await screen.findByText('Registro puesto en cola para enviar')).toBeInTheDocument();
+    expect(sincronizacion.cambioLocal).toHaveBeenCalledTimes(1);
+    const enCola = (await mutaciones()).filter((m) => m.estado === 'pendiente');
+    expect(enCola).toEqual([
+      expect.objectContaining({ tipo: 'consumo.crear', entidad_id: perdido }),
+    ]);
+    await waitFor(() =>
+      expect(screen.queryByText('Perdido en el servidor')).not.toBeInTheDocument(),
+    );
+  });
+
   it('un consumo validado no ofrece editar ni corregir; la URL tampoco lo permite', async () => {
     const validado = await sembrarConsumo(
       { estado_local: 'aprobado' },

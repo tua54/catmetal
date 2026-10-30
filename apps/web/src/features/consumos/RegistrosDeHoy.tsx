@@ -41,6 +41,7 @@ export function RegistrosDeHoy({ userId, codigoOrden, registros, alAbrir }: Prop
               acciones.corregir ||
               acciones.justificar ||
               acciones.registrarDeNuevo ||
+              acciones.reenviar ||
               chip === 'rechazado' ||
               chip === 'conflicto';
             const error =

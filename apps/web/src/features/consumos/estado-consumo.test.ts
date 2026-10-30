@@ -60,6 +60,27 @@ describe('chip por estado (§8)', () => {
   });
 });
 
+describe('consumo perdido en el servidor (ADR 0016)', () => {
+  it('chip propio, explicación y la única acción es enviarlo de nuevo', () => {
+    const perdido = consumo({
+      estado_local: 'sincronizado',
+      servidor: enServidor('pendiente'),
+      perdido_en_restauracion: true,
+      falta_novedad: true,
+    });
+    expect(chipDeConsumo(perdido)).toBe('perdido');
+    expect(explicacionEstado(perdido)).toMatch(/ya no tiene este registro/);
+    expect(accionesDeConsumo(perdido, YO)).toEqual({
+      editar: false,
+      corregir: false,
+      registrarDeNuevo: false,
+      justificar: false,
+      reenviar: true,
+    });
+    expect(accionesDeConsumo({ ...perdido, registrado_por: 'otro' }, YO).reenviar).toBe(false);
+  });
+});
+
 describe('acciones por estado', () => {
   it('S4: edita su consumo pendiente (local o ya en el servidor), no uno ajeno', () => {
     expect(accionesDeConsumo(consumo(), YO).editar).toBe(true);
@@ -79,6 +100,7 @@ describe('acciones por estado', () => {
       corregir: true,
       registrarDeNuevo: false,
       justificar: false,
+      reenviar: false,
     });
   });
 
@@ -89,6 +111,7 @@ describe('acciones por estado', () => {
       corregir: false,
       registrarDeNuevo: false,
       justificar: false,
+      reenviar: false,
     });
   });
 

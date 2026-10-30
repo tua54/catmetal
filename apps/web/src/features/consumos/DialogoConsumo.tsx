@@ -9,7 +9,7 @@ import {
   mensajeErrorSync,
 } from './estado-consumo';
 
-export type AccionElegida = 'editar' | 'corregir' | 'registrarDeNuevo' | 'justificar';
+export type AccionElegida = 'editar' | 'corregir' | 'registrarDeNuevo' | 'justificar' | 'reenviar';
 
 export interface PropsDialogoConsumo {
   userId: string;
@@ -91,6 +91,11 @@ function Contenido({
       </div>
 
       <div className="mt-6 flex flex-col gap-3">
+        {acciones.reenviar && (
+          <Boton tamano="grande" anchoCompleto onClick={() => alElegir('reenviar', consumo)}>
+            Enviar de nuevo
+          </Boton>
+        )}
         {acciones.corregir && (
           <Boton tamano="grande" anchoCompleto onClick={() => alElegir('corregir', consumo)}>
             Crear corrección

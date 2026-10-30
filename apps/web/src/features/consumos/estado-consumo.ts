@@ -14,6 +14,8 @@ export interface AccionesConsumo {
   registrarDeNuevo: boolean;
   /** El servidor marcó `requiere_novedad` y no hay novedad: justificarla. */
   justificar: boolean;
+  /** El servidor perdió el consumo en una restauración (ADR 0016): enviarlo de nuevo. */
+  reenviar: boolean;
 }
 
 /** El consumo fue rechazado por el jefe (en el servidor). */
@@ -26,16 +28,31 @@ export function accionesDeConsumo(c: ConsumoLocal, userId: string): AccionesCons
   const creacionRechazada = c.servidor === null && c.estado_local === 'rechazado_sync';
   const validado = c.estado_local === 'aprobado' || c.servidor?.estado === 'aprobado';
   const rechazado = rechazadoPorJefe(c);
+  const perdido = c.perdido_en_restauracion === true;
+  if (perdido) {
+    // El servidor ya no lo tiene: lo único que tiene sentido es enviarlo de nuevo.
+    return {
+      editar: false,
+      corregir: false,
+      registrarDeNuevo: false,
+      justificar: false,
+      reenviar: propio,
+    };
+  }
   return {
     editar: propio && !creacionRechazada && !validado && !rechazado,
     corregir: propio && rechazado,
     registrarDeNuevo: propio && creacionRechazada,
     justificar: propio && c.falta_novedad && !rechazado && !creacionRechazada,
+    reenviar: false,
   };
 }
 
 /** Chip de estado de la fila (§8: Pendiente de sync / Sincronizado / Validado / Rechazado / Falta novedad). */
 export function chipDeConsumo(c: ConsumoLocal): EstadoChip {
+  if (c.perdido_en_restauracion === true) {
+    return 'perdido';
+  }
   switch (c.estado_local) {
     case 'aprobado':
       return 'validado';
@@ -61,6 +78,8 @@ export function textoAccionChip(chip: EstadoChip): string {
       return 'justificar la novedad';
     case 'conflicto':
       return 'ver el conflicto';
+    case 'perdido':
+      return 'enviarlo de nuevo';
     default:
       return 'ver opciones';
   }
@@ -76,6 +95,9 @@ export function mensajeErrorSync(error: ErrorSync | null): string {
 
 /** Explicación del estado para el diálogo del consumo. */
 export function explicacionEstado(c: ConsumoLocal): string {
+  if (c.perdido_en_restauracion === true) {
+    return 'El servidor se restauró desde una copia anterior y ya no tiene este registro. Sigue guardado en esta tablet: envíelo de nuevo.';
+  }
   switch (c.estado_local) {
     case 'pendiente_sync':
       return 'Guardado en esta tablet. Se enviará al servidor al recuperar señal.';
