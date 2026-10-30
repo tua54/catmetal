@@ -56,7 +56,7 @@ Los cambios de la spec de esta ronda están en `docs/spec.md` §14 (v2.1).
 
 ### M2. `alerta_reloj` marca casi todo lo registrado offline (spec §6, v2.1)
 
-- **Estado**: PARCIAL: servidor RESUELTO (d498af3); falta el cliente (`enviado_at`, `X-Hora-Dispositivo`) y la E2E. ADR 0019.
+- **Estado**: RESUELTO: servidor (d498af3) y cliente con E2E (ea2b5df). ADR 0019. Pruebas: `apps/worker/test/correcciones-m2-alerta-reloj.test.ts`, `apps/web/src/sync/motor.test.ts` y `auth/cliente-api.test.ts` (M2), y `e2e/registro-offline.spec.ts`.
 
 - **Dónde**: `apps/worker/src/auditoria/auditar.ts:220-229` (`calcularAlertaReloj`), alimentado con `client_created_at` en `dominio/consumos.ts:366` y otros sitios.
 - **Aceptación**:
@@ -112,6 +112,8 @@ Los cambios de la spec de esta ronda están en `docs/spec.md` §14 (v2.1).
   - Hay pruebas de ambos casos.
 
 ### M7. Cerrar sesión no se propaga a otras pestañas o ventanas
+
+- **Estado**: RESUELTO (ea2b5df). ADR 0023. Pruebas: `apps/web/src/auth/sesion-pestanas.test.ts`, `canal-sesion.test.ts`, `apps/web/src/sync/motor-seguridad.test.ts` (M7) y `e2e/sesion-multipestana.spec.ts`.
 
 - **Dónde**: `apps/web/src/auth/sesion.ts:815-865`. No hay `BroadcastChannel` ni evento `storage`.
 - **Aceptación**:
