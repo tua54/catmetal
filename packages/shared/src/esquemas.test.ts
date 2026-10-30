@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { z } from 'zod';
+import { z } from 'zod';
 import {
   aprobarSchema,
   asignarSupervisoresSchema,
@@ -887,5 +887,13 @@ describe('syncPushRequestSchema: época opcional (ADR 0016)', () => {
   it('rechaza una época vacía o demasiado larga', () => {
     expect(syncPushRequestSchema.safeParse({ ...base, epoca: '' }).success).toBe(false);
     expect(syncPushRequestSchema.safeParse({ ...base, epoca: 'x'.repeat(65) }).success).toBe(false);
+  });
+});
+
+describe('configuración global de Zod', () => {
+  it('desactiva la compilación JIT (sin new Function, compatible con la CSP) y mantiene el español', () => {
+    expect(z.config().jitless).toBe(true);
+    const r = loginSchema.safeParse({ email: 1 });
+    expect(r.success).toBe(false);
   });
 });

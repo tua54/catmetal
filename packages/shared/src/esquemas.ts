@@ -21,7 +21,10 @@ import { CODIGOS_ERROR } from './errores';
 import { esUuidV7, REGEX_UUID_V7 } from './uuid';
 
 // Efecto global intencional: todos los mensajes genéricos de Zod en español, en la PWA y en el Worker.
-z.config(z.locales.es());
+// `jitless`: Zod 4 compila los objetos con `new Function`; la CSP de la PWA (`script-src 'self'`, sin
+// `unsafe-eval`) y el runtime de Workers lo bloquean y Zod recurre a su respaldo, pero el intento deja
+// una violación de CSP en la consola (Lighthouse, Best Practices). Se desactiva la compilación JIT.
+z.config({ ...z.locales.es(), jitless: true });
 
 // ---------------------------------------------------------------------------------------------
 // Primitivos
