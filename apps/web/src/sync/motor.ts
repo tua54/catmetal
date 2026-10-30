@@ -23,6 +23,13 @@
 // que se actualiza sola; la próxima sync (con la versión nueva) lo envía todo. Lo mismo si el 426
 // llega en el refresh que el motor hace tras un 401 (A4, ADR 0026 Enmienda 1): la sesión lo lanza
 // (`lanzarSiDesactualizado`) en lugar de devolver "sin token", que contaría un intento y espera.
+//
+// Cuota de almacenamiento agotada en la descarga (A7, ADR 0022 Enmienda 1): si el pull o el snapshot
+// fallan con `QuotaExceededError`, se descarta el área temporal (el estado vivo no se toca), la
+// descarga del usuario queda en espera exponencial (`calcularRetrasoMs`, como los transitorios) y se
+// avisa "Almacenamiento lleno: sincroniza o libera espacio" mientras dure. El push y las fotos siguen
+// saliendo, porque liberan espacio. Con un cambio de época pendiente nada se adelanta: el push recibe
+// `EPOCA_CAMBIADA` sin procesarse y el reenvío espera al reemplazo (ADR 0009 y 0022 punto 5).
 
 import {
   MAX_MUTACIONES_POR_LOTE,
@@ -58,6 +65,7 @@ import {
 import {
   completarSnapshot,
   descartarSnapshot,
+  esCuotaAgotada,
   guardarPaginaSnapshot,
   leerProgresoSnapshot,
   progresoVigente,
@@ -66,6 +74,7 @@ import {
   aMutacion,
   aplicarResultados,
   bloquearEvidencia,
+  calcularRetrasoMs,
   devolverAPendiente,
   evidenciasListasParaSubir,
   marcarEnviando,
@@ -78,7 +87,12 @@ import {
 import { ErrorDatosLocales } from '../datos/errores';
 import type { ErrorSync } from '../datos/tipos';
 import { registrarEvento } from '../datos/trazabilidad';
-import { actualizarContadores, useEstadoSync, type StoreEstadoSync } from './estado';
+import {
+  actualizarContadores,
+  AVISO_ALMACENAMIENTO_LLENO,
+  useEstadoSync,
+  type StoreEstadoSync,
+} from './estado';
 
 export { NOMBRE_CANDADO_SYNC };
 
@@ -108,6 +122,11 @@ export interface ResumenSync {
   fotos_con_error: number;
   /** Siguiente intento programado por backoff, si quedó algo sin resultado. */
   siguiente_intento_at: string | null;
+  /**
+   * A7: la descarga del servidor no cabe (cuota agotada) o sigue en espera por eso. `error` lleva
+   * entonces el aviso de almacenamiento lleno.
+   */
+  almacenamiento_lleno: boolean;
   error: ErrorSync | null;
 }
 
@@ -253,6 +272,25 @@ function detieneLaRed(error: ErrorSync): boolean {
   );
 }
 
+/** A7: error de la sincronización mientras la cuota de almacenamiento está agotada. */
+function errorAlmacenamientoLleno(): ErrorSync {
+  return { code: 'ERROR_INTERNO', message: AVISO_ALMACENAMIENTO_LLENO };
+}
+
+function esErrorAlmacenamientoLleno(error: ErrorSync | null): boolean {
+  return (
+    error !== null && error.code === 'ERROR_INTERNO' && error.message === AVISO_ALMACENAMIENTO_LLENO
+  );
+}
+
+/** A7: descarga en espera por cuota agotada (por usuario, en memoria de la pestaña). */
+interface EsperaCuota {
+  /** Fallos por cuota seguidos: la espera crece con ellos. */
+  fallos: number;
+  /** No se vuelve a intentar la descarga antes de este instante (ms). */
+  hasta: number;
+}
+
 /** B5: el servidor exige una versión más nueva de la app (426 de la petición entera). */
 function esClienteDesactualizado(error: unknown): error is ErrorApi {
   return error instanceof ErrorApi && error.code === 'CLIENTE_DESACTUALIZADO';
@@ -276,6 +314,7 @@ function resumenVacio(motivo: MotivoSync): ResumenSync {
     fotos_subidas: 0,
     fotos_con_error: 0,
     siguiente_intento_at: null,
+    almacenamiento_lleno: false,
     error: null,
   };
 }
@@ -301,6 +340,11 @@ export class MotorSync {
   #repetir = false;
   /** Señal de la sesión de la sincronización en curso (una a la vez: candado). */
   #senal: AbortSignal = SIN_SENAL;
+  /**
+   * A7: usuarios cuya descarga falló por cuota agotada. En memoria: al recargar la app se intenta una
+   * vez y, si sigue sin caber, vuelve la espera. Nunca hay un bucle inmediato.
+   */
+  readonly #esperaCuota = new Map<string, EsperaCuota>();
 
   constructor(opciones: OpcionesMotor) {
     this.#opciones = opciones;
@@ -337,7 +381,14 @@ export class MotorSync {
 
   async #ejecutarConRepeticion(motivo: MotivoSync): Promise<ResumenSync> {
     let resumen = await this.#conCandado(motivo);
-    while (this.#repetir && resumen.ejecutada && resumen.error === null && resumen.user_id) {
+    // A7: con el almacenamiento lleno también se repite: la descarga está en espera (no se vuelve a
+    // pedir), pero lo registrado mientras tanto debe salir.
+    while (
+      this.#repetir &&
+      resumen.ejecutada &&
+      (resumen.error === null || esErrorAlmacenamientoLleno(resumen.error)) &&
+      resumen.user_id
+    ) {
       this.#repetir = false;
       const listas = await siguienteLote(resumen.user_id, 1, this.#ahora());
       if (listas.length === 0) {
@@ -537,7 +588,7 @@ export class MotorSync {
       let ocupado = primero === 'ocupado';
       const epocaVieja = primero === 'epoca_cambiada';
       if (resumen.error === null && !ocupado) {
-        await this.#pull(userId, resumen);
+        await this.#descargar(userId, resumen);
       }
       if (resumen.error === null && !ocupado && (resumen.epoca_cambiada || epocaVieja)) {
         // Tras un cambio de época se reenvían las mutaciones aplicadas que se conservaban.
@@ -565,6 +616,9 @@ export class MotorSync {
 
   async #cerrar(userId: string, resumen: ResumenSync): Promise<void> {
     const sinConexion = resumen.error !== null && resumen.error.code === null;
+    // A7: el aviso es del usuario de la sesión ACTUAL y dura mientras su descarga no quepa. Se
+    // calcula dentro del `try`: el `finally` nunca debe lanzar antes de salir de "Sincronizando…".
+    let almacenamientoLleno = this.#estado.getState().almacenamientoLleno;
     try {
       if (resumen.aplicadas + resumen.fotos_subidas + resumen.rechazadas + resumen.conflictos > 0) {
         await registrarEvento(
@@ -579,13 +633,13 @@ export class MotorSync {
       // Los contadores se recalculan ANTES de salir de "Sincronizando…": el indicador nunca
       // muestra "Todo sincronizado" con un conteo viejo. Son los del usuario de la sesión ACTUAL
       // (si cambió durante la sync, nunca se muestran los de la partición anterior).
-      await actualizarContadores(
-        this.#estado,
-        this.#opciones.sesion.usuarioDeLaSesion()?.id ?? null,
-      );
+      const actual = this.#opciones.sesion.usuarioDeLaSesion()?.id ?? null;
+      almacenamientoLleno = actual !== null && this.#esperaCuota.has(actual);
+      await actualizarContadores(this.#estado, actual);
     } finally {
       this.#estado.setState({
         sincronizando: false,
+        almacenamientoLleno,
         error: resumen.error,
         ...(resumen.error === null
           ? { ultimoSync: this.#ahora().toISOString(), conexion: 'en_linea' as const }
@@ -715,6 +769,43 @@ export class MotorSync {
   // -------------------------------------------------------------------------------------------
   // Pull y snapshot
   // -------------------------------------------------------------------------------------------
+
+  /**
+   * A7: pull y snapshot, salvo que la descarga del usuario esté en espera por cuota agotada. Un
+   * `QuotaExceededError` no detiene la sync: se descarta el área temporal, se programa la espera
+   * exponencial y la sync sigue con las fotos y la purga (liberan espacio). Un éxito termina la espera.
+   */
+  async #descargar(userId: string, resumen: ResumenSync): Promise<void> {
+    const espera = this.#esperaCuota.get(userId);
+    if (espera !== undefined && this.#ahora().getTime() < espera.hasta) {
+      resumen.almacenamiento_lleno = true;
+      resumen.error = errorAlmacenamientoLleno();
+      return;
+    }
+    try {
+      await this.#pull(userId, resumen);
+    } catch (error) {
+      if (!esCuotaAgotada(error)) {
+        throw error;
+      }
+      // `guardarPaginaSnapshot` y `completarSnapshot` ya descartaron su área; si la cuota saltó en
+      // otra escritura de la descarga (pull, hidratación), también se libera lo descargado.
+      try {
+        await descartarSnapshot(userId);
+      } catch {
+        // Sin espacio ni para borrar: se reintenta con la próxima descarga.
+      }
+      const fallos = (espera?.fallos ?? 0) + 1;
+      this.#esperaCuota.set(userId, {
+        fallos,
+        hasta: this.#ahora().getTime() + calcularRetrasoMs(fallos, this.#opciones.aleatorio),
+      });
+      resumen.almacenamiento_lleno = true;
+      resumen.error = errorAlmacenamientoLleno();
+      return;
+    }
+    this.#esperaCuota.delete(userId);
+  }
 
   async #pull(userId: string, resumen: ResumenSync): Promise<void> {
     let meta = await leerMetaSync(userId);

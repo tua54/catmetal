@@ -34,6 +34,7 @@ export const RESUMEN_VACIO: ResumenSync = {
   fotos_subidas: 0,
   fotos_con_error: 0,
   siguiente_intento_at: null,
+  almacenamiento_lleno: false,
   error: null,
 };
 

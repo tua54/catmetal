@@ -1,13 +1,19 @@
 import { useCallback, useState } from 'react';
 import { sesion, useSesion } from '../../auth';
 import { useConsultaLocal } from '../../app/useConsultaLocal';
-import { AVISO_PERSISTENCIA, requiereAvisoPersistencia, useEstadoSync } from '../../sync';
+import {
+  AVISO_ALMACENAMIENTO_LLENO,
+  AVISO_PERSISTENCIA,
+  requiereAvisoPersistencia,
+  useEstadoSync,
+} from '../../sync';
 import { Aviso, Boton } from '../ui';
 import { DialogoContrasena } from './DialogoContrasena';
 
 /**
  * Avisos permanentes bajo la barra superior (§5 y §6):
  * - almacenamiento no persistente → "Sincroniza al menos una vez al día";
+ * - cuota de almacenamiento agotada (A7) → "Almacenamiento lleno: sincroniza o libera espacio";
  * - sesión sin conexión → los registros se guardan en la tablet;
  * - sesión del servidor perdida → pedir la contraseña para poder sincronizar;
  * - pendientes de otros usuarios de la tablet → "Hay N registros pendientes de <A>".
@@ -17,6 +23,7 @@ export function AvisosSesion() {
   const modo = useSesion((estado) => estado.modo);
   const requiereContrasena = useSesion((estado) => estado.requiere_contrasena);
   const sinPersistencia = useEstadoSync(requiereAvisoPersistencia);
+  const almacenamientoLleno = useEstadoSync((estado) => estado.almacenamientoLleno);
   const conexion = useEstadoSync((estado) => estado.conexion);
   const [pidiendoContrasena, setPidiendoContrasena] = useState(false);
 
@@ -34,6 +41,14 @@ export function AvisosSesion() {
         <Aviso tono="advertencia" titulo={AVISO_PERSISTENCIA}>
           Este navegador no garantiza conservar los datos de la tablet: si pasa varios días sin
           sincronizar, podría borrarlos.
+        </Aviso>
+      )}
+
+      {almacenamientoLleno && (
+        // Aparece a mitad de la sesión: se anuncia (`role="alert"`) y queda mientras dure.
+        <Aviso tono="advertencia" anunciar titulo={AVISO_ALMACENAMIENTO_LLENO}>
+          La tablet no tiene espacio para descargar los datos del servidor. Sus registros se
+          conservan y se siguen enviando; la descarga se reintentará sola.
         </Aviso>
       )}
 

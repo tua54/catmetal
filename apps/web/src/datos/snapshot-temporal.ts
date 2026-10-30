@@ -9,6 +9,11 @@
 //    transacción: catálogos, entidades con la regla `autoridad` (el servidor manda sobre todo lo que no
 //    esté pendiente), limpieza de lo que el servidor ya no tiene, cursor y época. O todo o nada.
 //
+// Cuota agotada (A7, ADR 0022 Enmienda 1): si guardar una página o el reemplazo falla con
+// `QuotaExceededError`, se descarta el área temporal del usuario y se relanza el error. El estado vivo
+// no se toca (el reemplazo es una sola transacción: si se aborta, no aplicó nada). El motor reintenta
+// con espera y avisa.
+//
 // Solo se toca la partición del usuario: nunca se leen ni escriben filas de otro usuario de la tablet.
 
 import Dexie from 'dexie';
@@ -72,6 +77,52 @@ export interface ResultadoCompletarSnapshot {
   ignorados: number;
 }
 
+/** Nombres con que IndexedDB (y Dexie, que conserva el nombre) informa la cuota agotada. */
+const NOMBRES_CUOTA: ReadonlySet<string> = new Set([
+  'QuotaExceededError',
+  // Firefox antiguo.
+  'NS_ERROR_DOM_QUOTA_REACHED',
+]);
+
+/**
+ * ¿El error es (o envuelve) una cuota de almacenamiento agotada? Reconoce el `DOMException` de
+ * IndexedDB, `Dexie.QuotaExceededError` y los envoltorios de Dexie: `AbortError` de la transacción
+ * (`inner`), `BulkError` (`failures`) y `cause`. La profundidad está acotada.
+ */
+export function esCuotaAgotada(error: unknown, profundidad = 0): boolean {
+  if (profundidad > 5 || typeof error !== 'object' || error === null) {
+    return false;
+  }
+  const e = error as { name?: unknown; inner?: unknown; cause?: unknown; failures?: unknown };
+  if (typeof e.name === 'string' && NOMBRES_CUOTA.has(e.name)) {
+    return true;
+  }
+  if (esCuotaAgotada(e.inner, profundidad + 1) || esCuotaAgotada(e.cause, profundidad + 1)) {
+    return true;
+  }
+  return Array.isArray(e.failures) && e.failures.some((f) => esCuotaAgotada(f, profundidad + 1));
+}
+
+/**
+ * A7: ejecuta una escritura del snapshot; si falla por cuota agotada, descarta el área temporal del
+ * usuario (libera espacio y evita reanudar una descarga que no cabe) y relanza el error original.
+ * Corre FUERA de la transacción que falló: esa ya se abortó sin aplicar nada.
+ */
+async function descartandoSiNoCabe<T>(userId: string, escribir: () => Promise<T>): Promise<T> {
+  try {
+    return await escribir();
+  } catch (error) {
+    if (esCuotaAgotada(error)) {
+      try {
+        await descartarSnapshot(userId);
+      } catch {
+        // Lo que importa es el error de cuota; el motor vuelve a descartar al reintentar.
+      }
+    }
+    throw error;
+  }
+}
+
 /** Progreso del snapshot `inicial` del usuario, si hay uno a medias o completo sin reemplazar. */
 export async function leerProgresoSnapshot(userId: string): Promise<ProgresoSnapshot | undefined> {
   return db.snapshot_progreso.get(userId);
@@ -102,12 +153,21 @@ export async function descartarSnapshot(userId: string): Promise<void> {
 
 /**
  * Guarda una página del snapshot `inicial` en el área temporal, en UNA transacción. La primera
- * página (sin progreso) fija la época y el cursor. Una página de otra época no se guarda.
+ * página (sin progreso) fija la época y el cursor. Una página de otra época no se guarda. Con la
+ * cuota agotada, descarta el área temporal y relanza (A7).
  */
 export async function guardarPaginaSnapshot(
   userId: string,
   respuesta: SnapshotResponse,
   ahora: string = ahoraIso(),
+): Promise<ResultadoPaginaSnapshot> {
+  return descartandoSiNoCabe(userId, () => guardarPagina(userId, respuesta, ahora));
+}
+
+function guardarPagina(
+  userId: string,
+  respuesta: SnapshotResponse,
+  ahora: string,
 ): Promise<ResultadoPaginaSnapshot> {
   return db.transaction('rw', tablasDeSnapshot(), async () => {
     const previo = await db.snapshot_progreso.get(userId);
@@ -192,13 +252,18 @@ async function confirmadasDesde(userId: string, desde: string): Promise<Set<stri
 /**
  * Reemplaza el estado sincronizado de la partición con el snapshot completo del área temporal, en
  * UNA transacción (ADR 0022, punto 4). Si no hay un snapshot completo, no hace nada. Si algo falla,
- * IndexedDB aborta y queda todo como antes (datos vivos, `meta` y área temporal).
+ * IndexedDB aborta y queda todo como antes (datos vivos, `meta` y área temporal). Con la cuota
+ * agotada, además se descarta el área temporal y se relanza (A7): los datos vivos siguen intactos.
  */
 export async function completarSnapshot(
   userId: string,
   opciones: { ahora?: string } = {},
 ): Promise<ResultadoCompletarSnapshot> {
   const ahora = opciones.ahora ?? ahoraIso();
+  return descartandoSiNoCabe(userId, () => reemplazar(userId, ahora));
+}
+
+function reemplazar(userId: string, ahora: string): Promise<ResultadoCompletarSnapshot> {
   return db.transaction('rw', [...tablasDeDatos(), ...tablasDeSnapshot()], async () => {
     const progreso = await db.snapshot_progreso.get(userId);
     if (progreso === undefined || !progreso.completo) {

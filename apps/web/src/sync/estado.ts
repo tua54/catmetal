@@ -28,9 +28,16 @@ export interface EstadoSync {
   ultimoSync: string | null;
   error: ErrorSync | null;
   persistencia: Persistencia;
+  /**
+   * A7 (ADR 0022, Enmienda 1): la descarga del servidor no cabe en el almacenamiento del navegador
+   * (cuota agotada). Se mantiene mientras dure; el push y las fotos siguen saliendo.
+   */
+  almacenamientoLleno: boolean;
 }
 
 export const AVISO_PERSISTENCIA = 'Sincroniza al menos una vez al día';
+/** A7: aviso persistente mientras la cuota de almacenamiento esté agotada. */
+export const AVISO_ALMACENAMIENTO_LLENO = 'Almacenamiento lleno: sincroniza o libera espacio';
 
 export function estadoSyncInicial(): EstadoSync {
   const enLinea = globalThis.navigator?.onLine ?? true;
@@ -45,6 +52,7 @@ export function estadoSyncInicial(): EstadoSync {
     ultimoSync: null,
     error: null,
     persistencia: 'desconocida',
+    almacenamientoLleno: false,
   };
 }
 
