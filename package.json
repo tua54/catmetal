@@ -6,7 +6,7 @@
   "description": "Control de Materia Prima · Catmetal S.A.S. (monorepo)",
   "packageManager": "pnpm@12.16.1",
   "engines": {
-    "node": ">=22"
+    "node": ">=24"
   },
   "scripts": {
     "dev": "node scripts/dev.mjs",

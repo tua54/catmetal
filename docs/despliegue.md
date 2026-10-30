@@ -6,7 +6,7 @@
 
 - **Plan Workers Paid** (obligatorio): D1 de hasta 10 GB, Time Travel de 30 días (7 en Free), 1000 consultas D1 por invocación, CPU de cron de hasta 15 min con intervalo ≥ 1 h. Referencias: https://developers.cloudflare.com/workers/platform/limits/ y https://developers.cloudflare.com/d1/platform/limits/
 - Una zona (dominio) activa en Cloudflare para producción (y opcionalmente para staging).
-- Node 22+ y pnpm (ver `README.md`), `pnpm install` hecho en el repositorio.
+- Node 24 o superior y pnpm (ver `README.md`), `pnpm install` hecho en el repositorio.
 - Iniciar sesión en Wrangler con una cuenta autorizada: `npx wrangler login` (o variables `CLOUDFLARE_API_TOKEN` y `CLOUDFLARE_ACCOUNT_ID`).
 
 Entornos (`apps/worker/wrangler.jsonc`): nivel superior = desarrollo local; `env.staging` → Worker `catmetal-mp-staging`; `env.production` → Worker `catmetal-mp-production`. Los bindings, `vars` y `secrets.required` se repiten por entorno (no se heredan); `assets`, `triggers` (crons) y `observability` sí se heredan.

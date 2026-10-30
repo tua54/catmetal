@@ -192,3 +192,14 @@ Los cambios de la spec de esta ronda están en `docs/spec.md` §14 (v2.1).
 
 - La verificación en una tablet real, WebKit/Safari en un dispositivo y el CI en GitHub siguen como pendientes humanos.
 - Las preguntas abiertas de negocio de `docs/preguntas-abiertas.md` no se tocan, salvo que un ítem de este documento las afecte.
+
+---
+
+## Nuevos
+
+### N1. La aserción "sin EXIF" de la prueba de fotos era vacía (P1, área de C2)
+
+- **Dónde**: `apps/web/src/features/consumos/fotos-diferido.test.ts`; la rama alternativa de `leerBytes` en `apps/web/src/features/consumos/fotos.ts` y `apps/web/src/datos/outbox.ts`.
+- **Hallazgo**: en jsdom, `new Response(blob)` no lee el Blob. Lo convierte al texto `"[object Blob]"`. Así, `tieneExif(...) === false` pasaba siempre, también con Node 24. La alternativa con `Response` del código tenía el mismo defecto en entornos sin `Blob.arrayBuffer`.
+- **Corrección**: el helper `apps/web/src/lib/blob.ts` (`leerBlob`) usa `arrayBuffer()` o, si no existe, `FileReader`. La prueba ahora exige el tamaño y el SOI del JPEG.
+- **Estado**: RESUELTO (en el commit de C2).

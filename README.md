@@ -21,7 +21,7 @@ Los comandos funcionan igual en **PowerShell** y en **cmd**. No se necesitan per
 
 ### 1. Node.js
 
-Instale Node.js **22 o superior**. Se recomienda la versión **24**, que es la del archivo `.nvmrc`. Compruebe la versión:
+Instale Node.js **24 o superior** (la versión del archivo `.nvmrc` y del CI). Es la única versión con la que se verifican los gates. Compruebe la versión:
 
 ```text
 node --version

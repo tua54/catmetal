@@ -33,6 +33,7 @@ import {
   type TipoResultadoMutacion,
 } from '@catmetal/shared';
 import type { Table } from 'dexie';
+import { leerBlob } from '../lib/blob';
 import { claveEntidad, db, rangoDe, tablasDeDatos } from './db';
 import {
   camposDe,
@@ -188,12 +189,6 @@ export async function sha256Hex(datos: ArrayBuffer): Promise<string> {
   return hex(await crypto.subtle.digest('SHA-256', datos));
 }
 
-async function leerBytes(foto: Blob): Promise<ArrayBuffer> {
-  return typeof foto.arrayBuffer === 'function'
-    ? foto.arrayBuffer()
-    : new Response(foto).arrayBuffer();
-}
-
 interface FotoPreparada {
   meta: EvidenciaMeta;
   datos: ArrayBuffer;
@@ -203,7 +198,7 @@ interface FotoPreparada {
 async function prepararFotos(fotos: readonly Blob[]): Promise<FotoPreparada[]> {
   const preparadas: FotoPreparada[] = [];
   for (const foto of fotos) {
-    const datos = await leerBytes(foto);
+    const datos = await leerBlob(foto);
     preparadas.push({
       meta: {
         id: uuidv7(),

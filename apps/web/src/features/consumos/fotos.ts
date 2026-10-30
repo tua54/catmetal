@@ -16,6 +16,7 @@
 
 import { MAX_EVIDENCIA_BYTES, MAX_EVIDENCIAS_POR_NOVEDAD } from '@catmetal/shared';
 import type { Options } from 'browser-image-compression';
+import { leerBlob } from '../../lib/blob';
 
 export const MAX_FOTOS = MAX_EVIDENCIAS_POR_NOVEDAD;
 
@@ -118,11 +119,7 @@ export function tieneExif(bytes: Uint8Array): boolean {
 }
 
 async function leerBytes(blob: Blob): Promise<Uint8Array> {
-  const buffer =
-    typeof blob.arrayBuffer === 'function'
-      ? await blob.arrayBuffer()
-      : await new Response(blob).arrayBuffer();
-  return new Uint8Array(buffer);
+  return new Uint8Array(await leerBlob(blob));
 }
 
 /**
