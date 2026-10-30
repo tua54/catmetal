@@ -57,6 +57,13 @@
       "when": 1793367245177,
       "tag": "0007_login_cupos",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1793373398430,
+      "tag": "0008_settings_insert_validos",
+      "breakpoints": true
     }
   ]
 }

@@ -65,6 +65,7 @@ const TRIGGERS_ESPERADOS = [
   'production_orders_estado_terminal',
   'production_orders_no_delete',
   'production_orders_transicion',
+  'settings_insercion_valida',
   'settings_no_delete',
   'settings_valores_validos',
   'sync_mutations_no_delete',
@@ -429,7 +430,14 @@ describe('CHECK', () => {
         created_at: ahora(),
         updated_at: ahora(),
       }),
-    ).rejects.toThrow(/settings_valor_json/);
+      // Desde B7 (migración 0008), el trigger `settings_insercion_valida` rechaza la clave
+      // desconocida antes de que se evalúe el CHECK; el INSERT sigue sin entrar.
+    ).rejects.toThrow(/settings_valor_json|valor de configuración no válido/);
+    expect(
+      await env.DB.prepare(
+        `SELECT count(*) AS n FROM settings WHERE clave LIKE 'prueba_%'`,
+      ).first(),
+    ).toEqual({ n: 0 });
     await expect(
       insertar('audit_log', {
         id: uuidv7(),
