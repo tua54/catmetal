@@ -84,3 +84,9 @@ No se usan `mvc-dotnet-developer`, `angular-developer` ni `orchestrator`.
 - `pnpm audit --prod`: sin vulnerabilidades conocidas.
 - 2.8 correcciones de seguridad confirmadas (`2594d7e`).
 - Cierre: 1.428 pruebas en verde; `pnpm audit --prod` sin vulnerabilidades. Evidencia: `docs/evidencia/fase-2.md`.
+
+### Fase 3 — Sincronización (en curso)
+
+- Adelantadas y confirmadas: 3.3 (Dexie + outbox), 3.4 (cliente de auth), contrato `/sync/snapshot` (orquestador), 3.5 (motor de sync del cliente, `react-developer`).
+- Decisión menor (3.5): sin conexión y sin pendientes, el indicador dice "Sin conexión · Todo sincronizado" (en vez de "0 por sincronizar").
+- En curso: 3.1–3.2 servidor de sync (`general-purpose`), y **tarea adelantada 4.2** (shell PWA, login, layout, estado de sync; `react-developer`; plan de la Fase 4 ya confirmado).
