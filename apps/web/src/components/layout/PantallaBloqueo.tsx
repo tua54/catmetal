@@ -12,7 +12,8 @@ import { Aviso, Boton, Campo, CapaModal, useAvisos } from '../ui';
  * sync sigue enviando lo ya encolado.
  *
  * - "Confirmar": contraseña contra el verificador local (sin red) o, si no hay verificador o no
- *   coincide y hay red, contra el servidor.
+ *   coincide y hay red, contra el servidor. Tras una revocación del servidor (S-09, `revocada`),
+ *   solo contra el servidor.
  * - "No soy <nombre>": cierra la sesión con las reglas de pendientes (§5): si hay registros sin
  *   enviar, se conservan en la tablet y se avisa.
  */
@@ -26,6 +27,8 @@ export function PantallaBloqueo() {
 
 function ContenidoBloqueo() {
   const usuario = useSesion((estado) => estado.usuario);
+  // S-09: el servidor revocó la sesión: solo se desbloquea con la contraseña y conexión.
+  const revocada = useSesion((estado) => estado.revocada === true);
   const confirmarIdentidad = useSesion((estado) => estado.confirmarIdentidad);
   const cerrarSesion = useSesion((estado) => estado.cerrarSesion);
   const navegar = useNavigate();
@@ -104,7 +107,9 @@ function ContenidoBloqueo() {
         Confirme que es {nombre}
       </h2>
       <p id={idDescripcion} className="mt-2 text-ink-700">
-        La tablet estuvo un rato sin uso. Para seguir, escriba su contraseña.
+        {revocada
+          ? 'El servidor cerró su sesión (por ejemplo, cambió su rol o su cuenta). Para seguir, escriba su contraseña con conexión. Sus registros pendientes siguen guardados en esta tablet.'
+          : 'La tablet estuvo un rato sin uso. Para seguir, escriba su contraseña.'}
       </p>
 
       {error && (

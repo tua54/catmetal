@@ -15,6 +15,11 @@
 // - Entre pestañas (ADR 0023, M7): cerrar sesión, bloquear por inactividad o entrar con otro usuario
 //   se avisa por el canal de sesión (sin secretos); las demás pestañas descartan su sesión en memoria
 //   en el mismo tick (y vuelven al login o al bloqueo). No borran datos locales.
+// - Revocación del servidor (S-09): `SESION_REVOCADA` en una petición autenticada (cambio de rol,
+//   desactivación, revocación del admin) BLOQUEA la sesión (`revocada`): solo se desbloquea con la
+//   contraseña contra el servidor, que trae el perfil fresco, nunca con el verificador local. El
+//   perfil queda `requiere_login_online` (tampoco hay login offline hasta un login con conexión) y
+//   las demás pestañas se bloquean (`bloqueo` por el canal).
 // - Bajada de rol (S-03): si el perfil nuevo del servidor ya no ve lo de todos, los consumos ajenos
 //   sin pendientes se borran de la partición al guardarlo (`purgarAjenosSinVisibilidad`).
 
@@ -72,6 +77,12 @@ export interface EstadoSesion {
    * el usuario confirme su contraseña o elija "No soy <nombre>". La sync no se detiene.
    */
   bloqueada: boolean;
+  /**
+   * S-09: el servidor revocó la sesión (`SESION_REVOCADA` en una petición autenticada). Va con
+   * `bloqueada`: la app queda oculta y solo se desbloquea con la contraseña CON conexión. Opcional en
+   * el tipo (estados simulados de pruebas); el gestor siempre lo publica.
+   */
+  revocada?: boolean;
 }
 
 export const ESTADO_SIN_SESION: EstadoSesion = Object.freeze({
@@ -81,6 +92,7 @@ export const ESTADO_SIN_SESION: EstadoSesion = Object.freeze({
   device_id: null,
   requiere_contrasena: false,
   bloqueada: false,
+  revocada: false,
 });
 
 export type CodigoErrorSesion =
@@ -271,7 +283,8 @@ export class GestorSesion {
         obtenerAccessToken: (ligado) => this.obtenerAccessToken(ligado),
         refrescar: (ligado) => this.refrescar(ligado),
         usuarioActual: () => this.#estado.usuario?.id ?? null,
-        sesionRevocada: () => this.#perderSesionDelServidor(),
+        // S-09: la revocación de una petición autenticada bloquea la sesión.
+        sesionRevocada: () => this.marcarSesionRevocada(),
       },
     });
   }
@@ -304,6 +317,42 @@ export class GestorSesion {
     this.#perderSesionDelServidor();
   }
 
+  /**
+   * S-09: el servidor respondió `SESION_REVOCADA` a una petición autenticada de esta sesión (cambio
+   * de rol, desactivación o revocación del admin). En el mismo tick: se descarta el token, se cortan
+   * las peticiones en vuelo y la sesión queda bloqueada (`revocada`), sin mostrar más datos. Luego se
+   * marca el perfil (`requiere_login_online`) y se avisa a las demás pestañas (`bloqueo`). No borra
+   * datos locales: los pendientes salen cuando la persona vuelva a entrar con conexión.
+   */
+  marcarSesionRevocada(): void {
+    const usuario = this.#estado.usuario;
+    this.#olvidarToken();
+    if (usuario === null) {
+      return;
+    }
+    this.#renovarSenal();
+    this.#publicar({
+      ...this.#estado,
+      modo: 'offline',
+      requiere_contrasena: true,
+      bloqueada: true,
+      revocada: true,
+    });
+    // Primero la marca persistida y después el aviso: la otra pestaña, al bloquearse, ya la lee.
+    void this.#marcarLoginOnline(usuario.id).finally(() =>
+      this.#avisarOtrasPestanas('bloqueo', usuario.id),
+    );
+  }
+
+  /** El perfil solo vuelve a entrar con un login contra el servidor (S-09). Nunca lanza. */
+  async #marcarLoginOnline(userId: string): Promise<void> {
+    try {
+      await db.perfiles.update(userId, { requiere_login_online: true });
+    } catch {
+      // Sin IndexedDB disponible queda el bloqueo en memoria de esta pestaña.
+    }
+  }
+
   /** Se llama con cada cambio de estado. Devuelve la función para desuscribirse. */
   suscribir(oyente: Oyente): () => void {
     this.#oyentes.add(oyente);
@@ -312,7 +361,12 @@ export class GestorSesion {
 
   #publicar(estado: EstadoSesion): void {
     const previo = this.#estado.usuario?.id ?? null;
-    this.#estado = Object.freeze({ ...estado, permisos: Object.freeze([...estado.permisos]) });
+    // `revocada` siempre presente: el store de React mezcla estados y no debe quedarse con uno viejo.
+    this.#estado = Object.freeze({
+      ...estado,
+      revocada: estado.revocada ?? false,
+      permisos: Object.freeze([...estado.permisos]),
+    });
     if ((estado.usuario?.id ?? null) !== previo) {
       this.#renovarSenal();
       this.#actividadGuardadaEn = Number.NEGATIVE_INFINITY;
@@ -358,8 +412,28 @@ export class GestorSesion {
           this.#olvidarToken();
           this.#renovarSenal();
           this.#publicar({ ...this.#estado, bloqueada: true });
+          // S-09: si el bloqueo vino de una revocación, el perfil ya está marcado: esta pestaña
+          // también exige la contraseña contra el servidor (y lo muestra).
+          void this.#adoptarRevocacion(actual.id);
         }
         return;
+    }
+  }
+
+  async #adoptarRevocacion(userId: string): Promise<void> {
+    let marcado: boolean;
+    try {
+      marcado = (await db.perfiles.get(userId))?.requiere_login_online === true;
+    } catch {
+      return;
+    }
+    if (marcado && this.#estado.usuario?.id === userId && this.#estado.bloqueada) {
+      this.#publicar({
+        ...this.#estado,
+        modo: 'offline',
+        requiere_contrasena: true,
+        revocada: true,
+      });
     }
   }
 
@@ -450,6 +524,8 @@ export class GestorSesion {
         cierre_pendiente: false,
         intentos_offline: cambios.reiniciarIntentos === true ? 0 : (previo?.intentos_offline ?? 0),
         espera_hasta: cambios.reiniciarIntentos === true ? null : (previo?.espera_hasta ?? null),
+        // S-09: el servidor acaba de aceptar esta sesión con el perfil vigente.
+        requiere_login_online: false,
       });
       if (perdioVisibilidad) {
         await purgarAjenosSinVisibilidad(respuesta.usuario.id);
@@ -477,7 +553,8 @@ export class GestorSesion {
         email: p.perfil.email,
         email_enmascarado: enmascararCorreo(p.perfil.email),
         ultimo_acceso_at: p.ultimo_acceso_at,
-        offline_disponible: p.verificador !== null,
+        // S-09: tras una revocación, solo con conexión.
+        offline_disponible: p.verificador !== null && p.requiere_login_online !== true,
       }));
   }
 
@@ -488,7 +565,12 @@ export class GestorSesion {
    */
   async #intentoLocal(userId: string, password: string): Promise<IntentoLocal> {
     const perfil = await db.perfiles.get(userId);
-    if (perfil?.verificador === null || perfil?.verificador === undefined) {
+    if (
+      perfil?.verificador === null ||
+      perfil?.verificador === undefined ||
+      perfil.requiere_login_online === true
+    ) {
+      // S-09: tras una revocación del servidor el verificador no sirve hasta un login con conexión.
       return 'sin_verificador';
     }
     const espera = perfil.espera_hasta ?? null;
@@ -497,10 +579,14 @@ export class GestorSesion {
     }
     // La derivación (≈ 1 s) va fuera de la transacción: esperar WebCrypto dentro la cerraría.
     const correcta = await comprobarVerificador(password, perfil.verificador, this.#comprobacion());
-    await db.transaction('rw', db.perfiles, async () => {
+    const revocadoMientras = await db.transaction('rw', db.perfiles, async () => {
       const actual = await db.perfiles.get(userId);
       if (actual === undefined) {
-        return;
+        return false;
+      }
+      if (actual.requiere_login_online === true) {
+        // La revocación llegó mientras se derivaba (S-09): ni se acepta ni cuenta como fallo.
+        return true;
       }
       if (correcta) {
         await db.perfiles.put({
@@ -510,7 +596,7 @@ export class GestorSesion {
           ultimo_acceso_at: this.#ahoraIso(),
           cierre_pendiente: false,
         });
-        return;
+        return false;
       }
       const fallos = (actual.intentos_offline ?? 0) + 1;
       if (fallos >= FALLOS_PARA_BORRAR_VERIFICADOR) {
@@ -520,7 +606,7 @@ export class GestorSesion {
           intentos_offline: 0,
           espera_hasta: null,
         });
-        return;
+        return false;
       }
       const ms = esperaTrasFallos(fallos);
       await db.perfiles.put({
@@ -528,7 +614,11 @@ export class GestorSesion {
         intentos_offline: fallos,
         espera_hasta: ms > 0 ? new Date(this.#ahora() + ms).toISOString() : null,
       });
+      return false;
     });
+    if (revocadoMientras) {
+      return 'sin_verificador';
+    }
     return correcta ? 'ok' : 'fallo';
   }
 
@@ -695,6 +785,17 @@ export class GestorSesion {
     }
     if (password === '') {
       throw new ErrorSesion('VALIDACION');
+    }
+    if (this.#estado.revocada === true) {
+      // S-09: solo contra el servidor (perfil fresco). Sin red, sigue bloqueada.
+      if (!this.#enLinea()) {
+        throw new ErrorSesion('SIN_CONEXION');
+      }
+      try {
+        return await this.#loginOnline(usuario.email, password);
+      } catch (error) {
+        throw esCaidaDelServidor(error) ? new ErrorSesion('SIN_CONEXION') : error;
+      }
     }
     const intento = await this.#intentoLocal(usuario.id, password);
     if (this.#estado.usuario?.id !== usuario.id) {

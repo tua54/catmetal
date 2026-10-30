@@ -120,6 +120,11 @@ export interface SesionParaSync {
   /** Se aborta cuando cambia o se cierra la sesión: corta las peticiones en vuelo. */
   senalDeSesion?(): AbortSignal;
   marcarRequiereContrasena(): void;
+  /**
+   * S-09: el servidor revocó la sesión (`SESION_REVOCADA`): se bloquea y solo se desbloquea con
+   * conexión. Si la sesión no lo implementa, se usa `marcarRequiereContrasena`.
+   */
+  marcarSesionRevocada?(): void;
   readonly api: ClienteApi;
 }
 
@@ -439,7 +444,13 @@ export class MotorSync {
         this.#opciones.sesion.usuarioDeLaSesion()?.id === userId
       ) {
         // Con `bearer` el cliente no avisa a la sesión: se hace aquí, solo si sigue siendo la suya.
-        this.#opciones.sesion.marcarRequiereContrasena();
+        // S-09: una revocación bloquea la sesión (no solo pide la contraseña).
+        const sesion = this.#opciones.sesion;
+        if (sesion.marcarSesionRevocada === undefined) {
+          sesion.marcarRequiereContrasena();
+        } else {
+          sesion.marcarSesionRevocada();
+        }
       }
       throw error;
     }

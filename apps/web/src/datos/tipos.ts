@@ -392,6 +392,12 @@ export interface PerfilLocal {
   intentos_offline?: number;
   /** No se acepta otro intento contra el verificador antes de este instante (ISO), o `null`. */
   espera_hasta?: string | null;
+  /**
+   * S-09: el servidor revocó una sesión de este perfil en este dispositivo. Hasta el próximo login
+   * con conexión, el verificador no sirve (ni login offline ni desbloqueo local). Opcional y sin
+   * índice: los perfiles anteriores no lo tienen (= `false`) y no cambia el esquema de Dexie.
+   */
+  requiere_login_online?: boolean;
 }
 
 /** Candado entre pestañas en IndexedDB (alternativa a Web Locks), con expiración. */
