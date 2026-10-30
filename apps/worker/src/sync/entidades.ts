@@ -48,6 +48,21 @@ export interface DescriptorEntidad {
   id: (fila: Fila) => string;
   datos: (fila: Fila) => Datos;
   ambito: (fila: Fila) => Ambito;
+  /**
+   * Paginación propia del snapshot, si no es por `clave` (revisión de la Fase 3, M5). Una sola
+   * columna por alcance (nombres del código) y el valor de la fila que va en el token de página.
+   */
+  paginacion?: {
+    inicial: string;
+    orden: string;
+    valor: (fila: Fila) => string;
+    /**
+     * En el alcance inicial del supervisor, la visibilidad se aplica al recorrer el índice de la
+     * paginación (operador unario `+` en sus columnas, que impide a SQLite usar otro índice y
+     * ordenar después con un B-tree temporal).
+     */
+    visibilidadAlRecorrer: boolean;
+  };
 }
 
 const texto = (valor: unknown): string => (typeof valor === 'string' ? valor : String(valor));
@@ -213,6 +228,17 @@ export const DESCRIPTORES: readonly DescriptorEntidad[] = [
     id: (f) => texto(f.id),
     datos: (f) => elegir(f, COLUMNAS_VALIDACION),
     ambito: ambitoDeConsumo,
+    // Revisión de la Fase 3, M5: en el snapshot se pagina por el consumo (relación 1:1 por
+    // `validations_consumption_id_unico`), no por `v.id`, para seguir el orden de un índice:
+    // - alcance inicial: `v.consumption_id` (índice único de validations);
+    // - alcance orden: `c.id` (el mismo valor por el JOIN), que sigue `consumptions_order_id_id`.
+    // En ambos casos el token lleva el id del consumo.
+    paginacion: {
+      inicial: 'v.consumption_id',
+      orden: 'c.id',
+      valor: (f) => texto(f.consumption_id),
+      visibilidadAlRecorrer: true,
+    },
   },
 ];
 
