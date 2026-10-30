@@ -294,18 +294,48 @@ export interface MetaSync {
   hidrataciones: string[];
 }
 
+/**
+ * Verificador del login offline (ADR 0012 punto 4): PBKDF2-SHA256 con sal propia del dispositivo.
+ * Nunca se envía al servidor ni reemplaza la autenticación del servidor.
+ */
+export interface VerificadorLocal {
+  algoritmo: 'pbkdf2-sha256';
+  /** Se guarda con el verificador para poder cambiar `ITERACIONES_VERIFICADOR` sin romper nada. */
+  iteraciones: number;
+  /** Sal aleatoria de 16 bytes, en base64. */
+  sal: string;
+  /** 32 bytes derivados, en base64. */
+  hash: string;
+  /** Tiempo que tardó la derivación al crearlo, en ms (diagnóstico para el ADR; sin secretos). */
+  ms_derivacion: number | null;
+  creado_at: string;
+}
+
 /** Perfil cacheado para trabajar offline y verificador del login offline (ADR 0012). */
 export interface PerfilLocal {
   user_id: string;
   perfil: Perfil;
   /** `device_id` de la sesión de este usuario en este navegador (ADR 0008 punto 7). */
   device_id: string | null;
-  /** Verificador PBKDF2 en base64. Nunca se envía al servidor. */
-  verificador: string | null;
-  /** Sal propia del dispositivo, en base64. */
-  sal: string | null;
-  iteraciones: number | null;
+  verificador: VerificadorLocal | null;
   actualizado_at: string;
+  /** Último inicio de sesión (online u offline) en este dispositivo: "último perfil activo". */
+  ultimo_acceso_at: string | null;
+  /**
+   * El usuario cerró sesión sin poder avisar al servidor (sin conexión): su cookie de refresh puede
+   * seguir viva. Mientras esté marcado, esa sesión del servidor nunca se adopta sin contraseña y se
+   * revoca en cuanto haya conexión (tablet compartida).
+   */
+  cierre_pendiente: boolean;
+}
+
+/** Candado entre pestañas en IndexedDB (alternativa a Web Locks), con expiración. */
+export interface CandadoLocal {
+  nombre: string;
+  /** Id aleatorio de quien lo tiene (por adquisición, no por pestaña). */
+  titular: string;
+  /** Milisegundos Unix en que vence aunque su titular no lo libere (pestaña cerrada). */
+  expira_at: number;
 }
 
 export const ACCIONES_TRAZABILIDAD = [

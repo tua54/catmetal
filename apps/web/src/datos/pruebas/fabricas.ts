@@ -28,9 +28,9 @@ export async function guardarPerfil(userId: string, nombre: string): Promise<voi
     },
     device_id: null,
     verificador: null,
-    sal: null,
-    iteraciones: null,
     actualizado_at: '2026-10-29T15:00:00.000Z',
+    ultimo_acceso_at: null,
+    cierre_pendiente: false,
   });
 }
 

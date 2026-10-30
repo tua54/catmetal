@@ -16,13 +16,14 @@ beforeEach(async () => {
 });
 
 describe('esquema Dexie', () => {
-  it('abre catmetal-mp v1 con todas las tablas de la ADR 0012', async () => {
+  it('abre catmetal-mp v2: las tablas de la ADR 0012 más los candados (tarea 3.4)', async () => {
     await db.open();
     expect(db.name).toBe(NOMBRE_DB);
-    expect(db.verno).toBe(1);
+    expect(db.verno).toBe(2);
     expect(db.tables.map((t) => t.name).sort()).toEqual(
       [
         'asignaciones',
+        'candados',
         'consumos',
         'evidencias',
         'instalacion',
@@ -49,7 +50,7 @@ describe('esquema Dexie', () => {
   it('permite instancias con otro nombre (pruebas aisladas)', async () => {
     const otra = new CatmetalDb(`prueba-${uuidv7()}`);
     await otra.open();
-    expect(otra.verno).toBe(1);
+    expect(otra.verno).toBe(2);
     await otra.delete();
   });
 

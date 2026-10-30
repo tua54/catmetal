@@ -14,6 +14,7 @@ import Dexie, { type Table } from 'dexie';
 import { ahoraIso, uuidv7 } from '@catmetal/shared';
 import type {
   AsignacionLocal,
+  CandadoLocal,
   ConsumoLocal,
   EventoTrazabilidad,
   EvidenciaLocal,
@@ -36,8 +37,9 @@ export const NOMBRE_DB = 'catmetal-mp';
 type ClaveUsuario = [string, string];
 
 /**
- * Esquema v1. Para cambiarlo, agregue `this.version(2).stores(...)` con `upgrade()`; nunca edite
- * la versión 1 (los navegadores con datos de planta la tienen).
+ * Esquema v1. Para cambiarlo, agregue `this.version(N + 1).stores(...)` (con `upgrade()` si hay que
+ * transformar datos); nunca edite
+ * una versión ya publicada (los navegadores con datos de planta la tienen).
  */
 export const ESQUEMA_V1 = {
   // `&seq_local`: único, garantiza un orden total de envío. `[user_id+estado+seq_local]`: cola de un
@@ -60,6 +62,14 @@ export const ESQUEMA_V1 = {
   instalacion: 'clave',
 } as const;
 
+/**
+ * v2 (tarea 3.4): candados entre pestañas en IndexedDB, alternativa a Web Locks para serializar el
+ * refresh del token. Solo agrega una tabla: no requiere `upgrade()`.
+ */
+export const ESQUEMA_V2 = {
+  candados: 'nombre',
+} as const;
+
 export class CatmetalDb extends Dexie {
   declare outbox: Table<MutacionOutbox, string>;
   declare consumos: Table<ConsumoLocal, ClaveUsuario>;
@@ -76,10 +86,12 @@ export class CatmetalDb extends Dexie {
   declare perfiles: Table<PerfilLocal, string>;
   declare trazabilidad: Table<EventoTrazabilidad, string>;
   declare instalacion: Table<Instalacion, string>;
+  declare candados: Table<CandadoLocal, string>;
 
   constructor(nombre: string = NOMBRE_DB) {
     super(nombre);
     this.version(1).stores(ESQUEMA_V1);
+    this.version(2).stores(ESQUEMA_V2);
   }
 }
 
