@@ -46,3 +46,8 @@ Los comandos exactos, en orden, están en `docs/despliegue.md` (secciones 2 a 6)
 ## Verificaciones en tablet real (correcciones v1.1)
 
 - **Duración del reemplazo del snapshot (M5, ADR 0022).** Medir en la tablet de planta, en Chromium y en Safari, cuánto tarda `completarSnapshot` con la partición de un jefe (decenas de miles de consumos). En fake-indexeddb, 10.000 consumos tardan 3,3-4,9 s, pero esa implementación es O(n) por actualización y no representa al navegador. Si supera unos 3 s, hay que optimizar el recálculo.
+
+## Verificaciones en staging (correcciones v1.1)
+
+- **D1 remota (M3/M4)**: en un ensayo de restauración en staging, verificar que exista `octet_length`, el límite de 100 KB por sentencia, el tope de 5 términos por `UNION ALL`, si `wrangler d1 execute --file` es atómico y que `PRAGMA foreign_key_check` funcione. Los resultados van a `docs/notas-plataforma.md`.
+- **Rate limit de `/sync/push` (ADR 0020, D.4)**: evaluar un binding de Rate Limiting por usuario para el push.

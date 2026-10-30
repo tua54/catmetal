@@ -3,6 +3,7 @@
 - Estado: aceptado
 - Fecha: 2026-10-29
 - Fase: 1
+- Enmendado por: correcciones v1.1, B6 (un hash con menos de 100.000 iteraciones se recalcula en el login, con la auditoría `usuario.rehash` sin el hash).
 
 ## Contexto
 

@@ -68,6 +68,8 @@ Los cambios de la spec de esta ronda están en `docs/spec.md` §14 (v2.1).
 
 ### M3. Un cliente puede hacer fallar el backup de forma permanente (memoria)
 
+- **Estado**: RESUELTO (88c6afb, junto con M4). ADR 0020. Pruebas: `apps/worker/test/fase6-cron-bytes.test.ts`, `fase6-cron-aislamiento.test.ts` y `fase3-push-recorte.test.ts`. El tope por usuario y día se evaluó y no se implementó (ADR 0020).
+
 - **Dónde**: `apps/worker/src/cron/backup.ts:54` (`TAMANO_PAGINA = 2000`) y `:398-412` (`SELECT *` por página); `sync/push.ts:140-146` guarda `payload_json` de hasta 64 KiB por mutación rechazada.
 - **Escenario**: unas 80 peticiones de 25 mutaciones inválidas de unos 63 KB llevan una página de `sync_mutations` a unos 128 MB. El Worker se queda sin memoria, la tabla se reintenta para siempre y las tablas siguientes nunca se respaldan.
 - **Aceptación**:
@@ -77,6 +79,8 @@ Los cambios de la spec de esta ronda están en `docs/spec.md` §14 (v2.1).
   - Evalúa también si hace falta un tope de crecimiento de `sync_mutations` rechazadas por usuario y día. Si lo implementas, que no pierda datos de planta y quede en el ADR.
 
 ### M4. Restaurar desde el backup de R2 puede dejar consumos decididos sin su validación
+
+- **Estado**: RESUELTO (88c6afb). ADR 0021. Prueba: `apps/worker/test/fase6-restauracion.test.ts`. Procedimiento en `docs/despliegue.md` §9.2.
 
 - **Dónde**: orden de `apps/worker/src/cron/tablas.ts` (`audit_log → sync_mutations → validations → … → consumptions`); `docs/despliegue.md` §9.
 - **Escenario**: el jefe aprueba entre la exportación de `validations` y la de `consumptions`. El backup restaurado tiene el consumo `aprobado` sin su fila de validación, y el reenvío del jefe recibe `CONSUMO_NO_PENDIENTE`. Además, falta en la auditoría lo que se escribió durante la ventana del backup.
@@ -121,12 +125,14 @@ Los cambios de la spec de esta ronda están en `docs/spec.md` §14 (v2.1).
 
 ### B1. Vida máxima de la familia de refresh (spec §5, v2.1)
 
+- **Estado**: RESUELTO (f5d4454). Prueba: `apps/worker/test/correcciones-b1-vida-familia.test.ts`.
+
 - **Dónde**: `apps/worker/src/auth/sesiones.ts:325` (cada rotación da 30 días nuevos).
 - **Aceptación**: la familia vence a los 30 días del login con contraseña aunque se rote, y hay una prueba de ello.
 
 ### B2. Documentar la ventana de gracia de la rotación
 
-- **Estado**: RESUELTO (ver commit `docs(desviaciones)` de B2): entrada D10 en `docs/desviaciones.md`.
+- **Estado**: RESUELTO (51f7956): entrada D10 en `docs/desviaciones.md`.
 
 - **Dónde**: `sesiones.ts:411-440`; ADR 0008 punto 3.
 - **Aceptación**: hay una entrada en `docs/desviaciones.md` que referencia el ADR.
@@ -151,6 +157,8 @@ Los cambios de la spec de esta ronda están en `docs/spec.md` §14 (v2.1).
   - Hay pruebas de ambas partes.
 
 ### B6. Hashes de contraseña con pocas iteraciones
+
+- **Estado**: RESUELTO (51a3ed3). Prueba: `apps/worker/test/correcciones-b6-rehash.test.ts`.
 
 - **Dónde**: `apps/worker/src/auth/contrasenas.ts:56-62` (acepta de 1 a 100.000).
 - **Aceptación**: un hash con menos de 100.000 iteraciones se acepta una vez y se **recalcula** a 100.000 al iniciar sesión, en el mismo batch que la auditoría.
