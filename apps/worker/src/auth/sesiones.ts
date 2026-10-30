@@ -54,9 +54,98 @@ export interface DatosNuevaSesion {
   userAgent: string | null;
 }
 
+/** Acción de auditoría de una familia revocada porque otro usuario entró en el mismo navegador. */
+export const ACCION_REVOCADA_POR_OTRO_INICIO = 'sesion.revocada_por_otro_inicio';
+
+/**
+ * Tope de familias ajenas revocadas en un mismo login (acota el tamaño del batch). En una tablet
+ * compartida hay pocos usuarios; si hubiera más, las restantes caerían en el siguiente login.
+ */
+export const MAX_FAMILIAS_AJENAS_POR_INICIO = 50;
+
+interface FamiliaAjena {
+  familia_id: string;
+  user_id: string;
+  device_id: string;
+  token_id: string;
+}
+
+/**
+ * Familias vigentes de OTROS usuarios cuyos dispositivos tienen el mismo `instalacion_id`
+ * (F4-06 de docs/auditoria/seguridad-fase-4.md; ADR 0008 puntos 7 y 8). Hay una sola cookie
+ * `mp_refresh` por origen: el login de este usuario la reemplaza en ese navegador, así que esas
+ * sesiones ya no se pueden usar legítimamente desde él. Las del mismo usuario (otros navegadores o
+ * el mismo) no se incluyen: las del mismo dispositivo las revoca el punto 7.
+ */
+async function familiasAjenasEnInstalacion(
+  db: D1Database,
+  instalacionId: string,
+  userId: string,
+  ahora: string,
+): Promise<FamiliaAjena[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT r.familia_id, r.user_id, r.device_id, MAX(r.id) AS token_id
+       FROM refresh_tokens AS r JOIN devices AS d ON d.id = r.device_id
+       WHERE d.instalacion_id = ? AND r.user_id <> ? AND r.revocado_at IS NULL AND r.expira_at > ?
+       GROUP BY r.familia_id, r.user_id, r.device_id
+       ORDER BY r.familia_id
+       LIMIT ?`,
+    )
+    .bind(instalacionId, userId, ahora, MAX_FAMILIAS_AJENAS_POR_INICIO)
+    .all<FamiliaAjena>();
+  return results;
+}
+
+/**
+ * Por cada familia ajena: su auditoría y su revocación, para el MISMO batch del login. La auditoría
+ * va ANTES del UPDATE y está condicionada a que la familia siga teniendo tokens vigentes de ese
+ * usuario: si entre la lectura y el batch la familia ya se cerró (logout, rotación por reutilización),
+ * no se audita una revocación que no ocurrió. La auditoría solo lleva ids (sin datos personales).
+ */
+function sentenciasRevocarAjenas(
+  db: D1Database,
+  familias: readonly FamiliaAjena[],
+  actor: { userId: string; deviceId: string },
+  ahora: string,
+): D1PreparedStatement[] {
+  return familias.flatMap((familia) => [
+    sentenciaAuditoriaCondicional(
+      db,
+      {
+        entidad: 'refresh_tokens',
+        entidad_id: familia.token_id,
+        accion: ACCION_REVOCADA_POR_OTRO_INICIO,
+        actor_id: actor.userId,
+        device_id: actor.deviceId,
+        despues: {
+          id: familia.token_id,
+          user_id: familia.user_id,
+          device_id: familia.device_id,
+          familia_id: familia.familia_id,
+          revocado_at: ahora,
+        },
+        server_at: ahora,
+      },
+      {
+        sql: `EXISTS (SELECT 1 FROM refresh_tokens
+          WHERE familia_id = ? AND user_id = ? AND revocado_at IS NULL)`,
+        parametros: [familia.familia_id, familia.user_id],
+      },
+    ),
+    db
+      .prepare(
+        `UPDATE refresh_tokens SET revocado_at = ?, updated_at = ?
+         WHERE familia_id = ? AND user_id = ? AND revocado_at IS NULL`,
+      )
+      .bind(ahora, ahora, familia.familia_id, familia.user_id),
+  ]);
+}
+
 /**
  * Login correcto: registra o actualiza el dispositivo, reinicia el contador de intentos, revoca las
- * familias activas del mismo usuario en el mismo dispositivo y crea una familia nueva.
+ * familias activas del mismo usuario en el mismo dispositivo y, si llega un `instalacion_id`, las de
+ * otros usuarios en ese mismo navegador (F4-06); por último crea una familia nueva.
  */
 export async function iniciarSesion(
   db: D1Database,
@@ -64,6 +153,10 @@ export async function iniciarSesion(
   datos: DatosNuevaSesion,
 ): Promise<TokenEmitido> {
   const ahora = ahoraIso();
+  const familiasAjenas =
+    datos.instalacionId === null
+      ? []
+      : await familiasAjenasEnInstalacion(db, datos.instalacionId, datos.userId, ahora);
   const token = generarRefreshToken();
   const emitido: TokenEmitido = {
     id: uuidv7(),
@@ -154,6 +247,16 @@ export async function iniciarSesion(
          WHERE id = ? AND (intentos_fallidos <> 0 OR bloqueado_hasta IS NOT NULL)`,
       )
       .bind(ahora, datos.userId),
+  );
+
+  // F4-06: en el mismo batch, después de registrar el dispositivo (la auditoría lo referencia).
+  sentencias.push(
+    ...sentenciasRevocarAjenas(
+      db,
+      familiasAjenas,
+      { userId: datos.userId, deviceId: datos.deviceId },
+      ahora,
+    ),
   );
 
   sentencias.push(

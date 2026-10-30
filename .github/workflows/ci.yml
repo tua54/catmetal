@@ -52,7 +52,7 @@ jobs:
         run: pnpm format:check
 
       # Incluye la cobertura de packages/shared y apps/worker con umbral de líneas del 80 %.
-      # apps/web/dist no existe en CI: scripts/ensure-web-dist.mjs crea un index.html marcador
+      # apps/web/dist no existe en CI: scripts/ensure-web-dist.mjs crea marcadores de index.html, sw.js y manifest.webmanifest
       # antes de las pruebas del Worker (assets.directory debe existir).
       - name: Pruebas
         run: pnpm test

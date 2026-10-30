@@ -37,6 +37,31 @@ function esRutaApi(ruta: string): boolean {
 }
 
 /**
+ * Archivos de la PWA sin hash en el nombre (F4-10 de docs/auditoria/seguridad-fase-4.md): el shell,
+ * el Service Worker y el manifest. Deben revalidarse siempre: si una caché HTTP los retuviera, la
+ * PWA no se enteraría de una versión nueva (el Service Worker nuevo no llegaría a instalarse).
+ */
+export const RUTAS_SIN_HASH: ReadonlySet<string> = new Set([
+  '/',
+  '/index.html',
+  '/sw.js',
+  '/manifest.webmanifest',
+]);
+
+/**
+ * `Cache-Control: no-cache` para lo que no lleva hash: las rutas de `RUTAS_SIN_HASH` y cualquier
+ * documento HTML (las navegaciones de la SPA devuelven `index.html` por `not_found_handling`). Los
+ * assets con hash (`/assets/*.js`, `*.css`, fuentes, iconos) conservan el valor de Workers Static
+ * Assets: no son HTML ni están en la lista.
+ */
+function debeRevalidarse(ruta: string, cabeceras: Headers): boolean {
+  if (RUTAS_SIN_HASH.has(ruta)) {
+    return true;
+  }
+  return (cabeceras.get('Content-Type') ?? '').toLowerCase().startsWith('text/html');
+}
+
+/**
  * Aplica las cabeceras después de que la ruta respondió. Las respuestas deben tener cabeceras
  * mutables: las de `env.ASSETS.fetch` son inmutables, por eso la ruta de assets las copia antes
  * (ver `servirAsset` en app.ts).
@@ -49,7 +74,13 @@ export const cabecerasSeguridad: MiddlewareHandler = async (c, next) => {
   }
   // Una ruta puede fijar su propio Cache-Control solo si también prohíbe guardar la respuesta (por
   // ejemplo `private, no-store` en GET /evidences/:id); cualquier otro valor se reemplaza.
-  if (esRutaApi(c.req.path) && !(cabeceras.get('Cache-Control') ?? '').includes('no-store')) {
-    cabeceras.set('Cache-Control', 'no-store');
+  if (esRutaApi(c.req.path)) {
+    if (!(cabeceras.get('Cache-Control') ?? '').includes('no-store')) {
+      cabeceras.set('Cache-Control', 'no-store');
+    }
+    return;
+  }
+  if (debeRevalidarse(c.req.path, cabeceras)) {
+    cabeceras.set('Cache-Control', 'no-cache');
   }
 };
