@@ -155,6 +155,8 @@ Los cambios de la spec de esta ronda están en `docs/spec.md` §14 (v2.1).
 
 ### B5. Versión mínima del cliente
 
+- **Estado**: PARCIAL: servidor RESUELTO (2a81cf2), ADR 0026; falta el cliente.
+
 - **Dónde**: `apps/web/src/pwa/AvisoActualizacion.tsx` y `pwa/registro.ts`.
 - **Aceptación**:
   - El cliente envía su versión. Si es menor que la mínima del servidor, recibe un código `CLIENTE_DESACTUALIZADO` y la app fuerza la actualización **sin perder el outbox**.
@@ -247,5 +249,5 @@ Los cambios de la spec de esta ronda están en `docs/spec.md` §14 (v2.1).
 
 - **Dónde**: `ENTIDADES_AUDITORIA` en `packages/shared/src/reportes.ts`.
 - **Hallazgo**: el admin ve las filas de `login_cupos` en `/audit` sin filtro, pero `?entidad=login_cupos` responde 400.
-- **Estado**: pendiente (P2).
+- **Estado**: RESUELTO (41ae133).
 
