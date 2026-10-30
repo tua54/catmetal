@@ -4,7 +4,8 @@
 //   la pestaña se cierra.
 // - Sin Web Locks (navegadores viejos): cola en memoria (serializa dentro de la pestaña) + candado en
 //   IndexedDB con expiración (entre pestañas). La expiración evita que una pestaña cerrada a mitad
-//   del refresh bloquee a las demás para siempre.
+//   del refresh bloquee a las demás para siempre. Mientras la tarea corre, su titular lo renueva
+//   (latido, B10): solo vence si la pestaña que lo tiene deja de existir o queda congelada.
 
 import { uuidv7 } from '@catmetal/shared';
 import { db } from '../datos/db';
@@ -29,7 +30,10 @@ export interface OpcionesCandado {
  * `sync/motor.ts` porque `cerrarSesion` también lo toma (F4-05) y `auth` no depende de `sync`.
  */
 export const NOMBRE_CANDADO_SYNC = 'catmetal-sync';
-/** Vida del candado de sync en la alternativa de IndexedDB (una sync larga no debe perderlo). */
+/**
+ * Vida del candado de sync en la alternativa de IndexedDB. Se renueva cada tercio mientras la sync
+ * sigue (B10); solo vence si su pestaña se cierra o se congela.
+ */
 export const DURACION_CANDADO_SYNC_MS = 120_000;
 
 const DURACION_MS = 30_000;
@@ -85,22 +89,59 @@ async function soltarEnIndexedDb(nombre: string, titular: string): Promise<void>
   });
 }
 
+/**
+ * Extiende la vida del candado si `titular` todavía lo tiene. Devuelve `false` si ya es de otro
+ * (venció y otra pestaña lo tomó): entonces no se pisa.
+ */
+async function renovarEnIndexedDb(
+  nombre: string,
+  titular: string,
+  duracionMs: number,
+  ahora: () => number,
+): Promise<boolean> {
+  return db.transaction('rw', db.candados, async () => {
+    const actual = await db.candados.get(nombre);
+    if (actual?.titular !== titular) {
+      return false;
+    }
+    await db.candados.put({ nombre, titular, expira_at: ahora() + duracionMs });
+    return true;
+  });
+}
+
 async function conCandadoAlternativo<T>(
   nombre: string,
   tarea: () => Promise<T>,
   opciones: OpcionesCandado,
 ): Promise<T> {
   const titular = uuidv7();
-  await tomarEnIndexedDb(
-    nombre,
-    titular,
-    opciones.duracionMs ?? DURACION_MS,
-    opciones.intervaloMs ?? INTERVALO_MS,
-    opciones.ahora ?? Date.now,
+  const duracionMs = opciones.duracionMs ?? DURACION_MS;
+  const ahora = opciones.ahora ?? Date.now;
+  await tomarEnIndexedDb(nombre, titular, duracionMs, opciones.intervaloMs ?? INTERVALO_MS, ahora);
+  // B10: latido. Mientras la tarea sigue, el candado se renueva cada tercio de su vida: una sync
+  // larga no lo pierde y otra pestaña no entra a la vez. Si la pestaña se cierra, el latido muere
+  // con ella y el candado vence solo. Con los temporizadores frenados de una pestaña en segundo
+  // plano (≥ 1 por minuto), el tercio de 120 s sigue dejando margen.
+  let renovacion: Promise<unknown> = Promise.resolve();
+  const latido = setInterval(
+    () => {
+      renovacion = renovacion
+        .then(() => renovarEnIndexedDb(nombre, titular, duracionMs, ahora))
+        .then((sigue) => {
+          if (!sigue) {
+            // Ya es de otro titular: no se renueva más (el motor tolera perder un lote, B10).
+            clearInterval(latido);
+          }
+        })
+        .catch(() => undefined);
+    },
+    Math.max(1, Math.floor(duracionMs / 3)),
   );
   try {
     return await tarea();
   } finally {
+    clearInterval(latido);
+    await renovacion;
     await soltarEnIndexedDb(nombre, titular);
   }
 }

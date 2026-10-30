@@ -68,6 +68,7 @@ import {
   recuperarEnviando,
   siguienteLote,
 } from '../datos/outbox';
+import { ErrorDatosLocales } from '../datos/errores';
 import type { ErrorSync } from '../datos/tipos';
 import { registrarEvento } from '../datos/trazabilidad';
 import { actualizarContadores, useEstadoSync, type StoreEstadoSync } from './estado';
@@ -493,18 +494,23 @@ export class MotorSync {
       await recuperarEnviando(userId, this.#ahora());
       // A1 (ADR 0016): si el servidor responde EPOCA_CAMBIADA, el lote volvió a pendiente sin
       // procesarse; el pull detecta la época nueva, reencola en orden y hace el snapshot.
-      const epocaVieja = (await this.#push(userId, resumen)) === 'epoca_cambiada';
-      if (resumen.error === null) {
+      const primero = await this.#push(userId, resumen);
+      // B10: otra sincronización ya está enviando estas mutaciones; esta se retira sin error.
+      let ocupado = primero === 'ocupado';
+      const epocaVieja = primero === 'epoca_cambiada';
+      if (resumen.error === null && !ocupado) {
         await this.#pull(userId, resumen);
       }
-      if (resumen.error === null && (resumen.epoca_cambiada || epocaVieja)) {
+      if (resumen.error === null && !ocupado && (resumen.epoca_cambiada || epocaVieja)) {
         // Tras un cambio de época se reenvían las mutaciones aplicadas que se conservaban.
-        if ((await this.#push(userId, resumen)) === 'epoca_cambiada') {
+        const segundo = await this.#push(userId, resumen);
+        ocupado = segundo === 'ocupado';
+        if (segundo === 'epoca_cambiada') {
           // La época volvió a cambiar (otra restauración): se reintenta en la próxima sync.
           resumen.error = { code: 'EPOCA_CAMBIADA', message: MENSAJES_ERROR.EPOCA_CAMBIADA };
         }
       }
-      if (resumen.error === null || !detieneLaRed(resumen.error)) {
+      if (!ocupado && (resumen.error === null || !detieneLaRed(resumen.error))) {
         await this.#subirEvidencias(userId, resumen);
       }
       await purgarAplicadasAntiguas(userId, this.#ahora());
@@ -556,7 +562,11 @@ export class MotorSync {
   // Push
   // -------------------------------------------------------------------------------------------
 
-  async #push(userId: string, resumen: ResumenSync): Promise<'ok' | 'epoca_cambiada'> {
+  /**
+   * `ocupado` (B10): otra sincronización tomó el lote entre `siguienteLote` y `marcarEnviando` (por
+   * ejemplo, otra pestaña tras vencer el candado alternativo). No es un error: esa sync lo envía.
+   */
+  async #push(userId: string, resumen: ResumenSync): Promise<'ok' | 'epoca_cambiada' | 'ocupado'> {
     for (let lotes = 0; lotes < MAX_LOTES; lotes += 1) {
       this.#verificarSesion(userId);
       const listo = await siguienteLote(userId, MAX_MUTACIONES_POR_LOTE, this.#ahora());
@@ -564,7 +574,17 @@ export class MotorSync {
         return 'ok';
       }
       const { epoca } = await leerMetaSync(userId);
-      const lote = await marcarEnviando(userId, listo, this.#ahora());
+      let lote;
+      try {
+        lote = await marcarEnviando(userId, listo, this.#ahora());
+      } catch (error) {
+        if (error instanceof ErrorDatosLocales && error.code === 'CONFLICTO') {
+          // B10: alguna ya no está `pendiente` (la marcó otra sync). La transacción no cambió nada:
+          // ninguna mutación se toca aquí y no se envía nada.
+          return 'ocupado';
+        }
+        throw error;
+      }
       resumen.lotes += 1;
       resumen.enviadas += lote.length;
 
