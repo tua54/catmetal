@@ -39,3 +39,30 @@ Se adopta la opción 2.
 ## Cómo revertir
 
 Quitar el middleware o dejar `VERSION_MINIMA_CLIENTE` en 1. El header del cliente es inocuo.
+
+## Enmienda 1 — El logout no exige la versión mínima (correcciones v1.2, ítem A3)
+
+- Fecha: 2026-10-30.
+
+### Contexto
+
+El middleware se aplica a todo `/api/v1/*`. Con la mínima subida, un cliente desactualizado recibe 426 también en `POST /auth/logout`: la tablet no puede revocar su familia de refresh antes de actualizarse, y la sesión queda viva en el servidor hasta que vence.
+
+### Decisión
+
+1. **`POST /api/v1/auth/logout` queda fuera** de la exigencia de versión mínima, igual que `GET /api/v1/health`. Solo reduce privilegios (revoca la familia y borra la cookie), no escribe datos de negocio ni toca `sync_mutations`. El CSRF por `Origin`, el límite de cuerpo y la autenticación del logout siguen igual.
+   - La exención compara el método **y** la ruta exactos. Cualquier otro método sobre esa ruta, o cualquier otra ruta, sigue exigiendo la versión.
+2. **`POST /api/v1/auth/refresh` sigue exigiendo la versión mínima.** Criterio:
+   - El refresh **emite credenciales nuevas**. Un cliente con un contrato incompatible no debe obtener un access token con el que seguir hablando con la API.
+   - No hace falta para actualizarse: la cookie de refresh sobrevive a la recarga, y la versión nueva hace su refresh con su propio header.
+   - El 426 del refresh durante un push no debe contar como intento ni aplicar espera: eso lo resuelve el cliente (A4).
+3. `POST /auth/login` y el resto siguen exigiendo la versión.
+
+### Consecuencias
+
+- Un cliente viejo siempre puede cerrar sesión y revocar su familia.
+- El logout no puede usarse para escribir nada con un contrato viejo: su cuerpo no se procesa más allá de lo que ya hacía.
+
+### Cómo revertir
+
+Quitar la exención del logout en `apps/worker/src/middleware/version-cliente.ts`.
