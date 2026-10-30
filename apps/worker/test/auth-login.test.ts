@@ -254,6 +254,14 @@ describe('bloqueo de cuenta (5 intentos, 15 min)', () => {
 
 describe('rate limiting (IP + email, 5 por 60 s)', () => {
   it('la sexta petición con la misma IP y correo responde 429 DEMASIADOS_INTENTOS', async () => {
+    // El limitador simulado de Miniflare cuenta por ventanas alineadas al minuto del reloj de pared
+    // (docs/notas-plataforma.md). Las 7 peticiones tardan unos 3 s (cada 401 espera 400 ms, H-02):
+    // si quedan menos de 10 s del minuto actual, se espera al siguiente para que todas caigan en la
+    // misma ventana. Antes la prueba fallaba de forma intermitente al cruzar el cambio de minuto.
+    const restanteMs = 60_000 - (Date.now() % 60_000);
+    if (restanteMs < 10_000) {
+      await new Promise((resolver) => setTimeout(resolver, restanteMs + 200));
+    }
     const email = `limite-${uuidv7()}@catmetal.test`;
     const ip = `ip-${crypto.randomUUID()}`;
     const estados: number[] = [];
