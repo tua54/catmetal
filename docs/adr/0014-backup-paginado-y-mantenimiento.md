@@ -3,6 +3,7 @@
 - Estado: aceptado
 - Fecha: 2026-10-29
 - Fase: 6 (adelantada en paralelo con la Fase 3)
+- Enmendado por: ADR 0020 (página acotada por bytes, tablas `incompleta`, manifest `formato: 2` con estado `parcial`) y ADR 0021 (marca de corte, `audit_log` al final, restauración reconciliada con `scripts/restaurar-backup.mjs`).
 
 ## Contexto
 

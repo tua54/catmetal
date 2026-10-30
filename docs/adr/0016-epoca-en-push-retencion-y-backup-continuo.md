@@ -5,6 +5,7 @@
 - Fase: 3
 - Enmendado por: ADR 0022 (snapshot en un área temporal y autoridad del servidor tras un cambio de época o un reinicio).
 - Enmienda: ADR 0009 (época y retención) y ADR 0014 (backup)
+- Enmendado por: ADR 0020 (punto 4: página acotada por bytes, además de por 2000 filas) y ADR 0021 (punto 4: `seq_final` es el `MAX(seq)` al empezar `audit_log`, que pasa a exportarse al final).
 
 ## Contexto
 
