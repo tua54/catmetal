@@ -116,17 +116,20 @@ pnpm format:check
 
 ## Scripts de la raíz
 
-| Script                              | Qué hace                                                                               |
-| ----------------------------------- | -------------------------------------------------------------------------------------- |
-| `pnpm dev`                          | Entorno de desarrollo local completo (Worker + Vite).                                  |
-| `pnpm setup:dev-vars`               | Genera `apps/worker/.dev.vars` con secretos aleatorios locales.                        |
-| `pnpm db:migrate:local`             | Aplica las migraciones a la D1 local.                                                  |
-| `pnpm db:seed:local`                | Carga usuarios, materiales y órdenes de prueba en la D1 local. **(Fase 1)**            |
-| `pnpm lint`                         | ESLint en todo el repositorio.                                                         |
-| `pnpm typecheck`                    | `tsc --noEmit` en cada paquete; en el Worker también `wrangler types --check`.         |
-| `pnpm test`                         | Pruebas de todos los paquetes, con cobertura.                                          |
-| `pnpm test:e2e`                     | Pruebas E2E con Playwright (Chromium y WebKit), incluido el modo offline. **(Fase 4)** |
-| `pnpm format` / `pnpm format:check` | Aplica o verifica el formato de Prettier.                                              |
+| Script                              | Qué hace                                                                       |
+| ----------------------------------- | ------------------------------------------------------------------------------ |
+| `pnpm dev`                          | Entorno de desarrollo local completo (Worker + Vite).                          |
+| `pnpm setup:dev-vars`               | Genera `apps/worker/.dev.vars` con secretos aleatorios locales.                |
+| `pnpm db:migrate:local`             | Aplica las migraciones a la D1 local.                                          |
+| `pnpm db:seed:local`                | Carga usuarios, materiales y órdenes de prueba en la D1 local.                 |
+| `pnpm db:reset:local`               | Borra solo el estado local de Wrangler, vuelve a migrar y siembra.             |
+| `pnpm lint`                         | ESLint en todo el repositorio.                                                 |
+| `pnpm typecheck`                    | `tsc --noEmit` en cada paquete; en el Worker también `wrangler types --check`. |
+| `pnpm test`                         | Pruebas de todos los paquetes, con cobertura.                                  |
+| `pnpm test:e2e`                     | Pruebas E2E con Playwright (Chromium y WebKit), incluidos offline, PWA y axe.  |
+| `pnpm test:e2e:instalar`            | Descarga los navegadores de Playwright (una vez).                              |
+| `pnpm test:lighthouse`              | Lighthouse con perfil de tablet; falla si alguna categoría baja de 90.         |
+| `pnpm format` / `pnpm format:check` | Aplica o verifica el formato de Prettier.                                      |
 
 Scripts útiles por paquete:
 
@@ -136,6 +139,6 @@ Scripts útiles por paquete:
 ## Reglas
 
 - **Nada remoto.** Todo el desarrollo y las pruebas usan recursos locales (`wrangler dev`, `--local`). No ejecute `wrangler deploy`, `wrangler secret`, `wrangler login` ni comandos con `--remote`.
-- **El despliegue lo hace una persona** siguiendo [`docs/despliegue.md`](docs/despliegue.md), que se escribe en la Fase 6. Requiere el plan Workers Paid.
+- **El despliegue lo hace una persona** siguiendo [`docs/despliegue.md`](docs/despliegue.md). Requiere el plan Workers Paid. El primer administrador de staging/producción se genera con `node scripts/crear-admin-sql.mjs` (solo escribe un SQL local).
 - **Secretos fuera de git**: `.dev.vars` es local; en Cloudflare se usan secrets de Wrangler.
 - Las decisiones de arquitectura están en [`docs/adr/`](docs/adr/) y el estado del trabajo, en [`docs/progreso.md`](docs/progreso.md).
