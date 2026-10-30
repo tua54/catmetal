@@ -6,11 +6,12 @@
   "description": "PWA offline-first de registro de consumos (React + Vite)",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && tsc --noEmit -p src/pwa/sw && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p src/pwa/sw",
     "test": "vitest run",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "generar:iconos": "pwa-assets-generator"
   },
   "dependencies": {
     "@catmetal/shared": "workspace:*",
@@ -35,6 +36,7 @@
     "@testing-library/user-event": "14.6.8",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
+    "@vite-pwa/assets-generator": "2.0.0",
     "@vitejs/plugin-react": "6.1.2",
     "@vitest/coverage-istanbul": "4.1.12",
     "fake-indexeddb": "6.2.6",
@@ -43,6 +45,9 @@
     "typescript": "6.0.3",
     "vite": "8.3.5",
     "vite-plugin-pwa": "2.0.0",
-    "vitest": "4.1.12"
+    "vitest": "4.1.12",
+    "workbox-core": "7.4.1",
+    "workbox-precaching": "7.4.1",
+    "workbox-routing": "7.4.1"
   }
 }

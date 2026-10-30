@@ -1,38 +1,35 @@
-import { render, screen } from '@testing-library/react';
-import { createMemoryRouter } from 'react-router';
-import { describe, expect, it } from 'vitest';
-import { App } from './App';
-import { createQueryClient } from './lib/query-client';
-import { routes } from './routes';
+import { screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { entrarSinConexion, reiniciarApp, renderizarApp } from './test/app';
 
-function renderEn(ruta: string) {
-  const router = createMemoryRouter(routes, { initialEntries: [ruta] });
-  return render(<App router={router} queryClient={createQueryClient()} />);
-}
+beforeEach(reiniciarApp);
+afterEach(reiniciarApp);
 
-describe('App (esqueleto)', () => {
-  it('muestra la barra superior con el logo de Catmetal y el contenido principal', async () => {
-    renderEn('/');
+describe('App', () => {
+  it('sin sesión, la raíz lleva al login con el logo de Catmetal', async () => {
+    const { router } = renderizarApp('/');
 
-    const barra = await screen.findByRole('banner');
-    expect(barra).toBeInTheDocument();
-    expect(screen.getByRole('img', { name: 'Catmetal' })).toBeInTheDocument();
-    expect(screen.getByRole('main')).toBeInTheDocument();
     expect(
-      screen.getByRole('heading', { level: 1, name: 'Control de Materia Prima' }),
+      await screen.findByRole('heading', { level: 1, name: 'Control de Materia Prima' }),
     ).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'Catmetal' })).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe('/login');
   });
 
-  it('ofrece un enlace para saltar al contenido principal', async () => {
-    renderEn('/');
+  it('con sesión muestra la barra superior, el salto al contenido y el contenido principal', async () => {
+    await entrarSinConexion('supervisor');
+    renderizarApp('/');
 
-    const salto = await screen.findByRole('link', { name: 'Saltar al contenido' });
+    expect(await screen.findByRole('banner')).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'Catmetal' })).toBeInTheDocument();
+    const salto = screen.getByRole('link', { name: 'Saltar al contenido' });
     expect(salto).toHaveAttribute('href', '#contenido');
     expect(screen.getByRole('main')).toHaveAttribute('id', 'contenido');
   });
 
   it('muestra la página 404 en una ruta desconocida, dentro del layout', async () => {
-    renderEn('/ruta/que/no/existe');
+    await entrarSinConexion('supervisor');
+    renderizarApp('/ruta/que/no/existe');
 
     expect(
       await screen.findByRole('heading', { level: 1, name: 'Página no encontrada' }),

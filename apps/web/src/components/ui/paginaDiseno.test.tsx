@@ -1,17 +1,15 @@
 // Prueba de humo de la página de muestra /diseno, montada con el router real de la app.
-import { render, screen, within } from '@testing-library/react';
+import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { createMemoryRouter } from 'react-router';
-import { describe, expect, it } from 'vitest';
-import { App } from '../../App';
-import { createQueryClient } from '../../lib/query-client';
-import { routes } from '../../routes';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { reiniciarApp, renderizarApp } from '../../test/app';
 
 async function abrirDiseno() {
-  const router = createMemoryRouter(routes, { initialEntries: ['/diseno'] });
-  render(<App router={router} queryClient={createQueryClient()} />);
+  renderizarApp('/diseno');
   await screen.findByRole('heading', { level: 1, name: 'Sistema visual · Componentes base' });
 }
+
+beforeEach(reiniciarApp);
 
 describe('Página /diseno', () => {
   it('toma el título de la barra del handle de la ruta y muestra las secciones', async () => {

@@ -25,13 +25,22 @@ export default defineConfig({
     react(),
     tailwindcss(),
     VitePWA({
-      strategies: 'generateSW',
-      // TODO(Fase 4): registrar el Service Worker desde la app con `virtual:pwa-register`
-      // (workbox-window) y definir la estrategia de actualización. En la Fase 0 el SW se genera
-      // en el build pero NO se registra, para que no cachee builds intermedios durante el desarrollo.
+      // Service Worker propio (src/pwa/sw/sw.ts): precache del shell, navegación offline al
+      // shell (excepto /api/*) y reenvío del evento `sync` de Background Sync a las pestañas.
+      // generateSW no permite atender `sync` sin inyectar un script aparte con `importScripts`.
+      strategies: 'injectManifest',
+      srcDir: 'src/pwa/sw',
+      filename: 'sw.ts',
+      // El registro lo hace la app con `virtual:pwa-register` (src/pwa/registro.ts). Nunca
+      // 'inline': un script en línea rompería la CSP `script-src 'self'` (ADR 0004).
       injectRegister: false,
       registerType: 'prompt',
+      // Los íconos ya entran al precache por `globPatterns`: no se agregan dos veces.
+      includeManifestIcons: false,
+      // Los íconos ya están versionados en public/icons (los genera `pnpm generar:iconos` con
+      // pwa-assets.config.mjs); el build no los regenera (`pwaAssets` sin configurar).
       manifest: {
+        id: '/',
         name: 'Control de Materia Prima · Catmetal',
         short_name: 'Catmetal MP',
         description: 'Registro y validación de consumos de materia prima en planta.',
@@ -43,17 +52,24 @@ export default defineConfig({
         orientation: 'any',
         start_url: '/',
         scope: '/',
-        // TODO(Fase 4): íconos 192, 512 y maskable a partir del SVG oficial de Catmetal
-        // (pendiente de que el cliente lo entregue).
-        icons: [],
+        // Íconos PROVISIONALES generados desde public/icons/escudo.svg (pendiente: SVG oficial).
+        icons: [
+          { src: '/icons/pwa-192x192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+          { src: '/icons/pwa-512x512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+          {
+            src: '/icons/maskable-icon-512x512.png',
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'maskable',
+          },
+        ],
       },
-      workbox: {
+      injectManifest: {
+        // Solo el shell estático. Nada de /api/*: el SW no tiene rutas de runtime para la API.
+        // (El plugin agrega por su cuenta manifest.webmanifest al precache.)
         globPatterns: ['**/*.{js,css,html,woff2,png,svg,ico}'],
-        navigateFallback: 'index.html',
-        // La API nunca se resuelve con el shell de la SPA.
-        navigateFallbackDenylist: [/^\/api\//],
-        cleanupOutdatedCaches: true,
-        // Sin runtimeCaching a propósito: el Service Worker nunca cachea respuestas de /api/*.
+        // El SVG de origen de los íconos no hace falta offline.
+        globIgnores: ['icons/escudo.svg'],
       },
       devOptions: {
         enabled: false,

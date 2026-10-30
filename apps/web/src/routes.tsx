@@ -1,31 +1,9 @@
-import type { RouteObject } from 'react-router';
-import { AppLayout, type HandleRuta } from './components/layout/AppLayout';
-import { DisenoPage } from './pages/DisenoPage';
-import { HomePage } from './pages/HomePage';
-import { NotFoundPage } from './pages/NotFoundPage';
-import { RouteErrorPage } from './pages/RouteErrorPage';
+import { crearRutas } from './rutas/rutas';
 
 /**
- * Árbol de rutas (React Router 7, modo data).
- * Se comparte entre `createBrowserRouter` (main.tsx) y `createMemoryRouter` (pruebas).
+ * Rutas de la app. `/diseno` (muestra del sistema visual) solo existe en desarrollo: en el build de
+ * producción `import.meta.env.DEV` es `false`, la ruta no se registra y el `import()` se elimina.
  */
-export const routes: RouteObject[] = [
-  {
-    path: '/',
-    element: <AppLayout />,
-    errorElement: <RouteErrorPage />,
-    children: [
-      { index: true, element: <HomePage /> },
-      {
-        // Muestra del sistema visual (Tarea 4.1): solo datos de ejemplo, sin API.
-        path: 'diseno',
-        element: <DisenoPage />,
-        handle: {
-          titulo: 'Sistema visual',
-          subtitulo: 'Componentes base · Catmetal',
-        } satisfies HandleRuta,
-      },
-      { path: '*', element: <NotFoundPage /> },
-    ],
-  },
-];
+export const routes = crearRutas({
+  diseno: import.meta.env.DEV ? () => import('./pages/DisenoPage') : null,
+});

@@ -1,11 +1,17 @@
 import { QueryClientProvider, type QueryClient } from '@tanstack/react-query';
 import { flushSync } from 'react-dom';
 import { RouterProvider, type DataRouter } from 'react-router';
+import {
+  ContextoSincronizacion,
+  type ServiciosSincronizacion,
+} from './app/contexto-sincronizacion';
 
 export interface AppProps {
   /** Router de datos: `createBrowserRouter` en la app, `createMemoryRouter` en las pruebas. */
   router: DataRouter;
   queryClient: QueryClient;
+  /** Motor de sync de la pestaña (`obtenerSincronizacion()`); en pruebas, uno simulado. */
+  sincronizacion: ServiciosSincronizacion;
 }
 
 /**
@@ -16,15 +22,17 @@ export interface AppProps {
  * importa un solo punto de entrada y se evita que Vitest cargue dos copias del paquete
  * (CJS + ESM) con contextos de router distintos.
  */
-export function App({ router, queryClient }: AppProps) {
+export function App({ router, queryClient, sincronizacion }: AppProps) {
   return (
     <QueryClientProvider client={queryClient}>
-      <RouterProvider
-        router={router}
-        flushSync={(fn) => {
-          flushSync(fn);
-        }}
-      />
+      <ContextoSincronizacion.Provider value={sincronizacion}>
+        <RouterProvider
+          router={router}
+          flushSync={(fn) => {
+            flushSync(fn);
+          }}
+        />
+      </ContextoSincronizacion.Provider>
     </QueryClientProvider>
   );
 }

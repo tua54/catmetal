@@ -3,7 +3,10 @@
   "compilerOptions": {
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "jsx": "react-jsx",
-    "types": ["vite/client"]
+    "types": ["vite/client", "vite-plugin-pwa/vanillajs"]
   },
-  "include": ["src", "*.ts"]
+  "include": ["src", "*.ts"],
+  // El Service Worker usa `lib.webworker` (incompatible con el DOM): tiene su propio proyecto en
+  // src/pwa/sw/tsconfig.json y se revisa con `tsc -p src/pwa/sw`.
+  "exclude": ["src/pwa/sw/sw.ts"]
 }
