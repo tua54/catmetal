@@ -190,7 +190,8 @@ export function sentenciasRevocarAjenas(
  * Desbloqueo de las columnas heredadas de la v1 en el login correcto (ADR 0028, punto 4):
  * 1. si había un bloqueo, un UPDATE propio lo quita y fija la marca de escritura;
  * 2. la auditoría `usuario.desbloqueado`, condicionada a esa marca;
- * 3. `intentos_fallidos` sin bloqueo vuelve a 0 en otro UPDATE, sin auditar (como antes).
+ * 3. `intentos_fallidos` sin bloqueo vuelve a 0 en otro UPDATE, sin auditar (como antes), pero con
+ *    su propia marca nueva (N2).
  * Debe ir DESPUÉS de cualquier otra escritura auditada de `users` del mismo batch (rehash, B6):
  * reescribe la marca de la fila (regla de orden).
  */
@@ -224,11 +225,20 @@ export function sentenciasDesbloqueoHeredado(
       },
       porMarca('users', { id: userId }, marca),
     ),
+    // N2 (R-v12-01): aunque no se audita, también fija una marca NUEVA (nunca NULL). Si no, el
+    // testigo de la edición del admin (`updated_at` y `escritura_id IS <leída>`, N1) quedaría solo
+    // en `updated_at` y una edición basada en una lectura vieja se aplicaría si este login cae en
+    // el mismo milisegundo. Va la última de este grupo y ninguna sentencia posterior del batch del
+    // login depende de la marca de `users` (las siguientes son de `refresh_tokens`, con sus
+    // propias marcas, o auditorías incondicionales): reescribirla no anula ninguna condición. Es
+    // excluyente con el primer UPDATE (que deja `intentos_fallidos` en 0), así que la marca de
+    // `usuario.desbloqueado` no se pisa antes de evaluarse.
     db
       .prepare(
-        'UPDATE users SET intentos_fallidos = 0, updated_at = ? WHERE id = ? AND intentos_fallidos <> 0',
+        `UPDATE users SET intentos_fallidos = 0, updated_at = ?, escritura_id = ?
+         WHERE id = ? AND intentos_fallidos <> 0`,
       )
-      .bind(ahora, userId),
+      .bind(ahora, nuevaMarca(), userId),
   ];
 }
 

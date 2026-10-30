@@ -62,6 +62,9 @@ export function generarSqlDesbloqueo({ email, ahora = new Date() }) {
   const usuario = `(SELECT id FROM users WHERE email = ${texto(correo)})`;
   const idCupos = uuidv7(ahora.getTime());
   const idUsuario = uuidv7(ahora.getTime());
+  // N2 (R-v12-01, ADR 0028): marca de escritura nueva de `users`, fija en el archivo (así aplicarlo
+  // dos veces deja la misma). Nunca NULL: un NULL reabriría el ABA contra una lectura NULL.
+  const escrituraUsuario = uuidv7(ahora.getTime());
   const columnas =
     'id, entidad, entidad_id, accion, actor_id, device_id, datos_antes, datos_despues, client_at, server_at, alerta_reloj, created_at, updated_at';
   return [
@@ -72,8 +75,10 @@ export function generarSqlDesbloqueo({ email, ahora = new Date() }) {
     `INSERT INTO audit_log (${columnas}) SELECT ${texto(idUsuario)}, 'users', id, 'usuario.desbloqueado', NULL, NULL, NULL, json_object('id', id, 'intentos_fallidos', 0, 'bloqueado_hasta', NULL), NULL, ${texto(marca)}, 0, ${texto(marca)}, ${texto(marca)} FROM users WHERE email = ${texto(correo)} AND (intentos_fallidos <> 0 OR bloqueado_hasta IS NOT NULL) AND NOT EXISTS (SELECT 1 FROM audit_log WHERE id = ${texto(idUsuario)});`,
     // 3. Reinicio de todos los cupos del usuario (dispositivos, orígenes y global), sin DELETE.
     `UPDATE login_cupos SET fallos = 0, bloqueado_hasta = NULL, updated_at = ${texto(marca)} WHERE user_id = ${usuario} AND (fallos <> 0 OR bloqueado_hasta IS NOT NULL);`,
-    // 4. Columnas heredadas de la v1: ya no bloquean, pero se dejan en 0/NULL.
-    `UPDATE users SET intentos_fallidos = 0, bloqueado_hasta = NULL, updated_at = ${texto(marca)} WHERE email = ${texto(correo)} AND (intentos_fallidos <> 0 OR bloqueado_hasta IS NOT NULL);`,
+    // 4. Columnas heredadas de la v1: ya no bloquean, pero se dejan en 0/NULL. También renueva la
+    //    marca de escritura (N2): la edición concurrente de un admin basada en una lectura previa
+    //    no se aplica aunque caiga en el mismo milisegundo.
+    `UPDATE users SET intentos_fallidos = 0, bloqueado_hasta = NULL, updated_at = ${texto(marca)}, escritura_id = ${texto(escrituraUsuario)} WHERE email = ${texto(correo)} AND (intentos_fallidos <> 0 OR bloqueado_hasta IS NOT NULL);`,
   ];
 }
 

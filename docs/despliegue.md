@@ -97,7 +97,8 @@ El script **no** se conecta a Cloudflare: solo escribe un archivo `.sql` local. 
 - reinicia todos los cupos de `login_cupos` del usuario (dispositivos, orígenes y el tope global) y las columnas heredadas `users.intentos_fallidos` y `bloqueado_hasta`;
 - inserta su fila de auditoría `login_cupos.desbloqueo_emergencia`, sin el correo;
 - no usa `DELETE` y no hace nada si el correo no existe;
-- es idempotente: aplicarlo dos veces no cambia nada más.
+- es idempotente: aplicarlo dos veces no cambia nada más;
+- desde la v1.2 fija una marca de escritura nueva en `users` (N2, ADR 0028). **Genere el archivo en el momento de usarlo**: uno generado con una versión anterior no la fija, y uno de la v1.2 necesita la migración 0009 aplicada.
 
 Desde `apps/worker`:
 
