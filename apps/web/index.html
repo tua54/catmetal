@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="es-CO">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#111111" />
+    <meta
+      name="description"
+      content="Registro y validación de consumos de materia prima en planta · Catmetal S.A.S."
+    />
+    <link rel="icon" type="image/png" href="/src/assets/brand/favicon-catmetal-32.png" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon-180x180.png" />
+    <meta name="apple-mobile-web-app-title" content="Catmetal MP" />
+    <title>Control de Materia Prima · Catmetal</title>
+  </head>
+  <body>
+    <noscript>Esta aplicación necesita JavaScript habilitado.</noscript>
+    <div id="root">
+      <!--
+        Copia estática de PantallaCarga (src/pages/comunes/PantallaCarga.tsx): se pinta en cuanto
+        llegan el HTML y el CSS, sin esperar al JavaScript, y React la reemplaza al montar.
+        Solo clases de Tailwind (sin estilos ni scripts en línea: CSP 'self').
+      -->
+      <div
+        class="flex min-h-dvh flex-col items-center justify-center gap-6 bg-ink-950 px-4 text-white"
+      >
+        <img
+          src="/src/assets/brand/logo-catmetal.png"
+          alt="Catmetal"
+          width="180"
+          height="36"
+          class="h-10 w-auto"
+        />
+        <div class="flex items-center gap-3">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+            focusable="false"
+            class="size-8 shrink-0 motion-safe:animate-spin"
+          >
+            <path d="M21 12a9 9 0 1 1-6.22-8.56" />
+          </svg>
+          <p role="status" class="text-lg font-medium">Cargando…</p>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

@@ -1,0 +1,2061 @@
+{
+  "version": "6",
+  "dialect": "sqlite",
+  "id": "bc978b39-9889-4fd0-9c7b-7dacf63f5697",
+  "prevId": "5838c87d-bf43-4cea-a84e-26efae42cad6",
+  "tables": {
+    "audit_log": {
+      "name": "audit_log",
+      "columns": {
+        "seq": {
+          "name": "seq",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "entidad": {
+          "name": "entidad",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "entidad_id": {
+          "name": "entidad_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "accion": {
+          "name": "accion",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "order_id": {
+          "name": "order_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "actor_id": {
+          "name": "actor_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "device_id": {
+          "name": "device_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "datos_antes": {
+          "name": "datos_antes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "datos_despues": {
+          "name": "datos_despues",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "client_at": {
+          "name": "client_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "server_at": {
+          "name": "server_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "alerta_reloj": {
+          "name": "alerta_reloj",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "audit_log_id_unico": {
+          "name": "audit_log_id_unico",
+          "columns": [
+            "id"
+          ],
+          "isUnique": true
+        },
+        "audit_log_entidad_entidad_id": {
+          "name": "audit_log_entidad_entidad_id",
+          "columns": [
+            "entidad",
+            "entidad_id"
+          ],
+          "isUnique": false
+        },
+        "audit_log_actor_id_seq": {
+          "name": "audit_log_actor_id_seq",
+          "columns": [
+            "actor_id",
+            "seq"
+          ],
+          "isUnique": false
+        },
+        "audit_log_order_id_seq": {
+          "name": "audit_log_order_id_seq",
+          "columns": [
+            "order_id",
+            "seq"
+          ],
+          "isUnique": false,
+          "where": "order_id IS NOT NULL"
+        }
+      },
+      "foreignKeys": {
+        "audit_log_actor_id_users_id_fk": {
+          "name": "audit_log_actor_id_users_id_fk",
+          "tableFrom": "audit_log",
+          "tableTo": "users",
+          "columnsFrom": [
+            "actor_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "audit_log_device_id_devices_id_fk": {
+          "name": "audit_log_device_id_devices_id_fk",
+          "tableFrom": "audit_log",
+          "tableTo": "devices",
+          "columnsFrom": [
+            "device_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "audit_log_datos_antes_json": {
+          "name": "audit_log_datos_antes_json",
+          "value": "datos_antes IS NULL OR json_valid(datos_antes)"
+        },
+        "audit_log_datos_despues_json": {
+          "name": "audit_log_datos_despues_json",
+          "value": "datos_despues IS NULL OR json_valid(datos_despues)"
+        },
+        "audit_log_alerta_reloj_booleano": {
+          "name": "audit_log_alerta_reloj_booleano",
+          "value": "alerta_reloj IN (0, 1)"
+        },
+        "audit_log_fechas_iso": {
+          "name": "audit_log_fechas_iso",
+          "value": "(length(created_at) = 24 AND created_at GLOB '????-??-??T??:??:??.???Z') AND (length(updated_at) = 24 AND updated_at GLOB '????-??-??T??:??:??.???Z') AND (length(server_at) = 24 AND server_at GLOB '????-??-??T??:??:??.???Z') AND (client_at IS NULL OR (length(client_at) = 24 AND client_at GLOB '????-??-??T??:??:??.???Z'))"
+        }
+      }
+    },
+    "consumptions": {
+      "name": "consumptions",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "order_id": {
+          "name": "order_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "material_id": {
+          "name": "material_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "cantidad": {
+          "name": "cantidad",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "unidad": {
+          "name": "unidad",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "cantidad_en_unidad_plan": {
+          "name": "cantidad_en_unidad_plan",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "lote": {
+          "name": "lote",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "costo_unitario_cop_snapshot": {
+          "name": "costo_unitario_cop_snapshot",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "registrado_por": {
+          "name": "registrado_por",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "device_id": {
+          "name": "device_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "client_created_at": {
+          "name": "client_created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "server_received_at": {
+          "name": "server_received_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "estado": {
+          "name": "estado",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'pendiente'"
+        },
+        "corrige_a": {
+          "name": "corrige_a",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "registro_tardio": {
+          "name": "registro_tardio",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "requiere_novedad": {
+          "name": "requiere_novedad",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "escritura_id": {
+          "name": "escritura_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "consumptions_order_id_estado": {
+          "name": "consumptions_order_id_estado",
+          "columns": [
+            "order_id",
+            "estado"
+          ],
+          "isUnique": false
+        },
+        "consumptions_registrado_por_created_at": {
+          "name": "consumptions_registrado_por_created_at",
+          "columns": [
+            "registrado_por",
+            "created_at"
+          ],
+          "isUnique": false
+        },
+        "consumptions_corrige_a_unico": {
+          "name": "consumptions_corrige_a_unico",
+          "columns": [
+            "corrige_a"
+          ],
+          "isUnique": true,
+          "where": "corrige_a IS NOT NULL"
+        },
+        "consumptions_material_id": {
+          "name": "consumptions_material_id",
+          "columns": [
+            "material_id"
+          ],
+          "isUnique": false
+        },
+        "consumptions_pendientes_id": {
+          "name": "consumptions_pendientes_id",
+          "columns": [
+            "id"
+          ],
+          "isUnique": false,
+          "where": "estado = 'pendiente'"
+        },
+        "consumptions_order_id_id": {
+          "name": "consumptions_order_id_id",
+          "columns": [
+            "order_id",
+            "id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "consumptions_order_id_production_orders_id_fk": {
+          "name": "consumptions_order_id_production_orders_id_fk",
+          "tableFrom": "consumptions",
+          "tableTo": "production_orders",
+          "columnsFrom": [
+            "order_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "consumptions_material_id_materials_id_fk": {
+          "name": "consumptions_material_id_materials_id_fk",
+          "tableFrom": "consumptions",
+          "tableTo": "materials",
+          "columnsFrom": [
+            "material_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "consumptions_registrado_por_users_id_fk": {
+          "name": "consumptions_registrado_por_users_id_fk",
+          "tableFrom": "consumptions",
+          "tableTo": "users",
+          "columnsFrom": [
+            "registrado_por"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "consumptions_device_id_devices_id_fk": {
+          "name": "consumptions_device_id_devices_id_fk",
+          "tableFrom": "consumptions",
+          "tableTo": "devices",
+          "columnsFrom": [
+            "device_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "consumptions_corrige_a_consumptions_id_fk": {
+          "name": "consumptions_corrige_a_consumptions_id_fk",
+          "tableFrom": "consumptions",
+          "tableTo": "consumptions",
+          "columnsFrom": [
+            "corrige_a"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "consumptions_cantidad_positiva": {
+          "name": "consumptions_cantidad_positiva",
+          "value": "cantidad > 0"
+        },
+        "consumptions_cantidad_plan_positiva": {
+          "name": "consumptions_cantidad_plan_positiva",
+          "value": "cantidad_en_unidad_plan > 0"
+        },
+        "consumptions_costo_no_negativo": {
+          "name": "consumptions_costo_no_negativo",
+          "value": "costo_unitario_cop_snapshot >= 0"
+        },
+        "consumptions_unidad_valida": {
+          "name": "consumptions_unidad_valida",
+          "value": "unidad IN ('kg', 'g', 'l', 'ml', 'und', 'm')"
+        },
+        "consumptions_estado_valido": {
+          "name": "consumptions_estado_valido",
+          "value": "estado IN ('pendiente', 'aprobado', 'rechazado')"
+        },
+        "consumptions_no_se_corrige_a_si_mismo": {
+          "name": "consumptions_no_se_corrige_a_si_mismo",
+          "value": "corrige_a IS NULL OR corrige_a <> id"
+        },
+        "consumptions_registro_tardio_booleano": {
+          "name": "consumptions_registro_tardio_booleano",
+          "value": "registro_tardio IN (0, 1)"
+        },
+        "consumptions_requiere_novedad_booleano": {
+          "name": "consumptions_requiere_novedad_booleano",
+          "value": "requiere_novedad IN (0, 1)"
+        },
+        "consumptions_version_positiva": {
+          "name": "consumptions_version_positiva",
+          "value": "version >= 1"
+        },
+        "consumptions_fechas_iso": {
+          "name": "consumptions_fechas_iso",
+          "value": "(length(created_at) = 24 AND created_at GLOB '????-??-??T??:??:??.???Z') AND (length(updated_at) = 24 AND updated_at GLOB '????-??-??T??:??:??.???Z') AND (length(client_created_at) = 24 AND client_created_at GLOB '????-??-??T??:??:??.???Z') AND (length(server_received_at) = 24 AND server_received_at GLOB '????-??-??T??:??:??.???Z')"
+        }
+      }
+    },
+    "devices": {
+      "name": "devices",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "instalacion_id": {
+          "name": "instalacion_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "nombre": {
+          "name": "nombre",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "user_agent": {
+          "name": "user_agent",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "ultimo_sync_at": {
+          "name": "ultimo_sync_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "devices_user_id": {
+          "name": "devices_user_id",
+          "columns": [
+            "user_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "devices_user_id_users_id_fk": {
+          "name": "devices_user_id_users_id_fk",
+          "tableFrom": "devices",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "devices_fechas_iso": {
+          "name": "devices_fechas_iso",
+          "value": "(length(created_at) = 24 AND created_at GLOB '????-??-??T??:??:??.???Z') AND (length(updated_at) = 24 AND updated_at GLOB '????-??-??T??:??:??.???Z') AND (ultimo_sync_at IS NULL OR (length(ultimo_sync_at) = 24 AND ultimo_sync_at GLOB '????-??-??T??:??:??.???Z'))"
+        }
+      }
+    },
+    "evidences": {
+      "name": "evidences",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "incident_id": {
+          "name": "incident_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "storage_key": {
+          "name": "storage_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "mime": {
+          "name": "mime",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tamano_bytes": {
+          "name": "tamano_bytes",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "sha256": {
+          "name": "sha256",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "subido": {
+          "name": "subido",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "subido_at": {
+          "name": "subido_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "escritura_id": {
+          "name": "escritura_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "evidences_incident_id": {
+          "name": "evidences_incident_id",
+          "columns": [
+            "incident_id"
+          ],
+          "isUnique": false
+        },
+        "evidences_storage_key_unico": {
+          "name": "evidences_storage_key_unico",
+          "columns": [
+            "storage_key"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "evidences_incident_id_incidents_id_fk": {
+          "name": "evidences_incident_id_incidents_id_fk",
+          "tableFrom": "evidences",
+          "tableTo": "incidents",
+          "columnsFrom": [
+            "incident_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "evidences_mime_valido": {
+          "name": "evidences_mime_valido",
+          "value": "mime IN ('image/jpeg', 'image/png', 'image/webp')"
+        },
+        "evidences_tamano_valido": {
+          "name": "evidences_tamano_valido",
+          "value": "tamano_bytes > 0 AND tamano_bytes <= 5242880"
+        },
+        "evidences_sha256_hex": {
+          "name": "evidences_sha256_hex",
+          "value": "length(sha256) = 64 AND sha256 NOT GLOB '*[^0-9a-f]*'"
+        },
+        "evidences_subido_booleano": {
+          "name": "evidences_subido_booleano",
+          "value": "subido IN (0, 1)"
+        },
+        "evidences_subido_coherente": {
+          "name": "evidences_subido_coherente",
+          "value": "(subido = 0 AND subido_at IS NULL) OR (subido = 1 AND subido_at IS NOT NULL)"
+        },
+        "evidences_fechas_iso": {
+          "name": "evidences_fechas_iso",
+          "value": "(length(created_at) = 24 AND created_at GLOB '????-??-??T??:??:??.???Z') AND (length(updated_at) = 24 AND updated_at GLOB '????-??-??T??:??:??.???Z') AND (subido_at IS NULL OR (length(subido_at) = 24 AND subido_at GLOB '????-??-??T??:??:??.???Z'))"
+        }
+      }
+    },
+    "incidents": {
+      "name": "incidents",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "consumption_id": {
+          "name": "consumption_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tipo": {
+          "name": "tipo",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "descripcion": {
+          "name": "descripcion",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "registrado_por": {
+          "name": "registrado_por",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "client_created_at": {
+          "name": "client_created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "server_received_at": {
+          "name": "server_received_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "escritura_id": {
+          "name": "escritura_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "incidents_consumption_id": {
+          "name": "incidents_consumption_id",
+          "columns": [
+            "consumption_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "incidents_consumption_id_consumptions_id_fk": {
+          "name": "incidents_consumption_id_consumptions_id_fk",
+          "tableFrom": "incidents",
+          "tableTo": "consumptions",
+          "columnsFrom": [
+            "consumption_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "incidents_registrado_por_users_id_fk": {
+          "name": "incidents_registrado_por_users_id_fk",
+          "tableFrom": "incidents",
+          "tableTo": "users",
+          "columnsFrom": [
+            "registrado_por"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "incidents_tipo_valido": {
+          "name": "incidents_tipo_valido",
+          "value": "tipo IN ('reproceso', 'merma', 'dano', 'error_registro', 'otro')"
+        },
+        "incidents_fechas_iso": {
+          "name": "incidents_fechas_iso",
+          "value": "(length(created_at) = 24 AND created_at GLOB '????-??-??T??:??:??.???Z') AND (length(updated_at) = 24 AND updated_at GLOB '????-??-??T??:??:??.???Z') AND (length(client_created_at) = 24 AND client_created_at GLOB '????-??-??T??:??:??.???Z') AND (length(server_received_at) = 24 AND server_received_at GLOB '????-??-??T??:??:??.???Z')"
+        }
+      }
+    },
+    "login_cupos": {
+      "name": "login_cupos",
+      "columns": {
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "origen": {
+          "name": "origen",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "fallos": {
+          "name": "fallos",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "ventana_inicio": {
+          "name": "ventana_inicio",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "bloqueado_hasta": {
+          "name": "bloqueado_hasta",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "reserva_id": {
+          "name": "reserva_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "login_cupos_updated_at": {
+          "name": "login_cupos_updated_at",
+          "columns": [
+            "updated_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "login_cupos_user_id_users_id_fk": {
+          "name": "login_cupos_user_id_users_id_fk",
+          "tableFrom": "login_cupos",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "login_cupos_pk": {
+          "columns": [
+            "user_id",
+            "origen"
+          ],
+          "name": "login_cupos_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "login_cupos_fallos_no_negativos": {
+          "name": "login_cupos_fallos_no_negativos",
+          "value": "fallos >= 0"
+        },
+        "login_cupos_origen_valido": {
+          "name": "login_cupos_origen_valido",
+          "value": "origen = 'g' OR (origen GLOB 'd:?*' AND length(origen) <= 64) OR (origen GLOB 'ip:?*' AND length(origen) <= 64)"
+        },
+        "login_cupos_fechas_iso": {
+          "name": "login_cupos_fechas_iso",
+          "value": "(length(created_at) = 24 AND created_at GLOB '????-??-??T??:??:??.???Z') AND (length(updated_at) = 24 AND updated_at GLOB '????-??-??T??:??:??.???Z') AND (length(ventana_inicio) = 24 AND ventana_inicio GLOB '????-??-??T??:??:??.???Z') AND (bloqueado_hasta IS NULL OR (length(bloqueado_hasta) = 24 AND bloqueado_hasta GLOB '????-??-??T??:??:??.???Z'))"
+        }
+      }
+    },
+    "materials": {
+      "name": "materials",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "codigo": {
+          "name": "codigo",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "nombre": {
+          "name": "nombre",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "unidad": {
+          "name": "unidad",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "costo_unitario_cop": {
+          "name": "costo_unitario_cop",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "activo": {
+          "name": "activo",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "escritura_id": {
+          "name": "escritura_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "materials_codigo_unico": {
+          "name": "materials_codigo_unico",
+          "columns": [
+            "codigo"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "materials_unidad_valida": {
+          "name": "materials_unidad_valida",
+          "value": "unidad IN ('kg', 'g', 'l', 'ml', 'und', 'm')"
+        },
+        "materials_costo_no_negativo": {
+          "name": "materials_costo_no_negativo",
+          "value": "costo_unitario_cop >= 0"
+        },
+        "materials_activo_booleano": {
+          "name": "materials_activo_booleano",
+          "value": "activo IN (0, 1)"
+        },
+        "materials_fechas_iso": {
+          "name": "materials_fechas_iso",
+          "value": "(length(created_at) = 24 AND created_at GLOB '????-??-??T??:??:??.???Z') AND (length(updated_at) = 24 AND updated_at GLOB '????-??-??T??:??:??.???Z')"
+        }
+      }
+    },
+    "order_planned_materials": {
+      "name": "order_planned_materials",
+      "columns": {
+        "order_id": {
+          "name": "order_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "material_id": {
+          "name": "material_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "cantidad_planeada": {
+          "name": "cantidad_planeada",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "unidad": {
+          "name": "unidad",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "escritura_id": {
+          "name": "escritura_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "order_planned_materials_material_id": {
+          "name": "order_planned_materials_material_id",
+          "columns": [
+            "material_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "order_planned_materials_order_id_production_orders_id_fk": {
+          "name": "order_planned_materials_order_id_production_orders_id_fk",
+          "tableFrom": "order_planned_materials",
+          "tableTo": "production_orders",
+          "columnsFrom": [
+            "order_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "order_planned_materials_material_id_materials_id_fk": {
+          "name": "order_planned_materials_material_id_materials_id_fk",
+          "tableFrom": "order_planned_materials",
+          "tableTo": "materials",
+          "columnsFrom": [
+            "material_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "order_planned_materials_pk": {
+          "columns": [
+            "order_id",
+            "material_id"
+          ],
+          "name": "order_planned_materials_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "order_planned_materials_cantidad_positiva": {
+          "name": "order_planned_materials_cantidad_positiva",
+          "value": "cantidad_planeada > 0"
+        },
+        "order_planned_materials_unidad_valida": {
+          "name": "order_planned_materials_unidad_valida",
+          "value": "unidad IN ('kg', 'g', 'l', 'ml', 'und', 'm')"
+        },
+        "order_planned_materials_fechas_iso": {
+          "name": "order_planned_materials_fechas_iso",
+          "value": "(length(created_at) = 24 AND created_at GLOB '????-??-??T??:??:??.???Z') AND (length(updated_at) = 24 AND updated_at GLOB '????-??-??T??:??:??.???Z')"
+        }
+      }
+    },
+    "order_supervisors": {
+      "name": "order_supervisors",
+      "columns": {
+        "order_id": {
+          "name": "order_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "asignado_por": {
+          "name": "asignado_por",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "activo": {
+          "name": "activo",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "escritura_id": {
+          "name": "escritura_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "order_supervisors_user_id": {
+          "name": "order_supervisors_user_id",
+          "columns": [
+            "user_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "order_supervisors_order_id_production_orders_id_fk": {
+          "name": "order_supervisors_order_id_production_orders_id_fk",
+          "tableFrom": "order_supervisors",
+          "tableTo": "production_orders",
+          "columnsFrom": [
+            "order_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "order_supervisors_user_id_users_id_fk": {
+          "name": "order_supervisors_user_id_users_id_fk",
+          "tableFrom": "order_supervisors",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "order_supervisors_asignado_por_users_id_fk": {
+          "name": "order_supervisors_asignado_por_users_id_fk",
+          "tableFrom": "order_supervisors",
+          "tableTo": "users",
+          "columnsFrom": [
+            "asignado_por"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "order_supervisors_pk": {
+          "columns": [
+            "order_id",
+            "user_id"
+          ],
+          "name": "order_supervisors_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "order_supervisors_activo_booleano": {
+          "name": "order_supervisors_activo_booleano",
+          "value": "activo IN (0, 1)"
+        },
+        "order_supervisors_fechas_iso": {
+          "name": "order_supervisors_fechas_iso",
+          "value": "(length(created_at) = 24 AND created_at GLOB '????-??-??T??:??:??.???Z') AND (length(updated_at) = 24 AND updated_at GLOB '????-??-??T??:??:??.???Z')"
+        }
+      }
+    },
+    "production_orders": {
+      "name": "production_orders",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "codigo": {
+          "name": "codigo",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "linea": {
+          "name": "linea",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "estado": {
+          "name": "estado",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'planeada'"
+        },
+        "fecha_inicio": {
+          "name": "fecha_inicio",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "fecha_fin": {
+          "name": "fecha_fin",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "creada_por": {
+          "name": "creada_por",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "escritura_id": {
+          "name": "escritura_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "production_orders_codigo_unico": {
+          "name": "production_orders_codigo_unico",
+          "columns": [
+            "codigo"
+          ],
+          "isUnique": true
+        },
+        "production_orders_estado": {
+          "name": "production_orders_estado",
+          "columns": [
+            "estado"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "production_orders_creada_por_users_id_fk": {
+          "name": "production_orders_creada_por_users_id_fk",
+          "tableFrom": "production_orders",
+          "tableTo": "users",
+          "columnsFrom": [
+            "creada_por"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "production_orders_estado_valido": {
+          "name": "production_orders_estado_valido",
+          "value": "estado IN ('planeada', 'en_proceso', 'finalizada', 'cancelada')"
+        },
+        "production_orders_fechas_iso": {
+          "name": "production_orders_fechas_iso",
+          "value": "(length(created_at) = 24 AND created_at GLOB '????-??-??T??:??:??.???Z') AND (length(updated_at) = 24 AND updated_at GLOB '????-??-??T??:??:??.???Z') AND (fecha_inicio IS NULL OR (length(fecha_inicio) = 24 AND fecha_inicio GLOB '????-??-??T??:??:??.???Z')) AND (fecha_fin IS NULL OR (length(fecha_fin) = 24 AND fecha_fin GLOB '????-??-??T??:??:??.???Z'))"
+        }
+      }
+    },
+    "refresh_tokens": {
+      "name": "refresh_tokens",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "device_id": {
+          "name": "device_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "token_hash": {
+          "name": "token_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "familia_id": {
+          "name": "familia_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "expira_at": {
+          "name": "expira_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "revocado_at": {
+          "name": "revocado_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "reemplazado_por": {
+          "name": "reemplazado_por",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "escritura_id": {
+          "name": "escritura_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "refresh_tokens_token_hash": {
+          "name": "refresh_tokens_token_hash",
+          "columns": [
+            "token_hash"
+          ],
+          "isUnique": true
+        },
+        "refresh_tokens_user_id": {
+          "name": "refresh_tokens_user_id",
+          "columns": [
+            "user_id"
+          ],
+          "isUnique": false
+        },
+        "refresh_tokens_familia_id": {
+          "name": "refresh_tokens_familia_id",
+          "columns": [
+            "familia_id"
+          ],
+          "isUnique": false
+        },
+        "refresh_tokens_vigentes_usuario": {
+          "name": "refresh_tokens_vigentes_usuario",
+          "columns": [
+            "user_id",
+            "device_id"
+          ],
+          "isUnique": false,
+          "where": "revocado_at IS NULL"
+        },
+        "refresh_tokens_expira_at": {
+          "name": "refresh_tokens_expira_at",
+          "columns": [
+            "expira_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "refresh_tokens_user_id_users_id_fk": {
+          "name": "refresh_tokens_user_id_users_id_fk",
+          "tableFrom": "refresh_tokens",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "refresh_tokens_device_id_devices_id_fk": {
+          "name": "refresh_tokens_device_id_devices_id_fk",
+          "tableFrom": "refresh_tokens",
+          "tableTo": "devices",
+          "columnsFrom": [
+            "device_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "refresh_tokens_token_hash_hex": {
+          "name": "refresh_tokens_token_hash_hex",
+          "value": "length(token_hash) = 64"
+        },
+        "refresh_tokens_fechas_iso": {
+          "name": "refresh_tokens_fechas_iso",
+          "value": "(length(created_at) = 24 AND created_at GLOB '????-??-??T??:??:??.???Z') AND (length(updated_at) = 24 AND updated_at GLOB '????-??-??T??:??:??.???Z') AND (length(expira_at) = 24 AND expira_at GLOB '????-??-??T??:??:??.???Z') AND (revocado_at IS NULL OR (length(revocado_at) = 24 AND revocado_at GLOB '????-??-??T??:??:??.???Z'))"
+        }
+      }
+    },
+    "settings": {
+      "name": "settings",
+      "columns": {
+        "clave": {
+          "name": "clave",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "valor": {
+          "name": "valor",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "actualizado_por": {
+          "name": "actualizado_por",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "escritura_id": {
+          "name": "escritura_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "settings_actualizado_por_users_id_fk": {
+          "name": "settings_actualizado_por_users_id_fk",
+          "tableFrom": "settings",
+          "tableTo": "users",
+          "columnsFrom": [
+            "actualizado_por"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "settings_valor_json": {
+          "name": "settings_valor_json",
+          "value": "json_valid(valor)"
+        },
+        "settings_fechas_iso": {
+          "name": "settings_fechas_iso",
+          "value": "(length(created_at) = 24 AND created_at GLOB '????-??-??T??:??:??.???Z') AND (length(updated_at) = 24 AND updated_at GLOB '????-??-??T??:??:??.???Z')"
+        }
+      }
+    },
+    "sync_mutations": {
+      "name": "sync_mutations",
+      "columns": {
+        "mutation_id": {
+          "name": "mutation_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "device_id": {
+          "name": "device_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tipo": {
+          "name": "tipo",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "resultado": {
+          "name": "resultado",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "respuesta_json": {
+          "name": "respuesta_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "payload_json": {
+          "name": "payload_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "procesada_at": {
+          "name": "procesada_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "sync_mutations_user_id_procesada_at": {
+          "name": "sync_mutations_user_id_procesada_at",
+          "columns": [
+            "user_id",
+            "procesada_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "sync_mutations_user_id_users_id_fk": {
+          "name": "sync_mutations_user_id_users_id_fk",
+          "tableFrom": "sync_mutations",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "sync_mutations_device_id_devices_id_fk": {
+          "name": "sync_mutations_device_id_devices_id_fk",
+          "tableFrom": "sync_mutations",
+          "tableTo": "devices",
+          "columnsFrom": [
+            "device_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "sync_mutations_resultado_valido": {
+          "name": "sync_mutations_resultado_valido",
+          "value": "resultado IN ('aplicada', 'rechazada', 'conflicto')"
+        },
+        "sync_mutations_respuesta_json": {
+          "name": "sync_mutations_respuesta_json",
+          "value": "json_valid(respuesta_json)"
+        },
+        "sync_mutations_payload_json": {
+          "name": "sync_mutations_payload_json",
+          "value": "payload_json IS NULL OR (json_valid(payload_json) AND length(payload_json) <= 65536)"
+        },
+        "sync_mutations_fechas_iso": {
+          "name": "sync_mutations_fechas_iso",
+          "value": "(length(created_at) = 24 AND created_at GLOB '????-??-??T??:??:??.???Z') AND (length(updated_at) = 24 AND updated_at GLOB '????-??-??T??:??:??.???Z') AND (length(procesada_at) = 24 AND procesada_at GLOB '????-??-??T??:??:??.???Z')"
+        }
+      }
+    },
+    "users": {
+      "name": "users",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "nombre": {
+          "name": "nombre",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "email": {
+          "name": "email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "password_hash": {
+          "name": "password_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "rol": {
+          "name": "rol",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "activo": {
+          "name": "activo",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": true
+        },
+        "intentos_fallidos": {
+          "name": "intentos_fallidos",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "bloqueado_hasta": {
+          "name": "bloqueado_hasta",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "escritura_id": {
+          "name": "escritura_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "users_email_unico": {
+          "name": "users_email_unico",
+          "columns": [
+            "email"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "users_email_minusculas": {
+          "name": "users_email_minusculas",
+          "value": "email = lower(email) AND length(trim(email)) > 0"
+        },
+        "users_rol_valido": {
+          "name": "users_rol_valido",
+          "value": "rol IN ('supervisor', 'jefe', 'admin')"
+        },
+        "users_activo_booleano": {
+          "name": "users_activo_booleano",
+          "value": "activo IN (0, 1)"
+        },
+        "users_intentos_no_negativos": {
+          "name": "users_intentos_no_negativos",
+          "value": "intentos_fallidos >= 0"
+        },
+        "users_fechas_iso": {
+          "name": "users_fechas_iso",
+          "value": "(length(created_at) = 24 AND created_at GLOB '????-??-??T??:??:??.???Z') AND (length(updated_at) = 24 AND updated_at GLOB '????-??-??T??:??:??.???Z') AND (bloqueado_hasta IS NULL OR (length(bloqueado_hasta) = 24 AND bloqueado_hasta GLOB '????-??-??T??:??:??.???Z'))"
+        }
+      }
+    },
+    "validations": {
+      "name": "validations",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "consumption_id": {
+          "name": "consumption_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "decision": {
+          "name": "decision",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "motivo": {
+          "name": "motivo",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "validado_por": {
+          "name": "validado_por",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "client_created_at": {
+          "name": "client_created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "server_received_at": {
+          "name": "server_received_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "escritura_id": {
+          "name": "escritura_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "validations_consumption_id_unico": {
+          "name": "validations_consumption_id_unico",
+          "columns": [
+            "consumption_id"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "validations_consumption_id_consumptions_id_fk": {
+          "name": "validations_consumption_id_consumptions_id_fk",
+          "tableFrom": "validations",
+          "tableTo": "consumptions",
+          "columnsFrom": [
+            "consumption_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "validations_validado_por_users_id_fk": {
+          "name": "validations_validado_por_users_id_fk",
+          "tableFrom": "validations",
+          "tableTo": "users",
+          "columnsFrom": [
+            "validado_por"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "validations_decision_valida": {
+          "name": "validations_decision_valida",
+          "value": "decision IN ('aprobado', 'rechazado')"
+        },
+        "validations_motivo_si_rechaza": {
+          "name": "validations_motivo_si_rechaza",
+          "value": "decision = 'aprobado' OR (motivo IS NOT NULL AND length(trim(motivo)) >= 3)"
+        },
+        "validations_fechas_iso": {
+          "name": "validations_fechas_iso",
+          "value": "(length(created_at) = 24 AND created_at GLOB '????-??-??T??:??:??.???Z') AND (length(updated_at) = 24 AND updated_at GLOB '????-??-??T??:??:??.???Z') AND (length(client_created_at) = 24 AND client_created_at GLOB '????-??-??T??:??:??.???Z') AND (length(server_received_at) = 24 AND server_received_at GLOB '????-??-??T??:??:??.???Z')"
+        }
+      }
+    }
+  },
+  "views": {},
+  "enums": {},
+  "_meta": {
+    "schemas": {},
+    "tables": {},
+    "columns": {}
+  },
+  "internal": {
+    "indexes": {}
+  }
+}

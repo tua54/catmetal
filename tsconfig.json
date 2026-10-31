@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["node"]
+  },
+  // Solo los archivos TypeScript de la raíz: la configuración de Playwright, las pruebas E2E y los
+  // tipos de los scripts de Node.
+  // Cada paquete de apps/ y packages/ tiene su propio tsconfig.
+  "include": [
+    "playwright.config.ts",
+    "scripts/e2e-config.d.mts",
+    // Tipos del script de desbloqueo de emergencia (lo importa una prueba del Worker; ADR 0018).
+    "scripts/desbloqueo-emergencia-sql.d.mts",
+    // Tipos del núcleo de la restauración del backup (lo importa una prueba del Worker; ADR 0021).
+    "scripts/restauracion-nucleo.d.mts",
+    "e2e/**/*.ts"
+  ]
+}

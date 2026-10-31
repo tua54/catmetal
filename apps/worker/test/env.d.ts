@@ -1,0 +1,18 @@
+// Bindings que solo existen en las pruebas (los define `miniflare` en vitest.config.mjs).
+import type { D1Migration } from 'cloudflare:test';
+
+declare global {
+  namespace Cloudflare {
+    interface Env {
+      TEST_MIGRATIONS: D1Migration[];
+      /** Archivos de src/, migrations/ y scripts/ para las pruebas estáticas (vitest.config.mjs). */
+      TEST_ARCHIVOS_FUENTE: { ruta: string; contenido: string }[];
+      /** Workflows de .github/workflows para la prueba estática de B8 (vitest.config.mjs). */
+      TEST_WORKFLOWS: { ruta: string; contenido: string }[];
+      /** D1 limpia para la prueba de restauración del backup (ADR 0021). */
+      DB_RESTAURADA: D1Database;
+      /** D1 recién migrada para probar la guardia de la restauración (R-05). */
+      DB_GUARDIA: D1Database;
+    }
+  }
+}

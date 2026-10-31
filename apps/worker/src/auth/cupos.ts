@@ -1,0 +1,534 @@
+// Cupos de login por (cuenta, origen) en D1 (ADR 0018, M1; docs/spec.md §5 v2.1, segunda capa).
+//
+// Orígenes (`login_cupos.origen`):
+// - `d:<nonce>`: dispositivo conocido (entrada válida de la cookie `mp_dispositivo`);
+// - `ip:<hmac>`: origen desconocido, HMAC truncado de la IP normalizada (nunca la IP en claro);
+// - `g`: tope global de TODOS los orígenes desconocidos de la cuenta.
+//
+// | Cupo                        | Fallos | Ventana fija            | Bloqueo                    |
+// | (cuenta, dispositivo)       | 5      | 15 min desde el 1.º     | 15 min, solo ese dispositivo |
+// | (cuenta, origen desconocido)| 5      | 15 min                  | 15 min                     |
+// | (cuenta, todos desconocidos)| 20     | 15 min                  | 15 min                     |
+//
+// La reserva se hace ANTES de comparar el hash y en un solo `db.batch()` (serial y atómico en D1):
+// N intentos concurrentes nunca reservan más que el límite. Sin reserva no se compara el hash.
+
+import {
+  BLOQUEO_MINUTOS,
+  MAX_INTENTOS_LOGIN,
+  MAX_INTENTOS_LOGIN_GLOBAL,
+  uuidv7,
+  VENTANA_INTENTOS_LOGIN_MINUTOS,
+} from '@catmetal/shared';
+import {
+  type CondicionDeEscritura,
+  MARCADOR_CONDICION,
+  porReserva,
+  sentenciaAuditoriaCondicional,
+  sentenciaDependiente,
+} from '../auditoria/auditar';
+import { aBase64Url } from './codificacion';
+import { hmacTruncado } from './dispositivo';
+
+export type TipoCupo = 'dispositivo' | 'origen' | 'global';
+
+export const ORIGEN_GLOBAL = 'g';
+const ETIQUETA_IP = 'mp-ip-v1';
+/** IP usada cuando no llega `cf-connecting-ip` (desarrollo local y pruebas). */
+export const IP_LOCAL = 'local';
+
+/** Filtro SQL por tipo de cupo sobre la columna `origen` (literales fijos del código). */
+const FILTRO_TIPO: Readonly<Record<TipoCupo, string>> = {
+  dispositivo: `origen GLOB 'd:*'`,
+  origen: `origen GLOB 'ip:*'`,
+  global: `origen = '${ORIGEN_GLOBAL}'`,
+};
+
+// ---------------------------------------------------------------------------------------------
+// Orígenes
+// ---------------------------------------------------------------------------------------------
+
+const PATRON_IPV4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
+
+function octetosIpv4(texto: string): number[] | null {
+  const partes = PATRON_IPV4.exec(texto);
+  if (partes === null) {
+    return null;
+  }
+  const octetos = partes.slice(1).map(Number);
+  return octetos.every((o) => o <= 255) ? octetos : null;
+}
+
+/** Los 8 hextetos de una IPv6 (admite `::` y una IPv4 al final), o null si no es válida. */
+function hextetosIpv6(texto: string): number[] | null {
+  let t = texto;
+  const ultimo = t.lastIndexOf(':');
+  const cola = t.slice(ultimo + 1);
+  if (cola.includes('.')) {
+    const o = octetosIpv4(cola);
+    if (o === null) {
+      return null;
+    }
+    const [a = 0, b = 0, c = 0, d = 0] = o;
+    t = `${t.slice(0, ultimo + 1)}${((a << 8) | b).toString(16)}:${((c << 8) | d).toString(16)}`;
+  }
+  const mitades = t.split('::');
+  if (mitades.length > 2) {
+    return null;
+  }
+  const izquierda = mitades[0] === '' || mitades[0] === undefined ? [] : mitades[0].split(':');
+  const derecha =
+    mitades.length === 2 && mitades[1] !== '' && mitades[1] !== undefined
+      ? mitades[1].split(':')
+      : [];
+  const faltan = 8 - izquierda.length - derecha.length;
+  if ((mitades.length === 1 && faltan !== 0) || (mitades.length === 2 && faltan < 1)) {
+    return null;
+  }
+  const todos = [
+    ...izquierda,
+    ...Array.from({ length: mitades.length === 2 ? faltan : 0 }, () => '0'),
+    ...derecha,
+  ];
+  if (todos.length !== 8 || !todos.every((h) => /^[0-9a-f]{1,4}$/.test(h))) {
+    return null;
+  }
+  return todos.map((h) => Number.parseInt(h, 16));
+}
+
+/**
+ * IP normalizada para el cupo: IPv4 tal cual; IPv4 mapeada (`::ffff:a.b.c.d`) → IPv4; IPv6 → su
+ * prefijo /64 (un cliente IPv6 controla normalmente todo su /64). Lo que no se reconoce como IP se
+ * usa en minúsculas, tal cual.
+ */
+export function normalizarIp(ip: string | undefined): string {
+  let texto = (ip ?? '').trim().toLowerCase();
+  if (texto === '') {
+    return IP_LOCAL;
+  }
+  const zona = texto.indexOf('%');
+  if (zona >= 0) {
+    texto = texto.slice(0, zona);
+  }
+  const v4 = octetosIpv4(texto);
+  if (v4 !== null) {
+    return v4.join('.');
+  }
+  if (!texto.includes(':')) {
+    return texto;
+  }
+  const h = hextetosIpv6(texto);
+  if (h === null) {
+    return texto;
+  }
+  const [h0, h1, h2, h3, h4, h5, h6 = 0, h7 = 0] = h;
+  if (h0 === 0 && h1 === 0 && h2 === 0 && h3 === 0 && h4 === 0 && h5 === 0xffff) {
+    return [h6 >> 8, h6 & 0xff, h7 >> 8, h7 & 0xff].join('.');
+  }
+  return `${[h0, h1, h2, h3].map((x = 0) => x.toString(16)).join(':')}::/64`;
+}
+
+/** `ip:<HMAC-SHA-256 truncado de la IP normalizada, base64url>`. */
+export async function origenDeIp(secreto: string, ip: string | undefined): Promise<string> {
+  return `ip:${aBase64Url(await hmacTruncado(secreto, ETIQUETA_IP, normalizarIp(ip)))}`;
+}
+
+export function origenDeDispositivo(nonce: string): string {
+  return `d:${nonce}`;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Reserva
+// ---------------------------------------------------------------------------------------------
+
+export interface Reserva {
+  tipo: 'dispositivo' | 'origen';
+  userId: string;
+  origen: string;
+  reservaId: string;
+  /** Hora de la reserva (ISO). */
+  ahora: string;
+}
+
+interface Tiempos {
+  ahora: string;
+  /** Una ventana iniciada en este instante o antes ya venció. */
+  limiteVentana: string;
+  hasta: string;
+}
+
+function tiempos(ahoraMs: number): Tiempos {
+  return {
+    ahora: new Date(ahoraMs).toISOString(),
+    limiteVentana: new Date(ahoraMs - VENTANA_INTENTOS_LOGIN_MINUTOS * 60_000).toISOString(),
+    hasta: new Date(ahoraMs + BLOQUEO_MINUTOS * 60_000).toISOString(),
+  };
+}
+
+/**
+ * Upsert de un cupo. Parámetros: ?1 user_id, ?2 origen de la fila, ?3 ahora, ?4 límite de la
+ * ventana, ?5 máximo de fallos, ?6 bloqueado_hasta si llega al máximo, ?7 reserva_id.
+ *
+ * - Ventana fija: si `ventana_inicio` ya venció, el contador vuelve a 1 con una ventana nueva.
+ * - Solo actualiza si no hay bloqueo vigente; si lo hay, la fila no cambia (no hay reserva).
+ * - En SQLite las expresiones del SET se evalúan con los valores ANTERIORES de la fila.
+ */
+const NUEVOS_FALLOS = `CASE WHEN login_cupos.ventana_inicio <= ?4 THEN 1 ELSE login_cupos.fallos + 1 END`;
+const AL_CONFLICTO = `ON CONFLICT (user_id, origen) DO UPDATE SET
+    fallos = ${NUEVOS_FALLOS},
+    ventana_inicio = CASE WHEN login_cupos.ventana_inicio <= ?4 THEN ?3 ELSE login_cupos.ventana_inicio END,
+    bloqueado_hasta = CASE WHEN ${NUEVOS_FALLOS} >= ?5 THEN ?6 ELSE NULL END,
+    reserva_id = ?7,
+    updated_at = ?3
+  WHERE login_cupos.bloqueado_hasta IS NULL OR login_cupos.bloqueado_hasta <= ?3`;
+const COLUMNAS_CUPO =
+  'user_id, origen, fallos, ventana_inicio, bloqueado_hasta, reserva_id, created_at, updated_at';
+const FILA_NUEVA = `?1, ?2, 1, ?3, CASE WHEN 1 >= ?5 THEN ?6 ELSE NULL END, ?7, ?3, ?3`;
+
+/** Condición: la fila (user, origen) quedó con ESTA reserva y bloqueada por ella (ADR 0028). */
+function bloqueadaPorReserva(
+  userId: string,
+  origen: string,
+  reservaId: string,
+): CondicionDeEscritura {
+  return porReserva(userId, origen, reservaId, { bloqueada: true });
+}
+
+/**
+ * Auditoría del bloqueo de un cupo. Es una acción del SISTEMA (sin actor ni dispositivo) que
+ * dispara un intento anónimo: no lleva alerta de reloj (ADR 0019 la mide por dispositivo), queda 0.
+ */
+function auditoriaBloqueo(
+  db: D1Database,
+  tipo: TipoCupo,
+  userId: string,
+  maximo: number,
+  t: Tiempos,
+  condicion: CondicionDeEscritura,
+): D1PreparedStatement {
+  return sentenciaAuditoriaCondicional(
+    db,
+    {
+      entidad: 'login_cupos',
+      entidad_id: userId,
+      accion: 'login_cupos.bloqueado',
+      actor_id: null,
+      device_id: null,
+      despues: { user_id: userId, tipo, fallos: maximo, bloqueado_hasta: t.hasta },
+      server_at: t.ahora,
+    },
+    condicion,
+  );
+}
+
+/**
+ * Incremento de `g` ligado a una reserva: solo si la fila `origenReserva` quedó con ESTA reserva, y
+ * solo si `g` no tiene un bloqueo vigente (el WHERE del upsert). Nunca condiciona la reserva previa:
+ * un `g` bloqueado simplemente no cambia.
+ */
+function sentenciaIncrementoGlobal(
+  db: D1Database,
+  userId: string,
+  origenReserva: string,
+  reservaId: string,
+  t: Tiempos,
+): D1PreparedStatement {
+  return db
+    .prepare(
+      `INSERT INTO login_cupos (${COLUMNAS_CUPO})
+       SELECT ?1, ?8, 1, ?3, CASE WHEN 1 >= ?5 THEN ?6 ELSE NULL END, ?7, ?3, ?3
+       WHERE EXISTS (SELECT 1 FROM login_cupos
+         WHERE user_id = ?1 AND origen = ?2 AND reserva_id = ?7)
+       ${AL_CONFLICTO}`,
+    )
+    .bind(
+      userId,
+      origenReserva,
+      t.ahora,
+      t.limiteVentana,
+      MAX_INTENTOS_LOGIN_GLOBAL,
+      t.hasta,
+      reservaId,
+      ORIGEN_GLOBAL,
+    );
+}
+
+/**
+ * Reserva en el cupo del dispositivo conocido (cuatro sentencias en un batch):
+ * 1. upsert condicional de la fila `d:` con RETURNING (solo si no tiene un bloqueo vigente; `g` NO
+ *    la condiciona: propiedad (a) de la spec §5);
+ * 2. S-02: el fallo reservado también cuenta en `g`, si `g` no está bloqueado. Así el total de
+ *    adivinanzas por cuenta y ventana queda acotado (20 en `g`, más 5 por cada entrada válida de
+ *    la cookie mientras `g` está bloqueado), y los fallos del dispositivo adelantan el bloqueo de
+ *    los orígenes desconocidos;
+ * 3. y 4. auditorías de los bloqueos (dispositivo y global) que haya fijado esta reserva.
+ * Devuelve null si el cupo del dispositivo está bloqueado.
+ */
+export async function reservarDispositivo(
+  db: D1Database,
+  userId: string,
+  origen: string,
+  ahoraMs = Date.now(),
+): Promise<Reserva | null> {
+  const t = tiempos(ahoraMs);
+  const reservaId = uuidv7();
+  const [upsert] = await db.batch([
+    db
+      .prepare(
+        `INSERT INTO login_cupos (${COLUMNAS_CUPO}) VALUES (${FILA_NUEVA})
+         ${AL_CONFLICTO}
+         RETURNING fallos`,
+      )
+      .bind(userId, origen, t.ahora, t.limiteVentana, MAX_INTENTOS_LOGIN, t.hasta, reservaId),
+    sentenciaIncrementoGlobal(db, userId, origen, reservaId, t),
+    auditoriaBloqueo(
+      db,
+      'dispositivo',
+      userId,
+      MAX_INTENTOS_LOGIN,
+      t,
+      bloqueadaPorReserva(userId, origen, reservaId),
+    ),
+    auditoriaBloqueo(
+      db,
+      'global',
+      userId,
+      MAX_INTENTOS_LOGIN_GLOBAL,
+      t,
+      bloqueadaPorReserva(userId, ORIGEN_GLOBAL, reservaId),
+    ),
+  ]);
+  if ((upsert?.results.length ?? 0) !== 1) {
+    return null;
+  }
+  return { tipo: 'dispositivo', userId, origen, reservaId, ahora: t.ahora };
+}
+
+/**
+ * Reserva en un origen desconocido (cuatro sentencias en un batch):
+ * 1. upsert de la fila `ip:` solo si la IP Y `g` tienen cupo (`INSERT … SELECT … WHERE`: el WHERE
+ *    en el SELECT es obligatorio en SQLite para que `ON CONFLICT` se lea como upsert);
+ * 2. incremento de `g` solo si la fila `ip:` quedó con esta reserva;
+ * 3. y 4. auditorías de los bloqueos que haya fijado esta reserva (spec §5 (d): todo bloqueo se
+ *    audita). Volumen acotado por `g`: como máximo 4 bloqueos `origen` y 1 `global` por cuenta y
+ *    ventana de 15 min (S-01, riesgo residual aceptado).
+ * Se reservan los dos cupos o ninguno: una IP bloqueada no consume `g`, y sin cupo global no se
+ * crean filas de IP. Devuelve null si no hay reserva.
+ */
+export async function reservarOrigenDesconocido(
+  db: D1Database,
+  userId: string,
+  origen: string,
+  ahoraMs = Date.now(),
+): Promise<Reserva | null> {
+  const t = tiempos(ahoraMs);
+  const reservaId = uuidv7();
+  const [upsert] = await db.batch([
+    db
+      .prepare(
+        `INSERT INTO login_cupos (${COLUMNAS_CUPO})
+         SELECT ${FILA_NUEVA}
+         WHERE NOT EXISTS (SELECT 1 FROM login_cupos
+           WHERE user_id = ?1 AND origen IN (?2, ?8) AND bloqueado_hasta > ?3)
+         ${AL_CONFLICTO}
+         RETURNING fallos`,
+      )
+      .bind(
+        userId,
+        origen,
+        t.ahora,
+        t.limiteVentana,
+        MAX_INTENTOS_LOGIN,
+        t.hasta,
+        reservaId,
+        ORIGEN_GLOBAL,
+      ),
+    sentenciaIncrementoGlobal(db, userId, origen, reservaId, t),
+    auditoriaBloqueo(
+      db,
+      'origen',
+      userId,
+      MAX_INTENTOS_LOGIN,
+      t,
+      bloqueadaPorReserva(userId, origen, reservaId),
+    ),
+    auditoriaBloqueo(
+      db,
+      'global',
+      userId,
+      MAX_INTENTOS_LOGIN_GLOBAL,
+      t,
+      bloqueadaPorReserva(userId, ORIGEN_GLOBAL, reservaId),
+    ),
+  ]);
+  if ((upsert?.results.length ?? 0) !== 1) {
+    return null;
+  }
+  return { tipo: 'origen', userId, origen, reservaId, ahora: t.ahora };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Reinicio
+// ---------------------------------------------------------------------------------------------
+
+interface Actor {
+  userId: string;
+  deviceId: string | null;
+  /** Alerta de reloj de la petición del actor (ADR 0019); ausente → 0. */
+  alertaReloj?: boolean;
+}
+
+/**
+ * Auditoría de un desbloqueo. `fallos`: los que quedan en el cupo tras desbloquearlo (0 al
+ * reiniciarlo; `máximo − 1` cuando el login correcto solo descuenta su unidad de `g`, A5).
+ */
+function auditoriaDesbloqueo(
+  db: D1Database,
+  tipo: TipoCupo,
+  userId: string,
+  actor: Actor,
+  ahora: string,
+  condicion: CondicionDeEscritura,
+  fallos = 0,
+): D1PreparedStatement {
+  return sentenciaAuditoriaCondicional(
+    db,
+    {
+      entidad: 'login_cupos',
+      entidad_id: userId,
+      accion: 'login_cupos.desbloqueado',
+      actor_id: actor.userId,
+      device_id: actor.deviceId,
+      despues: { user_id: userId, tipo, fallos, bloqueado_hasta: null },
+      server_at: ahora,
+      alerta_reloj: actor.alertaReloj === true,
+    },
+    condicion,
+  );
+}
+
+/**
+ * Sentencias para el MISMO batch del login correcto (después de registrar el dispositivo, que la
+ * auditoría referencia):
+ * - reinicia SOLO el cupo del origen usado (`d:` o `ip:`). Si estaba bloqueado (la reserva de
+ *   este mismo login lo bloqueó al ser el 5.º intento), un UPDATE propio lo desbloquea y fija una
+ *   `reserva_id` nueva, y la auditoría se condiciona a ella (ADR 0028, punto 4); los fallos sin
+ *   bloqueo vuelven a 0 en otro UPDATE, sin auditar;
+ * - el global `g` (al que suman las reservas de ambos tipos, S-02) NO se reinicia (si no, cada login legítimo le regalaría al atacante otros 20
+ *   intentos). Solo se descuenta el +1 de ESTA reserva, que no fue un fallo:
+ *   - si `g` no está bloqueado, se descuenta sin más. No se compara la ventana: con reservas
+ *     concurrentes, la que abrió la ventana puede tener una hora posterior a la de otra que se
+ *     ejecutó después. Si la ventana de `g` se reinició justo entre la reserva y este batch
+ *     (milisegundos), la ventana nueva cuenta un fallo de menos: un efecto acotado a 1;
+ *   - A5 (ADR 0018, enmienda 2): si `g` quedó bloqueado POR ESTA RESERVA (`reserva_id` de `g` igual
+ *     al de la reserva y `bloqueado_hasta` no nulo; con `g` bloqueado ninguna otra reserva pudo
+ *     cambiarlo, porque su upsert no aplica sobre un bloqueo vigente), se descuenta la unidad, se
+ *     quita el bloqueo con una `reserva_id` nueva y se audita `login_cupos.desbloqueado` (tipo
+ *     global) condicionado a ella (ADR 0028). Un login correcto nunca deja `g` bloqueado, y el
+ *     atacante no gana intentos: `g` queda con los mismos fallos reales que antes del login;
+ *   - un `g` bloqueado por OTRA reserva se deja tal cual (vence con su ventana).
+ *   El descuento sin bloqueo va ANTES que el desbloqueo: si fuera después, volvería a descontar
+ *   sobre el `g` recién desbloqueado. Son excluyentes: uno exige `bloqueado_hasta IS NULL`, el otro
+ *   `IS NOT NULL`, y el primero no cambia `bloqueado_hasta`.
+ */
+export function sentenciasReinicioTrasLogin(
+  db: D1Database,
+  reserva: Reserva,
+  actor: Actor,
+  ahora: string,
+): D1PreparedStatement[] {
+  const desbloqueo = uuidv7();
+  const sentencias = [
+    db
+      .prepare(
+        `UPDATE login_cupos SET fallos = 0, bloqueado_hasta = NULL, reserva_id = ?, updated_at = ?
+         WHERE user_id = ? AND origen = ? AND bloqueado_hasta > ?`,
+      )
+      .bind(desbloqueo, ahora, reserva.userId, reserva.origen, ahora),
+    auditoriaDesbloqueo(
+      db,
+      reserva.tipo,
+      reserva.userId,
+      actor,
+      ahora,
+      porReserva(reserva.userId, reserva.origen, desbloqueo),
+    ),
+    db
+      .prepare(
+        `UPDATE login_cupos SET fallos = 0, bloqueado_hasta = NULL, updated_at = ?
+         WHERE user_id = ? AND origen = ? AND (fallos <> 0 OR bloqueado_hasta IS NOT NULL)`,
+      )
+      .bind(ahora, reserva.userId, reserva.origen),
+  ];
+  // S-02: las reservas del dispositivo conocido también suman en `g`; se descuentan igual.
+  sentencias.push(
+    db
+      .prepare(
+        `UPDATE login_cupos SET fallos = fallos - 1, updated_at = ?
+         WHERE user_id = ? AND origen = ? AND fallos > 0 AND bloqueado_hasta IS NULL`,
+      )
+      .bind(ahora, reserva.userId, ORIGEN_GLOBAL),
+  );
+  // A5: `g` bloqueado por ESTA reserva → se descuenta su unidad y se quita el bloqueo, con auditoría.
+  // La reserva que bloquea `g` lo deja exactamente en el máximo (el upsert no aplica sobre un
+  // bloqueo vigente y una ventana nueva empieza en 1 < máximo): tras el descuento, `máximo − 1`.
+  const desbloqueoGlobal = uuidv7();
+  sentencias.push(
+    db
+      .prepare(
+        `UPDATE login_cupos
+         SET fallos = fallos - 1, bloqueado_hasta = NULL, reserva_id = ?, updated_at = ?
+         WHERE user_id = ? AND origen = ? AND reserva_id = ? AND bloqueado_hasta IS NOT NULL`,
+      )
+      .bind(desbloqueoGlobal, ahora, reserva.userId, ORIGEN_GLOBAL, reserva.reservaId),
+    auditoriaDesbloqueo(
+      db,
+      'global',
+      reserva.userId,
+      actor,
+      ahora,
+      porReserva(reserva.userId, ORIGEN_GLOBAL, desbloqueoGlobal),
+      MAX_INTENTOS_LOGIN_GLOBAL - 1,
+    ),
+  );
+  return sentencias;
+}
+
+/**
+ * Desbloqueo del admin (`PATCH /users/:id` con `desbloquear`): reinicia TODOS los cupos del
+ * usuario, incluido `g`. Todo es DEPENDIENTE de `condicion` (que la edición del usuario aplicó en
+ * este batch). Por cada tipo de cupo con un bloqueo vigente, un UPDATE lo desbloquea y fija una
+ * `reserva_id` nueva, y su `login_cupos.desbloqueado` se condiciona a ella (ADR 0028, punto 4);
+ * al final, los fallos sin bloqueo vuelven a 0, sin auditar.
+ */
+export function sentenciasReinicioAdmin(
+  db: D1Database,
+  userId: string,
+  actor: Actor,
+  ahora: string,
+  condicion: CondicionDeEscritura,
+): D1PreparedStatement[] {
+  const tipos: TipoCupo[] = ['dispositivo', 'origen', 'global'];
+  return [
+    ...tipos.flatMap((tipo) => {
+      const desbloqueo = uuidv7();
+      return [
+        sentenciaDependiente(
+          db,
+          `UPDATE login_cupos SET fallos = 0, bloqueado_hasta = NULL, reserva_id = ?, updated_at = ?
+           WHERE user_id = ? AND ${FILTRO_TIPO[tipo]} AND bloqueado_hasta > ? AND ${MARCADOR_CONDICION}`,
+          [desbloqueo, ahora, userId, ahora],
+          condicion,
+        ),
+        auditoriaDesbloqueo(db, tipo, userId, actor, ahora, porReserva(userId, null, desbloqueo)),
+      ];
+    }),
+    sentenciaDependiente(
+      db,
+      `UPDATE login_cupos SET fallos = 0, bloqueado_hasta = NULL, updated_at = ?
+       WHERE user_id = ? AND (fallos <> 0 OR bloqueado_hasta IS NOT NULL) AND ${MARCADOR_CONDICION}`,
+      [ahora, userId],
+      condicion,
+    ),
+  ];
+}

@@ -1,6 +1,6 @@
 # Especificación — App de Control de Materia Prima · Catmetal S.A.S.
 
-> Versión 2 (2026-10-29). Reemplaza al prompt original `PROMPT_ORQUESTADOR.md`. Incorpora las correcciones de la revisión de arquitectura, resumidas en la sección 13. La forma de trabajar está en `CLAUDE.md`; este documento define **qué** se construye.
+> Versión 2.1 (2026-10-30). Reemplaza al prompt original `PROMPT_ORQUESTADOR.md`. Incorpora las correcciones de la revisión de arquitectura (sección 13) y las de la auditoría externa de `build/v1` (sección 14). La forma de trabajar está en `CLAUDE.md`; este documento define **qué** se construye.
 
 ---
 
@@ -215,12 +215,18 @@ Un script de Node (no de bash) crea 1 admin, 1 jefe, 2 supervisores, 10 material
 ## 5. Autenticación y sesiones
 
 - **Access token**: JWT de 15 min, guardado **solo en memoria** en el cliente y enviado en el header `Authorization`.
-- **Refresh token**: 30 días, en una cookie `HttpOnly; Secure; SameSite=Strict; Path=/api/v1/auth`. En D1 se guarda solo su hash.
+- **Refresh token**: en una cookie `HttpOnly; Secure; SameSite=Strict; Path=/api/v1/auth`. En D1 se guarda solo su hash.
+  - Cada token dura 30 días, y la **familia tiene una vida máxima absoluta de 30 días contados desde el login con contraseña**. Las rotaciones no la extienden. Al vencer, se exige la contraseña de nuevo.
 - **Rotación**: cada refresh revoca el token usado y emite uno nuevo de la misma familia. Si se reutiliza un token ya rotado, se trata como robo: **se revoca toda la familia** y se audita.
+  - Se permite una ventana de gracia de 30 s o menos para reintentos legítimos de red. Debe estar documentada en un ADR y en `docs/desviaciones.md`.
 - **CSRF**: además de `SameSite=Strict`, toda petición que cambie estado verifica que el header `Origin` sea el propio origen.
 - **Protección de fuerza bruta en dos capas**:
   1. **Primer filtro**: el binding de Rate Limiting de Workers, con clave IP + email normalizado, límite 5 y periodo 60 s. Es aproximado y se aplica por ubicación de Cloudflare.
-  2. **Garantía**: un contador en D1 (`users.intentos_fallidos`). Tras 5 intentos fallidos consecutivos, la cuenta se bloquea 15 min (`bloqueado_hasta`) y se audita. El mensaje de error no revela si el email existe.
+  2. **Garantía en D1, sin bloqueo abusable.** El bloqueo duro por cuenta de la v2 permitía que un tercero bloqueara indefinidamente a todos los admin y jefes. Se reemplaza por un diseño que cumpla **todas** estas condiciones (el diseño concreto va en un ADR):
+     - **(a)** Desde un dispositivo ya registrado para ese usuario (instalación conocida), un atacante que use otros dispositivos u otras IP **no puede impedir el login** del usuario legítimo. Como referencia, se puede usar un cupo por (cuenta, dispositivo conocido) separado del cupo de dispositivos desconocidos, como recomienda OWASP para el bloqueo por dispositivo.
+     - **(b)** Las adivinanzas por cuenta quedan acotadas: como máximo unos 5 intentos por 15 min por (cuenta, origen desconocido), y un tope global por cuenta para orígenes desconocidos.
+     - **(c)** Existe un **desbloqueo de emergencia** que no depende de que haya un admin con sesión: un script local que genere el SQL, documentado en `docs/despliegue.md`.
+     - **(d)** Todo bloqueo y desbloqueo se audita. El mensaje de error es uniforme y no revela si el email existe ni si la cuenta está bloqueada.
 - **Login offline**: solo para usuarios que ya iniciaron sesión con conexión en ese dispositivo.
   - Al hacer login con conexión, el cliente deriva con PBKDF2 en el navegador un **verificador local**: sal propia del dispositivo, distinta de la del servidor. Las iteraciones las fijas en un ADR según el rendimiento medido en tablet.
   - El verificador se guarda en IndexedDB junto con el perfil y los permisos cacheados.
@@ -278,7 +284,11 @@ Un script de Node (no de bash) crea 1 admin, 1 jefe, 2 supervisores, 10 material
   - Si el servidor calcula que se superó la tolerancia y el consumo no trae novedad, **lo acepta** con `requiere_novedad = 1`, para no perder el dato.
   - El supervisor ve el aviso "Falta justificar la novedad".
   - El jefe **no puede aprobar** el consumo hasta que tenga una novedad.
-- **Reloj**: se guardan la hora del dispositivo y la del servidor. Si difieren en más de 10 min, se marca `alerta_reloj = 1` en la auditoría.
+- **Reloj**: `alerta_reloj` detecta relojes de dispositivo desajustados. **No** mide el retraso de sincronización.
+  - En cada envío, el cliente manda la **hora del dispositivo en el momento de enviar**: `enviado_at` en el cuerpo de `/sync/push`, y el header `X-Hora-Dispositivo` en las peticiones REST que escriben.
+  - Si esa hora difiere de la hora del servidor al recibir en más de 10 min, se marca `alerta_reloj = 1` en las filas de auditoría de esa petición.
+  - `client_created_at` (hora de registro en la tablet) se sigue guardando para la trazabilidad, pero **no** se usa para la alerta.
+  - Si falta la hora de envío (por ejemplo, un cliente viejo), no se marca la alerta y se registra `alerta_reloj = 0`.
 
 ---
 
@@ -531,3 +541,15 @@ Cópialas al iniciar y añade las que detectes:
 | 14 | Una fase por ventana, con push | Sesión única, solo commits locales | Decisión del equipo: auditan y luego hacen el push |
 | 15 | Referencia visual solo al Figma | Figma + identidad de Catmetal (`docs/diseno/`) | Petición del cliente |
 | 16 | Auditoría con datos completos | Se excluyen secretos y hashes | Seguridad y Ley 1581 |
+
+---
+
+## 14. Cambios de la versión 2.1 (auditoría externa de `build/v1`, 2026-10-30)
+
+| # | v2 | v2.1 | Motivo |
+|---|---|---|---|
+| 17 | Bloqueo duro de la cuenta tras 5 fallos | Cupos por dispositivo conocido y por origen desconocido, más desbloqueo de emergencia (§5) | El bloqueo duro permitía a un tercero dejar sin acceso a todos los admin y jefes |
+| 18 | `alerta_reloj` comparaba la hora de registro con la de recepción | Compara la hora del dispositivo **al enviar** con la del servidor (§6) | Con la regla anterior, casi todo lo registrado offline quedaba marcado y la señal no servía |
+| 19 | Refresh de 30 días sin vida máxima de la familia | Vida máxima absoluta de la familia: 30 días desde el login (§5) | Una tablet perdida conservaba la sesión indefinidamente |
+| 20 | Rotación sin ventana de gracia | Gracia de 30 s o menos, documentada (§5) | Reintentos de red legítimos |
+

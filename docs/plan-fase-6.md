@@ -1,0 +1,16 @@
+# Plan — Fase 6: Endurecimiento y despliegue
+
+Referencia: `docs/spec.md` §2 (cron, backups, entornos), §4 (Backups), §9, §10 (Fase 6); revisión de esquema H9 y H14 (`docs/auditoria/revision-esquema-fase-1.md`); seguridad H-06, H-07 y pendientes (`docs/auditoria/seguridad-fase-2.md`, `seguridad-fase-4.md`).
+
+**Criterio de cierre (§10):** instalabilidad PWA verificada con una prueba automatizada (manifest válido, SW que controla la página, arranque offline de `start_url`); Lighthouse con perfil de tablet: Performance, Accessibility y Best Practices ≥ 90; prueba del cron de backup contra R2 local; checklist de despliegue completo; revisión de seguridad final (`docs/auditoria/seguridad-fase-6.md`). **Ningún comando remoto se ejecuta**: todos quedan en `docs/pendientes-humanos.md`.
+
+## Tareas
+
+| Id | Tarea | Responsable | Archivos | Depende | Aceptación |
+|---|---|---|---|---|---|
+| 6.1 | **Cron de backup** (`scheduled`): exporta cada tabla a NDJSON comprimido (gzip con `CompressionStream`) en R2 `backups/AAAA-MM-DD/<tabla>.ndjson.gz`, paginando por PK en lotes (hijos antes que padres, H9), con `manifest.json` (conteos, sha256 por archivo, `MAX(seq)` inicial, época); sin export nativo de D1; respeta límites de CPU/consultas (reanudable si no termina: marca de progreso en R2). Mantenimiento: medir tamaño de la base y purgar `refresh_tokens` vencidos hace > 90 días (no es tabla de negocio; ADR). Prueba contra R2 local | `general-purpose` | `apps/worker/src/cron/**`, pruebas | Fase 5 | Prueba del cron con D1/R2 locales: archivos, manifest, sha256 y conteos correctos |
+| 6.2 | **Endurecimiento de la UI**: errores y estados vacíos en todas las pantallas, accesibilidad (roles, foco, contraste, `axe` en pruebas), rendimiento en tablet (división de código por rol, peso del bundle, fuentes, imágenes), sourcemaps ocultos en producción | `react-developer` + `ui-ux-designer` | `apps/web/**` | Fase 5 | Lighthouse ≥ 90 en las tres categorías |
+| 6.3 | **Instalabilidad y Lighthouse automatizados**: prueba Playwright (manifest válido con íconos, SW activo controlando la página, recarga offline de `start_url` muestra el shell) y Lighthouse con perfil de tablet (script de Node; resultados en `docs/evidencia/`) | `test-engineer` | `e2e/**`, `scripts/lighthouse.mjs` | 6.2 | Umbrales cumplidos |
+| 6.4 | **Despliegue**: `docs/despliegue.md` (plan Workers Paid; crear D1/R2/KV y la regla de ciclo de vida de 90 días en `backups/` para staging y producción; aplicar migraciones remotas; cargar secretos de 32 bytes —regla H-07—; desplegar; `workers_dev`/`preview_urls` en `false`; restaurar con Time Travel y desde R2 en el orden de H9 y cambio de época; datos personales y Ley 1581; Cloudflare Access opcional para admin; checklist); workflow `deploy-staging.yml` solo `workflow_dispatch` con `environment` protegido; comandos remotos copiados a `docs/pendientes-humanos.md` | orquestador + `documentation-researcher` | `docs/despliegue.md`, `.github/workflows/deploy-staging.yml`, `apps/worker/wrangler.jsonc` | — | Checklist completo; ningún comando ejecutado |
+| 6.5 | Revisión de seguridad final | `security-reviewer` | `docs/auditoria/seguridad-fase-6.md` | 6.1–6.4 | Altos/críticos corregidos o en ADR |
+| 6.6 | Evidencia, `pnpm audit --prod`, informe final | orquestador | `docs/evidencia/fase-6.md`, `docs/INFORME-FINAL.md` | todo | — |

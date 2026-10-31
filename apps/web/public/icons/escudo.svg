@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <title>Catmetal</title>
+  <!--
+    Escudo "CM" PROVISIONAL de Catmetal para los íconos de la PWA (docs/diseno/README.md).
+    Fondo ink-950 (#111111), escudo brand-600 (#0539CC) y letras blancas dibujadas como trazos
+    (sin texto: así el render no depende de las fuentes instaladas y es reproducible).
+    Reemplazar por el SVG oficial cuando el cliente lo entregue y regenerar con
+    el script generar:iconos de apps/web.
+  -->
+  <rect width="512" height="512" fill="#111111"/>
+  <path d="M112 100 L256 60 L400 100 L400 262 C400 360 334 420 256 456 C178 420 112 360 112 262 Z" fill="#0539CC"/>
+  <path d="M132 115 L256 81 L380 115 L380 262 C380 346 324 398 256 432 C188 398 132 346 132 262 Z" fill="none" stroke="#FFFFFF" stroke-opacity="0.35" stroke-width="6"/>
+  <g fill="none" stroke="#FFFFFF" stroke-width="30" stroke-linejoin="round">
+    <path d="M244 210 A58 58 0 1 0 244 292"/>
+    <path d="M281 310 L281 196 L324 262 L367 196 L367 310"/>
+  </g>
+</svg>

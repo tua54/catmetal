@@ -1,0 +1,22 @@
+{
+  "name": "@catmetal/shared",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Contratos compartidos: tipos, esquemas Zod, roles, estados, errores y unidades",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --coverage"
+  },
+  "dependencies": {
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@vitest/coverage-istanbul": "4.1.12",
+    "typescript": "6.0.3",
+    "vitest": "4.1.12"
+  }
+}

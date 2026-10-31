@@ -1,0 +1,42 @@
+{
+  "name": "catmetal",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Control de Materia Prima · Catmetal S.A.S. (monorepo)",
+  "packageManager": "pnpm@12.16.1",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "setup:dev-vars": "node scripts/gen-dev-vars.mjs",
+    "db:generate": "pnpm --filter @catmetal/worker db:generate",
+    "db:migrate:local": "pnpm --filter @catmetal/worker db:migrate:local",
+    "db:seed:local": "node scripts/seed.mjs",
+    "db:reset:local": "node scripts/seed.mjs --reset",
+    "lint": "eslint .",
+    "typecheck": "pnpm -r typecheck && tsc --noEmit -p tsconfig.json",
+    "test": "pnpm -r --workspace-concurrency=1 test",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test:e2e": "playwright test",
+    "test:lighthouse": "node scripts/lighthouse.mjs",
+    "test:e2e:instalar": "playwright install chromium webkit"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.14.0",
+    "@eslint/js": "10.0.1",
+    "@playwright/test": "1.64.1",
+    "@types/node": "26.6.6",
+    "eslint": "10.13.0",
+    "eslint-config-prettier": "10.1.8",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "eslint-plugin-react-refresh": "0.5.7",
+    "globals": "17.13.0",
+    "lighthouse": "13.6.0",
+    "prettier": "3.9.10",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.72.1"
+  }
+}

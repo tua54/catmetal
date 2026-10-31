@@ -1,0 +1,31 @@
+{
+  "name": "@catmetal/worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Worker de Cloudflare: API /api/v1 (Hono) y PWA como Static Assets",
+  "scripts": {
+    "dev": "wrangler dev --ip 127.0.0.1 --port 8787",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local",
+    "cf-typegen": "wrangler types",
+    "typecheck": "wrangler types --check && tsc --noEmit && tsc --noEmit -p test",
+    "test": "node ../../scripts/ensure-web-dist.mjs && vitest run --coverage"
+  },
+  "dependencies": {
+    "@catmetal/shared": "workspace:*",
+    "@hono/zod-validator": "0.9.1",
+    "drizzle-orm": "0.45.4",
+    "hono": "4.13.14",
+    "jose": "6.2.13",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "1.4.11",
+    "@vitest/coverage-istanbul": "4.1.12",
+    "drizzle-kit": "0.31.11",
+    "typescript": "6.0.3",
+    "vitest": "4.1.12",
+    "wrangler": "4.156.0"
+  }
+}

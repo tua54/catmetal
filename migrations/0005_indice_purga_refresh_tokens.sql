@@ -1,0 +1,1 @@
+CREATE INDEX `refresh_tokens_expira_at` ON `refresh_tokens` (`expira_at`);

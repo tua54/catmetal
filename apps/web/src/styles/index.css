@@ -1,0 +1,139 @@
+/*
+ * Estilos globales y tokens visuales (Tailwind 4, configuración CSS-first).
+ * Fuente de los tokens: docs/diseno/README.md (identidad Catmetal + Figma) y ADR 0011.
+ * La fuente Poppins se importa empaquetada desde main.tsx (@fontsource/poppins), nunca desde Google Fonts.
+ *
+ * Contraste WCAG 2.2 (calculado con la fórmula de luminancia relativa de WCAG, 2026-10-29).
+ * Texto normal exige ≥ 4,5:1 (1.4.3); bordes de controles, íconos y anillo de foco ≥ 3:1 (1.4.11).
+ *
+ *   Texto
+ *   ink-700  #333333 / white   #FFFFFF  12,63:1   texto principal
+ *   ink-700  #333333 / surface-50       11,77:1
+ *   ink-500  #69727D / white             4,88:1   texto secundario
+ *   ink-500  #69727D / surface-50        4,54:1
+ *   white    / brand-600 #0539CC         8,52:1   botón primario
+ *   white    / brand-500 #0349FF         6,17:1   botón primario activo
+ *   white    / brand-700 #043BC9         8,49:1   botón primario presionado
+ *   brand-600 / surface-50               7,94:1   enlaces sobre el fondo
+ *   brand-600 / brand-100 #DBE5FF        6,76:1   opción activa del combobox
+ *   white    / success-700 #15803D       5,02:1   botón "Validar gasto"
+ *   success-700 / success-100 #DCFCE7    4,57:1   chips verdes
+ *   warning-800 #92400E / warning-100 #FEF3C7  6,37:1   chips ámbar y bloque de novedad
+ *   danger-700 #B91C1C / white           6,47:1   botón "Rechazar" (contorno), errores
+ *   danger-700 / danger-100 #FEE2E2      5,30:1   chip "Rechazado"
+ *   white    / ink-950 #111111          18,88:1   título de la barra superior
+ *   ink-300  #C9CED4 / ink-950          11,93:1   subtítulo de la barra superior
+ *   white    / píldora (#292929 = white/10 sobre ink-950)  14,35:1
+ *   ¡Ojo! ink-500 sobre warning-100 da 4,38:1 (no cumple): dentro de bloques ámbar usar ink-700.
+ *
+ *   No texto (≥ 3:1)
+ *   brand-500 (anillo de foco) / white   6,17:1  ·  / surface-50 5,75:1  ·  / ink-950 3,06:1
+ *   ink-400  #7C8590 / white             3,74:1   borde de campos, selects e interruptor apagado
+ *   warning-700 #B45309 / white          5,02:1   punto ámbar de la línea de tiempo, íconos
+ *   warning-700 / warning-100            4,51:1   ícono del bloque de novedad
+ *   warning-500 #F59E0B / píldora        6,68:1   punto "Sin conexión"
+ *   success-400 #4ADE80 / píldora        8,24:1   punto "En línea"
+ *   warning-500 / white da 2,15:1: solo como borde decorativo del bloque de novedad (el ícono y el
+ *   texto llevan el significado), nunca como único indicador.
+ */
+@import 'tailwindcss';
+
+@theme {
+  /* Tipografía */
+  --font-sans:
+    'Poppins', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+    sans-serif;
+
+  /* Marca Catmetal */
+  --color-brand-50: #eef3ff;
+  --color-brand-100: #dbe5ff;
+  --color-brand-500: #0349ff;
+  --color-brand-600: #0539cc;
+  --color-brand-700: #043bc9;
+  --color-navy-800: #243673;
+
+  /* Neutros */
+  --color-ink-950: #111111;
+  --color-ink-700: #333333;
+  --color-ink-500: #69727d;
+  --color-ink-400: #7c8590;
+  --color-ink-300: #c9ced4;
+  --color-line-200: #dde2e7;
+  --color-surface-50: #f5f7f9;
+  --color-surface-200: #e5e9ed;
+
+  /* Semánticos */
+  --color-success-100: #dcfce7;
+  --color-success-400: #4ade80;
+  --color-success-700: #15803d;
+  --color-success-800: #166534;
+  --color-warning-100: #fef3c7;
+  --color-warning-500: #f59e0b;
+  --color-warning-700: #b45309;
+  --color-warning-800: #92400e;
+  --color-danger-50: #fef2f2;
+  --color-danger-100: #fee2e2;
+  --color-danger-700: #b91c1c;
+  --color-danger-800: #991b1b;
+
+  /* Animaciones propias (se desactivan con prefers-reduced-motion, ver abajo). */
+  --animate-entrada: entrada 160ms ease-out;
+
+  @keyframes entrada {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+}
+
+@layer base {
+  html {
+    /* Base de 16 px: respeta el tamaño de fuente configurado por el usuario. */
+    font-size: 100%;
+    color-scheme: light;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
+  body {
+    min-height: 100dvh;
+    background-color: var(--color-surface-50);
+    color: var(--color-ink-700);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    /* Evita el resaltado gris del toque en tablets: el estado presionado lo da `active:`. */
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Anillo de foco visible y consistente (teclado), en brand-500 de 3 px. No depende de hover. */
+  :focus-visible {
+    outline: 3px solid var(--color-brand-500);
+    outline-offset: 2px;
+  }
+
+  /* Movimiento reducido: sin animaciones ni transiciones perceptibles. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+/*
+ * Cifras alineadas para cantidades y costos.
+ * Tailwind ya trae `tabular-nums`; `cifras` es el alias semántico del proyecto.
+ */
+@utility cifras {
+  font-variant-numeric: tabular-nums;
+}

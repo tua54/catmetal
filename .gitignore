@@ -35,3 +35,10 @@ desktop.ini
 !.vscode/extensions.json
 .idea/
 *.log
+
+# Despliegue (docs/despliegue.md): SQL del primer admin (contiene un hash) y backups descargados.
+# Deben generarse fuera del repositorio; esto es solo una protección adicional.
+primer-admin.sql
+*-primer-admin.sql
+restaurar/
+catmetal-restaurar/

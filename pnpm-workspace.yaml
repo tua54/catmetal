@@ -1,0 +1,19 @@
+packages:
+  - apps/*
+  - packages/*
+
+# pnpm 11+ reemplazó onlyBuiltDependencies por allowBuilds.
+# Solo estas dependencias pueden ejecutar scripts de instalación;
+# cualquier otra con build scripts hace fallar `pnpm install` (strictDepBuilds: true por defecto).
+allowBuilds:
+  esbuild: true
+  workerd: true
+  sharp: true
+
+# minimumReleaseAge (1440 min por defecto en pnpm 12) bloquea versiones con menos de 24 h.
+# Excepciones puntuales por versión exacta: @cloudflare/vitest-plugin 1.4.11 fija wrangler 4.156.0
+# (y este a miniflare), publicados el mismo día de la instalación. Retirarlas cuando cumplan 24 h.
+minimumReleaseAgeExclude:
+  - '@cloudflare/vitest-plugin@1.4.11'
+  - miniflare@5.20261023.3-beta
+  - wrangler@4.156.0

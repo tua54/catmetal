@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    // Los tipos del runtime de Workers y de `Env` los genera `wrangler types` en
+    // worker-configuration.d.ts (incluido abajo); no se usa @cloudflare/workers-types.
+    "types": []
+  },
+  "include": ["src", "worker-configuration.d.ts"]
+}
